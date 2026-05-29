@@ -1621,7 +1621,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   // Command: Show current session memory
   pi.registerCommand("memory", {
     description: "Display the active session's task memory status.",
-    async execute(ctx, args) {
+    async handler(ctx, args) {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         ctx.ui.notify("No active session file found.", "error");
@@ -1652,13 +1652,16 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       } catch (e: any) {
         ctx.ui.notify(`Failed to read memory: ${e.message}`, "error");
       }
+    },
+    async execute(ctx, args) {
+      return (this as any).handler(ctx, args);
     }
   });
 
   // Command: Reset session memory
   pi.registerCommand("memory-reset", {
     description: "Reset the active session's task memory.",
-    async execute(ctx, args) {
+    async handler(ctx, args) {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         ctx.ui.notify("No active session file found.", "error");
@@ -1675,6 +1678,9 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       } else {
         ctx.ui.notify("No session memory to reset.", "info");
       }
+    },
+    async execute(ctx, args) {
+      return (this as any).handler(ctx, args);
     }
   });
 
