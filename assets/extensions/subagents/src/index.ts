@@ -9,7 +9,7 @@ import { completeSimple } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import os from "node:os";
 
-import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted } from "./memory-store";
+import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted, getSkills } from "./memory-store";
 import { buildMemoryContextBlock } from "./memory-retrieval";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -73,20 +73,31 @@ const C = {
 //  ANIMATION SYSTEM — Braille Spinners & Status Messages
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const DOT_PULSE = ["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"];
+const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+const DOT_PULSE = ["◐", "◓", "◑", "◒"];
 const PROGRESS_SPINNER = ["◐", "◓", "◑", "◒"];
-const BOUNCING_BAR = ["▉", "▊", "▋", "▌", "▍", "▎", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+const BOUNCING_BAR = ["◐", "◓", "◑", "◒"];
 
 const STATUS_VERBS = [
-  "Analyzing", "Reasoning", "Planning", "Investigating",
-  "Evaluating", "Processing", "Synthesizing", "Exploring",
-  "Considering", "Computing", "Examining", "Reviewing",
+  "Cooking", "Brewing", "Baking", "Roasting", "Sautéing",
+  "Thinking", "Dreaming", "Musing", "Pondering", "Ruminating",
+  "Crafting", "Forging", "Sculpting", "Weaving", "Knitting",
+  "Decoding", "Cracking", "Solving", "Unraveling", "Untangling",
+  "Mixing", "Blending", "Whisking", "Kneading", "Drizzling",
+  "Booping", "Beaming", "Frolicking", "Moonwalking", "Jitterbugging",
+  "Churning", "Brewing", "Fermenting", "Marinating", "Caramelizing",
+  "Orchestrating", "Conducting", "Composing", "Harmonizing", "Grooving",
+  "Foraging", "Noodling", "Meandering", "Moseying", "Gallivanting",
+  "Illuminating", "Enchanting", "Concocting", "Hatching", "Germinating",
+  "Catalyzing", "Nucleating", "Crystallizing", "Coalescing", "Manifesting",
+  "Flummoxing", "Befuddling", "Discombobulating", "Flibbertigibbeting", "Boondoggling",
+  "Hullaballooing", "Canoodling", "Dilly-dallying", "Lollygagging", "Fiddle-faddling",
 ];
 
 let globalFrame = 0;
 let globalVerbIndex = 0;
 let globalAnimTimer: ReturnType<typeof setInterval> | null = null;
+let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 const activeTrackers = new Map<string, SubAgentProgress>();
 const activeInvalidators = new Map<string, () => void>();
 
@@ -94,7 +105,7 @@ function startGlobalAnimation() {
   if (globalAnimTimer) return;
   globalAnimTimer = setInterval(() => {
     globalFrame = (globalFrame + 1) % (SPINNER_FRAMES.length * DOT_PULSE.length * BOUNCING_BAR.length);
-    if (globalFrame % 30 === 0) {
+    if (globalFrame % 10 === 0) {
       globalVerbIndex = (globalVerbIndex + 1) % STATUS_VERBS.length;
     }
     // Trigger invalidation for any active terminal components/widgets
@@ -332,9 +343,12 @@ class SubAgentCallCard implements Component {
 
       // Tool call count
       if (tracker.toolCallCount > 0) {
-        const verb = chalk.hex(C.amber)(getStatusVerb() + "...");
+        const verb = STATUS_VERBS[globalVerbIndex % STATUS_VERBS.length];
+        const frameInVerb = globalFrame % 10;
+        const charsToShow = Math.min(frameInVerb + 1, verb.length);
+        const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "…" : "");
         const calls = chalk.hex(C.dusty)(`${tracker.toolCallCount} tool calls`);
-        lines.push(boxLine(`${verb}  ${chalk.hex(C.mutedText)("·")}  ${calls}`, w, borderColor));
+        lines.push(boxLine(`${chalk.hex(C.orange).bold(displayVerb)}${chalk.hex(C.orange)("...")}  ${chalk.hex(C.mutedText)("·")}  ${calls}`, w, borderColor));
       }
 
       // Mini progress indicator
@@ -402,29 +416,39 @@ class SubAgentResultCard implements Component {
       ));
     }
 
-    // Result content
-    const resultText = this.result?.content
-      ?.filter((c: any) => c.type === "text")
-      .map((c: any) => c.text)
-      .join("\n") || "";
+    // Result content with expand/collapse
+    const resultText = this.result?.details?.fullResult
+      || this.result?.content
+        ?.filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join("\n")
+      || "";
 
     if (resultText) {
       lines.push(boxDivider(w, borderColor));
 
       const resultLines = resultText.split("\n");
-      const maxDisplayLines = Math.min(resultLines.length, 200);
-      for (const line of resultLines.slice(0, maxDisplayLines)) {
+      const COLLAPSED_LINES = 8;
+      const showAll = this.expanded || resultLines.length <= COLLAPSED_LINES;
+      const displayLines = showAll ? resultLines : resultLines.slice(0, COLLAPSED_LINES);
+
+      for (const line of displayLines) {
         const trimmed = truncate(line, w - 6);
         lines.push(boxLine(
           chalk.hex(isError ? C.coral : C.sand)(trimmed),
           w, borderColor
         ));
       }
-      if (resultLines.length > maxDisplayLines) {
-        lines.push(boxLine(
-          chalk.hex(C.dusty)(`... ${resultLines.length - maxDisplayLines} more lines`),
-          w, borderColor
-        ));
+
+      if (!showAll) {
+        const remaining = resultLines.length - COLLAPSED_LINES;
+        const hint = chalk.hex(C.lavender)(`▸ ${remaining} more lines — press e to expand`);
+        const padded = hint + " ".repeat(Math.max(0, w - 6 - stripAnsi(hint).length));
+        lines.push(boxLine(padded, w, borderColor));
+      } else if (resultLines.length > COLLAPSED_LINES) {
+        const hint = chalk.hex(C.dusty)(`▾ Showing all ${resultLines.length} lines — press e to collapse`);
+        const padded = hint + " ".repeat(Math.max(0, w - 6 - stripAnsi(hint).length));
+        lines.push(boxLine(padded, w, borderColor));
       }
     }
 
@@ -1227,7 +1251,8 @@ class SubAgentRuntime {
             return data.organic.map((r: any) => `**Title**: ${r.title}\n**URL**: ${r.link}\n**Snippet**: ${r.snippet}\n`).join("\n---\n");
           });
 
-          return Promise.race([tavilyFetch, serperFetch]).catch(() => "Web search failed.");
+          const raw = await Promise.race([tavilyFetch, serperFetch]).catch(() => "Web search failed.");
+          return raw.length > 4000 ? raw.slice(0, 4000) + "\n\n...[TRUNCATED — use more specific query for details]" : raw;
         }
         case "web_fetch": {
           const url = args.url;
@@ -1582,9 +1607,13 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         return {
           content: [{
             type: "text",
-            text: `Sub-agent ${config.name} completed the task:\n\n${result}`
+            text: `Sub-agent ${config.name} completed the task:\n\n${
+              result.length > 3000
+                ? result.slice(0, 3000) + `\n\n...[Result truncated to 3000 chars — ${result.length} total. Press 'e' on the result card to expand.]`
+                : result
+            }`
           }],
-          details: { agent: config.name },
+          details: { agent: config.name, fullResult: result },
         };
       } catch (error: any) {
         // Mark error in tracker
@@ -1718,10 +1747,10 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   pi.registerTool({
     name: "memory_store",
     label: "Store Memory",
-    description: "Store a fact, decision, preference, or pattern into persistent memory for future recall. Use this when you learn something important about the project, the user's preferences, architecture decisions, or recurring patterns.",
+    description: "Store a fact, decision, preference, pattern, or skill into persistent memory for future recall. Use this when you learn something important about the project, the user's preferences, architecture decisions, recurring patterns, or when you've learned a new approach/skill.",
     parameters: Type.Object({
       content: Type.String({ description: "The fact, decision, or pattern to remember" }),
-      type: Type.String({ description: "Type of memory: 'fact' (general knowledge), 'decision' (architectural choice), 'preference' (user preference), 'pattern' (recurring pattern)" }),
+      type: Type.String({ description: "Type of memory: 'fact' (general knowledge), 'decision' (architectural choice), 'preference' (user preference), 'pattern' (recurring pattern), 'skill' (learned approach/technique)" }),
       importance: Type.Optional(Type.Number({ description: "Importance 1-10 (default: 5). Higher = more likely to be recalled." })),
       tags: Type.Optional(Type.Array(Type.String(), { description: "Optional tags for categorization" })),
       project: Type.Optional(Type.String({ description: "Project scope. Auto-detected from working directory if omitted." })),
@@ -1733,7 +1762,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         const project = params.project || path.basename(context.cwd || process.cwd()) || "global";
         const tags = params.tags || [];
         const type = params.type || "fact";
-        const validTypes = ["fact", "decision", "preference", "pattern"];
+        const validTypes = ["fact", "decision", "preference", "pattern", "skill"];
         if (!validTypes.includes(type)) {
           return { content: [{ type: "text", text: `Invalid type '${type}'. Must be one of: ${validTypes.join(", ")}` }], isError: true };
         }
@@ -1749,7 +1778,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   pi.registerTool({
     name: "memory_search",
     label: "Search Memory",
-    description: "Semantically search persistent memory for facts, decisions, preferences, or patterns related to a query.",
+    description: "Semantically search persistent memory for facts, decisions, preferences, patterns, or skills related to a query.",
     parameters: Type.Object({
       query: Type.String({ description: "Natural language query to search for in memory" }),
       k: Type.Optional(Type.Number({ description: "Number of results to return (default: 5)" })),
@@ -1836,6 +1865,112 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         return { content: [{ type: "text", text: `Consolidation complete: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed` }] };
       } catch (e: any) {
         return { content: [{ type: "text", text: `Consolidation failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GitHub Repo Fetcher — clone & explore any public repo
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const clonedRepos = new Set<string>();
+
+  pi.registerTool({
+    name: "fetch_github_repo",
+    label: "Fetch GitHub Repository",
+    description: "Clone a GitHub repository locally to explore its full codebase. Use this when the user shares a GitHub repo link or asks you to analyze code from GitHub. After cloning, you can use read, grep, ls, and bash tools to explore the code in the returned path.",
+    parameters: Type.Object({
+      url: Type.String({ description: "Full GitHub repository URL (e.g. https://github.com/owner/repo or https://github.com/owner/repo/tree/branch)" }),
+      maxDepth: Type.Optional(Type.Number({ description: "Max directory depth for the file tree (default: 3, max: 6)" })),
+    }),
+    async execute(id, params, _signal, _update, _context) {
+      try {
+        let url = params.url.replace(/\.git$/, "").trim();
+        let branch = "";
+
+        const treeMatch = url.match(/^(https?:\/\/github\.com\/[^\/]+\/[^\/]+)\/tree\/(.+)$/);
+        if (treeMatch) {
+          url = treeMatch[1];
+          branch = treeMatch[2];
+        }
+
+        const match = url.match(/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+?)(?:\/|$)/);
+        if (!match) {
+          return { content: [{ type: "text", text: "Invalid GitHub URL. Expected format: https://github.com/owner/repo" }], isError: true };
+        }
+
+        const owner = match[1];
+        const repo = match[2];
+        const cloneDir = path.join("/tmp/opencode/github", `${owner}-${repo}-${Date.now()}`);
+        const cloneUrl = branch ? `https://github.com/${owner}/${repo}.git` : url + ".git";
+
+        _context.ui.notify(`Cloning ${owner}/${repo}...`, "info");
+
+        fs.mkdirSync(cloneDir, { recursive: true });
+
+        const cloneArgs = ["clone", "--depth", "1", "--single-branch"];
+        if (branch) cloneArgs.push("--branch", branch);
+        cloneArgs.push(cloneUrl, cloneDir);
+
+        execSync(`git ${cloneArgs.join(" ")}`, {
+          stdio: "pipe",
+          timeout: 120_000,
+        });
+
+        clonedRepos.add(cloneDir);
+
+        const maxDepth = Math.min(6, Math.max(1, params.maxDepth ?? 3));
+
+        let treeLines: string[] = [];
+        function walkTree(dir: string, depth: number) {
+          if (depth > maxDepth) return;
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+              if (entry.name.startsWith(".")) continue;
+              if (entry.name === "node_modules") continue;
+              const indent = "  ".repeat(depth);
+              const fullPath = path.join(dir, entry.name);
+              const relPath = path.relative(cloneDir, fullPath);
+              if (entry.isDirectory()) {
+                treeLines.push(`${indent}📁 ${entry.name}/`);
+                walkTree(fullPath, depth + 1);
+              } else {
+                const stats = fs.statSync(fullPath);
+                const size = stats.size > 1024 ? `${(stats.size / 1024).toFixed(1)}KB` : `${stats.size}B`;
+                treeLines.push(`${indent}📄 ${entry.name} (${size})`);
+              }
+            }
+          } catch {}
+        }
+
+        const entries = fs.readdirSync(cloneDir, { withFileTypes: true });
+        for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+          if (entry.name.startsWith(".")) continue;
+          if (entry.name === "node_modules") continue;
+          const fullPath = path.join(cloneDir, entry.name);
+          const stats = fs.statSync(fullPath);
+          if (entry.isDirectory()) {
+            treeLines.push(`📁 ${entry.name}/`);
+            walkTree(fullPath, 1);
+          } else {
+            const size = stats.size > 1024 ? `${(stats.size / 1024).toFixed(1)}KB` : `${stats.size}B`;
+            treeLines.push(`📄 ${entry.name} (${size})`);
+          }
+        }
+
+        const totalFiles = treeLines.filter(l => l.includes("📄")).length;
+        const totalDirs = treeLines.filter(l => l.includes("📁")).length;
+        const treeStr = treeLines.join("\n").slice(0, 8000);
+
+        return {
+          content: [{
+            type: "text",
+            text: `✅ Cloned ${owner}/${repo}${branch ? ` (branch: ${branch})` : ""}\nPath: ${cloneDir}\nFiles: ${totalFiles}, Dirs: ${totalDirs}\n\n📂 Repository Structure:\n${treeStr}\n\nUse read, grep, ls, or bash tools on files inside ${cloneDir} to explore the codebase.`
+          }]
+        };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to fetch repository: ${e.message}` }], isError: true };
       }
     },
   });
@@ -2039,6 +2174,25 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
   // Event Hook: Setup HUD on session start, run consolidation for crash recovery
   pi.on("session_start", async (_event, ctx) => {
+    // Set playful geometric thinking indicator
+    const megaFrames = ["◐", "◓", "◑", "◒"];
+    ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });
+    // Cycle global working message with playful verbs and typing effect
+    if (!globalVerbCycler) {
+      let verbIdx = 0;
+      let charIdx = 0;
+      globalVerbCycler = setInterval(() => {
+        const verb = STATUS_VERBS[verbIdx % STATUS_VERBS.length];
+        charIdx++;
+        if (charIdx > verb.length + 3) {
+          verbIdx++;
+          charIdx = 0;
+        }
+        const showLen = Math.min(charIdx, verb.length);
+        const partial = verb.slice(0, showLen) + (showLen < verb.length ? "…" : "");
+        ctx.ui.setWorkingMessage(partial + "...");
+      }, 200);
+    }
     setupWidget(ctx);
     try {
       const result = await consolidateMemory();
@@ -2094,6 +2248,22 @@ ${state.state_notes || "None"}
     const memBlock = buildMemoryContextBlock(projectDir);
     extraPrompt += memBlock;
 
+    // Inject learned skills from past complex tasks
+    try {
+      const skills = getSkills(3);
+      if (skills.length > 0) {
+        const skillLines = skills.map((s, i) => {
+          const steps = s.skillMeta?.keySteps?.slice(0, 3).join(" → ") || "";
+          const approach = s.skillMeta?.approach ? ` (${s.skillMeta.approach})` : "";
+          const reused = s.skillMeta?.successCount > 1 ? ` [used ${s.skillMeta.successCount}x]` : "";
+          return `  ${i + 1}. ${s.content}${approach}${reused}\n     Steps: ${steps}`;
+        }).join("\n");
+        extraPrompt += `\n# 🧠 LEARNED SKILLS FROM PAST TASKS\nBelow are skills the AI learned from solving similar problems before. Use these approaches to solve problems faster and more effectively.\n${skillLines}\n`;
+      }
+    } catch (e) {
+      // silent — skill injection should never crash startup
+    }
+
     return {
       systemPrompt: event.systemPrompt + extraPrompt
     };
@@ -2111,6 +2281,7 @@ ${state.state_notes || "None"}
 
     updateSessionMemoryInBackground(event, ctx);
     autoExtractMemory(event, ctx);
+    autoImprove(event, ctx);
   });
 
   // Helper function to update task memory in background
@@ -2299,7 +2470,7 @@ Respond ONLY with the JSON object. No other text.`;
         const importance = Math.min(10, Math.max(1, Math.floor(parsed.importance ?? 5)));
         const type = parsed.type || "fact";
         const tags = parsed.tags || [];
-        const validTypes = ["fact", "decision", "preference", "pattern"];
+        const validTypes = ["fact", "decision", "preference", "pattern", "skill"];
         if (validTypes.includes(type)) {
           const newId = await storeMemory(parsed.content, type, importance, project, tags, 180);
           if (parsed.contradicts) {
@@ -2314,6 +2485,125 @@ Respond ONLY with the JSON object. No other text.`;
       } catch {}
     } finally {
       isAutoExtracting = false;
+    }
+  }
+
+  let isAutoImproving = false;
+
+  async function autoImprove(event: any, ctx: ExtensionContext) {
+    if (isAutoImproving) return;
+    isAutoImproving = true;
+
+    try {
+      const branch = ctx.sessionManager.getBranch();
+      if (!branch) return;
+      const messages = branch.filter((e: any) => e.type === "message").map((e: any) => e.message);
+      if (messages.length < 10) return;
+
+      const recentAssistant = messages.slice(-6).filter((m: any) => m.role === "assistant");
+      if (!recentAssistant.length) return;
+
+      const allToolCalls = messages.filter((m: any) =>
+        m.role === "assistant" && Array.isArray(m.content) &&
+        m.content.some((c: any) => c.type === "toolCall")
+      );
+
+      const totalToolCalls = allToolCalls.reduce((sum: number, m: any) => {
+        return sum + m.content.filter((c: any) => c.type === "toolCall").length;
+      }, 0);
+
+      if (totalToolCalls < 5) return;
+
+      const recentMsgs = messages.slice(-8).map((m: any) => {
+        let text = "";
+        if (typeof m.content === "string") text = m.content;
+        else if (Array.isArray(m.content)) {
+          text = m.content
+            .filter((c: any) => c.type === "text")
+            .map((c: any) => c.text)
+            .join(" ");
+        }
+        return `${m.role.toUpperCase()}: ${text.slice(0, 800)}`;
+      }).join("\n\n");
+
+      const recentUserMsg = [...messages].reverse().find((m: any) => m.role === "user");
+      if (!recentUserMsg) return;
+
+      const project = path.basename(ctx.cwd || process.cwd()) || "global";
+      const model = resolveFastModel(ctx);
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) return;
+
+      const prompt = `You are a self-improvement agent. Analyze the recent conversation and decide if the AI just performed a complex task worth learning from.
+
+A task is worth learning if it involved:
+- Multiple tool calls (reading files, editing code, running commands, web searches)
+- Multiple steps to achieve a goal
+- Problem-solving with a clear approach
+- Using sub-agents
+
+If the task is simple or trivial (single command, simple answer, greeting), respond with: {"learn": false}
+
+If the task is complex and worth learning from, extract a "skill" — a reusable approach that will make similar tasks easier in the future. Respond with JSON:
+{
+  "learn": true,
+  "content": "A concise description of what was learned, e.g. 'How to set up a React project with Vite and Tailwind'",
+  "problemType": "The category of problem, e.g. 'project-setup', 'debugging', 'code-review', 'architecture', 'testing', 'deployment'",
+  "approach": "The general approach used to solve it, 1-2 sentences",
+  "keySteps": ["Step 1: what was done", "Step 2: what was done", "Step 3: what was done"],
+  "complexityScore": <number 1-10>,
+  "tags": ["relevant", "tags", "for", "retrieval"]
+}
+
+Recent conversation:
+${recentMsgs}
+
+Respond ONLY with the JSON object. No other text.`;
+
+      const response = await completeSimple(model, {
+        messages: [{ role: "user", content: prompt, timestamp: Date.now() }]
+      }, {
+        apiKey: auth.apiKey,
+        headers: auth.headers,
+        reasoning: "off" as any
+      });
+
+      const text = response.content
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join("\n");
+
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+
+      if (parsed && parsed.learn && parsed.content) {
+        const tags = [...(parsed.tags || []), "skill", parsed.problemType || "general"].filter(Boolean);
+        const importance = Math.min(10, Math.max(1, parsed.complexityScore ?? 5));
+        const skillMeta = {
+          problemType: parsed.problemType || "general",
+          approach: parsed.approach || "",
+          keySteps: parsed.keySteps || [],
+          complexityScore: parsed.complexityScore || 5,
+          successCount: 1,
+        };
+
+        await storeMemory(
+          parsed.content,
+          "skill" as any,
+          importance + 2,
+          project,
+          tags,
+          365,
+          skillMeta as any,
+        );
+      }
+    } catch (e: any) {
+      try {
+        const debugLogPath = path.join(os.homedir(), ".pi", "agent", "memory-debug.log");
+        fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] AutoImprove error: ${e.message}\n`, "utf8");
+      } catch {}
+    } finally {
+      isAutoImproving = false;
     }
   }
 
@@ -2332,7 +2622,19 @@ Respond ONLY with the JSON object. No other text.`;
     } catch (e) {
       // silent — consolidation should never crash shutdown
     }
+    // Clean up cloned repos
+    for (const repoPath of clonedRepos) {
+      try {
+        fs.rmSync(repoPath, { recursive: true, force: true });
+      } catch {}
+    }
+    clonedRepos.clear();
+
     stopGlobalAnimation();
+    if (globalVerbCycler) {
+      clearInterval(globalVerbCycler);
+      globalVerbCycler = null;
+    }
     activeTrackers.clear();
     activeInvalidators.clear();
     teardownWidget(ctx);

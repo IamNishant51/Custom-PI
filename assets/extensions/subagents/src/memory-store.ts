@@ -37,6 +37,7 @@ function migrateEntry(e: any): MemoryEntry {
     ttl: e.ttl ?? new Date(Date.now() + 90 * 86_400_000).toISOString(),
     deprecated: e.deprecated ?? false,
     correctedById: e.correctedById ?? undefined,
+    skillMeta: e.skillMeta ?? undefined,
   };
 }
 
@@ -135,8 +136,9 @@ function multiSignalScore(
   const keyword = computeKeywordMultiplier(query, entry);
   const recency = computeRecencyMultiplier(entry.lastAccessed);
   const importanceBonus = Math.max(-0.06, Math.min(0.08, (entry.importance - 5) * 0.02));
+  const skillBonus = entry.type === "skill" ? 0.15 : 0;
 
-  const multiplier = 1 + keyword + recency + importanceBonus;
+  const multiplier = 1 + keyword + recency + importanceBonus + skillBonus;
   const adjusted = semanticScore * multiplier;
   return Math.min(1, Math.max(0, adjusted));
 }
@@ -162,14 +164,24 @@ function recalibrateNow(entry: MemoryEntry): void {
 
   let newImportance = entry.importance;
 
-  if (accessRate > 0.5 && retrievalSuccessRate > 0.6) {
-    newImportance = Math.min(10, entry.importance + 0.2);
-  } else if (accessRate < 0.05 && retrievalSuccessRate < 0.2) {
-    newImportance = Math.max(1, entry.importance - 0.3);
-  } else if (retrievalSuccessRate > 0.8) {
-    newImportance = Math.min(10, entry.importance + 0.1);
-  } else if (retrievalSuccessRate < 0.1 && entry.retrievalCount > 3) {
-    newImportance = Math.max(1, entry.importance - 0.5);
+  if (entry.type === "skill") {
+    if (accessRate > 0.3) {
+      newImportance = Math.min(10, entry.importance + 0.3);
+    }
+    if (entry.skillMeta && entry.skillMeta.successCount > 3) {
+      newImportance = Math.min(10, newImportance + 0.2);
+    }
+    newImportance = Math.max(6, newImportance);
+  } else {
+    if (accessRate > 0.5 && retrievalSuccessRate > 0.6) {
+      newImportance = Math.min(10, entry.importance + 0.2);
+    } else if (accessRate < 0.05 && retrievalSuccessRate < 0.2) {
+      newImportance = Math.max(1, entry.importance - 0.3);
+    } else if (retrievalSuccessRate > 0.8) {
+      newImportance = Math.min(10, entry.importance + 0.1);
+    } else if (retrievalSuccessRate < 0.1 && entry.retrievalCount > 3) {
+      newImportance = Math.max(1, entry.importance - 0.5);
+    }
   }
 
   if (newImportance !== entry.importance) {
@@ -186,6 +198,7 @@ export async function store(
   project: string,
   tags: string[],
   ttlDays?: number,
+  skillMeta?: SkillMeta,
 ): Promise<string> {
   const embedding = await embed(content);
   const ttlDaysFinal = ttlDays ?? computeAdaptiveTTL(importance, 1);
@@ -235,6 +248,7 @@ export async function store(
       retrievalSuccessCount: 0,
       ttl,
       deprecated: false,
+      skillMeta,
     };
 
     recalibrateNow(entry);
@@ -249,6 +263,7 @@ export async function search(
   k = 5,
   project?: string,
   recordSuccess = false,
+  typeFilter?: MemoryType,
 ): Promise<SearchResult[]> {
   const qv = await embed(query);
   const entries = load();
@@ -259,6 +274,7 @@ export async function search(
   for (const entry of entries) {
     if (entry.deprecated) continue;
     if (project && entry.project !== project && entry.project !== "global") continue;
+    if (typeFilter && entry.type !== typeFilter) continue;
     const semanticScore = cosineSimilarity(qv, entry.embedding);
     const finalScore = multiSignalScore(semanticScore, query, entry);
     scored.push({ entry, score: finalScore });
@@ -319,6 +335,13 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
             new Date(keeper.lastAccessed).getTime(),
             new Date(dropper.lastAccessed).getTime(),
           )).toISOString();
+          // Merge skill metadata if both are skills
+          if (keeper.type === "skill" && dropper.skillMeta && keeper.skillMeta) {
+            keeper.skillMeta.successCount = Math.max(keeper.skillMeta.successCount, dropper.skillMeta.successCount) + 1;
+            keeper.skillMeta.keySteps = [...new Set([...keeper.skillMeta.keySteps, ...dropper.skillMeta.keySteps])];
+            keeper.skillMeta.complexityScore = Math.max(keeper.skillMeta.complexityScore, dropper.skillMeta.complexityScore);
+            if (!keeper.skillMeta.approach) keeper.skillMeta.approach = dropper.skillMeta.approach;
+          }
           dropper.deprecated = true;
           dropper.correctedById = keeper.id;
           dropper.ttl = new Date(now + 7 * 86_400_000).toISOString();
@@ -437,6 +460,17 @@ export async function markContradicted(oldContent: string, newEntryId: string): 
       save(entries);
     }
   });
+}
+
+export function getSkills(k?: number): MemoryEntry[] {
+  return load()
+    .filter(e => e.type === "skill" && !e.deprecated)
+    .sort((a, b) => {
+      const aScore = (a.importance || 0) + (a.skillMeta?.successCount || 0) * 2;
+      const bScore = (b.importance || 0) + (b.skillMeta?.successCount || 0) * 2;
+      return bScore - aScore;
+    })
+    .slice(0, k ?? 5);
 }
 
 export async function searchExisting(query: string): Promise<MemoryEntry | null> {

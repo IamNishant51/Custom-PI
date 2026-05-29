@@ -2,7 +2,7 @@
   "defaultModel": "qwen3.5:9b",
   "defaultProvider": "ollama",
   "defaultThinkingLevel": "high",
-  "editorPaddingX": 3,
+  "editorPaddingX": 6,
   "hideThinkingBlock": false,
   "lastChangelogVersion": "0.77.0",
   "packages": [

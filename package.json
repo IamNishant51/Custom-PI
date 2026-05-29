@@ -1,6 +1,6 @@
 {
   "name": "custom-pi",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Customized Pi Coding Agent with parallel subagents, premium TUI dashboard styling, and session memory tracking",
   "main": "bin/cli.js",
   "bin": {

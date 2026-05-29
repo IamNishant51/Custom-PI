@@ -1,4 +1,12 @@
-export type MemoryType = "fact" | "decision" | "preference" | "pattern";
+export type MemoryType = "fact" | "decision" | "preference" | "pattern" | "skill";
+
+export interface SkillMeta {
+  problemType: string;
+  approach: string;
+  keySteps: string[];
+  complexityScore: number;
+  successCount: number;
+}
 
 export interface MemoryEntry {
   id: string;
@@ -16,6 +24,7 @@ export interface MemoryEntry {
   ttl: string;
   deprecated: boolean;
   correctedById?: string;
+  skillMeta?: SkillMeta;
 }
 
 export interface SearchResult {
