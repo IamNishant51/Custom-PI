@@ -1841,6 +1841,96 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Current Session Search Tool — prevent AI forgetting in long conversations
+  // ─────────────────────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "search_current_session",
+    label: "Search Current Session",
+    description: "Search the current conversation session for past messages matching a query. Use this when you need to recall what was discussed earlier in the conversation, what decisions were made, what code was shown, or what the user requested previously. This prevents forgetting in long sessions.",
+    parameters: Type.Object({
+      query: Type.String({ description: "Search terms to find in the current session messages" }),
+      k: Type.Optional(Type.Number({ description: "Number of results to return (default: 10)" })),
+      includeRoles: Type.Optional(Type.Array(Type.String(), { description: "Only include specific roles: 'user', 'assistant', 'tool'. Default: all." })),
+    }),
+    async execute(id, params, _signal, _update, context) {
+      try {
+        const branch = context.sessionManager.getBranch();
+        if (!branch || !branch.length) {
+          return { content: [{ type: "text", text: "No current session data available." }] };
+        }
+
+        const query = params.query.toLowerCase();
+        const k = Math.min(50, Math.max(1, params.k ?? 10));
+        const includeRoles = params.includeRoles || ["user", "assistant", "tool"];
+
+        const queryTokens = query.split(/\s+/).filter(t => t.length > 2);
+        if (!queryTokens.length) {
+          return { content: [{ type: "text", text: "Please provide a more specific query." }], isError: true };
+        }
+
+        const scored: Array<{ score: number; role: string; text: string; timestamp: number }> = [];
+
+        for (const entry of branch) {
+          if (entry.type !== "message") continue;
+          const msg = entry.message;
+          if (!includeRoles.includes(msg.role)) continue;
+
+          let text = "";
+          if (typeof msg.content === "string") {
+            text = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            text = msg.content
+              .filter((c: any) => c.type === "text")
+              .map((c: any) => c.text)
+              .join(" ");
+          }
+          if (!text) continue;
+
+          const lowerText = text.toLowerCase();
+
+          // Score: exact phrase match > all tokens match > partial token match
+          let score = 0;
+          if (lowerText.includes(query)) {
+            score = queryTokens.length + 5;
+          } else {
+            const matched = queryTokens.filter(t => lowerText.includes(t)).length;
+            if (matched > 0) {
+              score = matched + (matched / queryTokens.length) * 2;
+            }
+          }
+
+          if (score > 0) {
+            const timestamp = entry.timestamp || entry.id ? Date.parse(String(entry.timestamp || entry.id)) || 0 : 0;
+            scored.push({ score, role: msg.role, text: text.slice(0, 2000), timestamp });
+          }
+        }
+
+        // Sort by score desc, then by timestamp desc (most recent first for ties)
+        scored.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp);
+
+        const top = scored.slice(0, k);
+        if (!top.length) {
+          return { content: [{ type: "text", text: `No messages in the current session matched "${params.query}". Try different keywords or check the memory_search tool for persistent memories.` }] };
+        }
+
+        const iconForRole: Record<string, string> = { user: "🧑", assistant: "🤖", tool: "🔧" };
+        const lines = top.map((m, i) => {
+          const timeStr = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : "";
+          const roleLabel = (iconForRole[m.role] || "") + ` ${m.role.toUpperCase()}`;
+          const preview = m.text.length > 300 ? m.text.slice(0, 300) + "..." : m.text;
+          return `${i + 1}. ${roleLabel} (${timeStr}): ${preview}`;
+        });
+
+        const summary = `Found ${top.length} relevant message(s) in the current session:\n\n${lines.join("\n\n")}`;
+        return { content: [{ type: "text", text: summary }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Session search failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Session Memory / Task State Tracking Commands & Hooks
   // ─────────────────────────────────────────────────────────────────────────
 
