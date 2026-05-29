@@ -1,7 +1,7 @@
 # custom-pi
 
 <p align="center">
-  <img src="./pi-logo-on-dark.svg" alt="custom-pi Logo" width="160" />
+  <img src="https://raw.githubusercontent.com/IamNishant51/Custom-PI/main/pi-logo-on-dark.svg" alt="custom-pi Logo" width="160" />
 </p>
 
 <p align="center">
