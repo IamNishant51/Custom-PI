@@ -1,0 +1,47 @@
+{
+  "name": "custom-pi",
+  "version": "1.0.0",
+  "description": "Customized Pi Coding Agent with parallel subagents, premium TUI dashboard styling, and session memory tracking",
+  "main": "bin/cli.js",
+  "bin": {
+    "custom-pi": "./bin/cli.js"
+  },
+  "scripts": {
+    "update-and-publish": "node scripts/update-and-publish.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "latest"
+  },
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "coding-agent",
+    "agent-swarm",
+    "multi-agent",
+    "tui",
+    "cli-tui",
+    "terminal",
+    "autonomous-agent",
+    "developer-tools",
+    "developer-productivity",
+    "claude-code",
+    "gemini",
+    "openai",
+    "ollama",
+    "rag-memory"
+  ],
+  "author": "Nishant Unavane <iamnishantunavane@gmail.com> (https://nishant-unavane.vercel.app)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IamNishant51/custom-pi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/IamNishant51/custom-pi/issues"
+  },
+  "homepage": "https://github.com/IamNishant51/custom-pi#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "preferGlobal": true
+}

@@ -1,0 +1,21 @@
+{
+  "defaultModel": "qwen3.5:9b",
+  "defaultProvider": "ollama",
+  "defaultThinkingLevel": "high",
+  "editorPaddingX": 3,
+  "hideThinkingBlock": false,
+  "lastChangelogVersion": "0.77.0",
+  "packages": [
+    "npm:@ollama/pi-web-search"
+  ],
+  "steeringMode": "one-at-a-time",
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "theme": "claude-code",
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 1024,
+    "keepRecentTokens": 4096
+  }
+}

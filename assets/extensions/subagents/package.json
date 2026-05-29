@@ -1,0 +1,15 @@
+{
+  "name": "pi-subagents",
+  "version": "0.1.0",
+  "description": "Extension to allow multiple sub-agents in Pi coding agent",
+  "main": "src/index.ts",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "yaml": "^2.4.1"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
