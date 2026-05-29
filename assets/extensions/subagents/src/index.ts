@@ -9,6 +9,9 @@ import { completeSimple } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import os from "node:os";
 
+import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted } from "./memory-store";
+import { buildMemoryContextBlock } from "./memory-retrieval";
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  TYPE DEFINITIONS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -863,9 +866,10 @@ class QuantumHUDWidget implements Component {
     let cpu = `CPU: ${cpuLoad}L`;
     let ram = `RAM: ${memPercent}% (${memUsed}G/${memTotal}G)`;
     
-    const memoryFile = path.join(process.env.HOME || "/home/nishant", ".pi/agent/obsidian_memory/Agent_Memory.md");
-    const vaultLinked = fs.existsSync(memoryFile);
-    let rag = vaultLinked ? chalk.hex(C.teal)("[ RAG: Linked ]") : chalk.hex(C.dusty)("[ RAG: Offline ]");
+    const memStats = memoryStats();
+    let rag = memStats.totalEntries > 0
+      ? chalk.hex(C.teal)(`[ Memory: ${memStats.totalEntries} ]`)
+      : chalk.hex(C.dusty)("[ Memory: Empty ]");
     
     let swarm = running.length > 0
       ? chalk.hex(C.orange)(`[ Swarm: ${running.length} active ]`)
@@ -877,7 +881,7 @@ class QuantumHUDWidget implements Component {
     }
     if (w < 70) {
       cpu = `${cpuLoad}L`;
-      rag = vaultLinked ? chalk.hex(C.teal)("RAG") : "";
+      rag = memStats.totalEntries > 0 ? chalk.hex(C.teal)(`M:${memStats.totalEntries}`) : "";
       swarm = running.length > 0 ? chalk.hex(C.orange)(`Swarm:${running.length}`) : "";
     }
     if (w < 55) {
@@ -938,7 +942,7 @@ class QuantumHUDWidget implements Component {
 //  AGENT LOADING & CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const AGENTS_DIR_GLOBAL = path.join(process.env.HOME || "", ".pi/agent/agents");
+const AGENTS_DIR_GLOBAL = path.join(os.homedir(), ".pi/agent/agents");
 const AGENTS_DIR_LOCAL = path.join(process.cwd(), ".pi/agents");
 
 function parseMarkdownAgent(content: string): { config: AgentConfig; body: string } | null {
@@ -1200,8 +1204,8 @@ class SubAgentRuntime {
           const query = args.query;
           if (!query) return "Error: Missing query argument.";
 
-          const tavilyKey = process.env.TAVILY_API_KEY || "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";
-          const serperKey = process.env.SERPER_API_KEY || "47d75b55564ee5dd8668a00e8817eaca533792ee";
+          const tavilyKey = process.env.TAVILY_API_KEY || "";
+          const serperKey = process.env.SERPER_API_KEY || "";
 
           const tavilyFetch = fetch("https://api.tavily.com/search", {
             method: "POST",
@@ -1492,13 +1496,44 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     },
   });
 
+  // Tool: Delete sub-agent
+  pi.registerTool({
+    name: "delete_subagent",
+    label: "Delete Sub-Agent",
+    description: "Delete/remove a sub-agent template by name. Use when a sub-agent is no longer needed.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Name of the sub-agent to delete (e.g., 'operator', 'legacy-tester')" }),
+    }),
+    async execute(id, params, _signal, _update, context) {
+      try {
+        const safeName = params.name.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+        const dirs = [AGENTS_DIR_GLOBAL, AGENTS_DIR_LOCAL];
+        let deleted = false;
+        for (const dir of dirs) {
+          const filePath = path.join(dir, `${safeName}.md`);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            deleted = true;
+            context.ui.notify(`${chalk.hex(C.coral)("✗")} Deleted sub-agent: ${chalk.hex(C.cream).bold(safeName)}`, "info");
+          }
+        }
+        if (deleted) {
+          return { content: [{ type: "text", text: `Deleted sub-agent '${safeName}'. They will no longer be available for delegation.` }] };
+        }
+        return { content: [{ type: "text", text: `Sub-agent '${safeName}' not found. Use list_subagents to see available agents.` }], isError: true };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to delete sub-agent: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   // Tool 3: Single subagent delegation — with animated execution card
   // ─────────────────────────────────────────────────────────────────────────
   pi.registerTool({
     name: "delegate_to_subagent",
     label: "Delegate to Sub-Agent",
-    description: "Delegate a specific task to a specialized sub-agent (e.g. reviewer, builder, researcher) to run independently. Call this immediately when the user requests a sub-agent task, instead of reading files or executing the task yourself.",
+    description: "Delegate a specific task to a specialized sub-agent (e.g. reviewer, builder) to run independently. Call this immediately when the user requests a sub-agent task, instead of reading files or executing the task yourself.",
     parameters: Type.Object({
       agentId: Type.String({ description: "The name or ID of the sub-agent to use (e.g. 'reviewer', 'builder', 'researcher')" }),
       task: Type.String({ description: "The detailed task for the sub-agent to perform. Specify the target files and scope clearly." }),
@@ -1578,7 +1613,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   pi.registerTool({
     name: "delegate_parallel_tasks",
     label: "Delegate Parallel Tasks",
-    description: "Delegate multiple sub-tasks to multiple specialized sub-agents to run in parallel.",
+    description: "Delegate multiple sub-tasks to multiple specialized sub-agents (e.g. reviewer, builder) to run in parallel.",
     parameters: Type.Object({
       tasks: Type.Array(
         Type.Object({
@@ -1676,6 +1711,136 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Persistent Memory Tools — Semantic Store & Retrieval
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Tool: Store memory
+  pi.registerTool({
+    name: "memory_store",
+    label: "Store Memory",
+    description: "Store a fact, decision, preference, or pattern into persistent memory for future recall. Use this when you learn something important about the project, the user's preferences, architecture decisions, or recurring patterns.",
+    parameters: Type.Object({
+      content: Type.String({ description: "The fact, decision, or pattern to remember" }),
+      type: Type.String({ description: "Type of memory: 'fact' (general knowledge), 'decision' (architectural choice), 'preference' (user preference), 'pattern' (recurring pattern)" }),
+      importance: Type.Optional(Type.Number({ description: "Importance 1-10 (default: 5). Higher = more likely to be recalled." })),
+      tags: Type.Optional(Type.Array(Type.String(), { description: "Optional tags for categorization" })),
+      project: Type.Optional(Type.String({ description: "Project scope. Auto-detected from working directory if omitted." })),
+      ttlDays: Type.Optional(Type.Number({ description: "Days until auto-expiry. Defaults to 90." })),
+    }),
+    async execute(id, params, _signal, _update, context) {
+      try {
+        const importance = Math.min(10, Math.max(1, Math.floor(params.importance ?? 5)));
+        const project = params.project || path.basename(context.cwd || process.cwd()) || "global";
+        const tags = params.tags || [];
+        const type = params.type || "fact";
+        const validTypes = ["fact", "decision", "preference", "pattern"];
+        if (!validTypes.includes(type)) {
+          return { content: [{ type: "text", text: `Invalid type '${type}'. Must be one of: ${validTypes.join(", ")}` }], isError: true };
+        }
+        const id_ = await storeMemory(params.content, type as any, importance, project, tags, params.ttlDays);
+        return { content: [{ type: "text", text: `Stored memory [${id_}] (${type}, importance: ${importance}, project: ${project})` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to store memory: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // Tool: Search memory
+  pi.registerTool({
+    name: "memory_search",
+    label: "Search Memory",
+    description: "Semantically search persistent memory for facts, decisions, preferences, or patterns related to a query.",
+    parameters: Type.Object({
+      query: Type.String({ description: "Natural language query to search for in memory" }),
+      k: Type.Optional(Type.Number({ description: "Number of results to return (default: 5)" })),
+      project: Type.Optional(Type.String({ description: "Optional project filter. Defaults to the current project." })),
+    }),
+    async execute(id, params, _signal, _update, context) {
+      try {
+        const project = params.project || path.basename(context.cwd || process.cwd()) || undefined;
+        const results = await searchMemory(params.query, params.k ?? 5, project);
+        if (!results.length) {
+          return { content: [{ type: "text", text: "No relevant memories found." }] };
+        }
+        const lines = results.map((r, i) => {
+          const icon =
+            r.entry.type === "fact" ? "" :
+            r.entry.type === "decision" ? "⚡" :
+            r.entry.type === "preference" ? "💡" : "";
+          return `${i + 1}. ${icon}[${r.entry.type}] ${r.entry.content} (relevance: ${(r.score * 100).toFixed(0)}%, importance: ${r.entry.importance}, project: ${r.entry.project})`;
+        });
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Memory search failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // Tool: Delete memory
+  pi.registerTool({
+    name: "memory_delete",
+    label: "Delete Memory",
+    description: "Delete a persistent memory entry by its ID.",
+    parameters: Type.Object({
+      id: Type.String({ description: "The unique ID of the memory entry to delete. Use memory_search to find IDs." }),
+    }),
+    async execute(id, params, _signal, _update, _context) {
+      try {
+        const ok = await deleteMemory(params.id);
+        if (ok) {
+          return { content: [{ type: "text", text: `Deleted memory entry: ${params.id}` }] };
+        }
+        return { content: [{ type: "text", text: `Memory entry '${params.id}' not found.` }], isError: true };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to delete memory: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // Tool: Memory stats
+  pi.registerTool({
+    name: "memory_stats",
+    label: "Memory Statistics",
+    description: "Get statistics about the persistent memory system: total entries, breakdown by type and project, and episode count.",
+    parameters: Type.Object({}),
+    async execute(id, params, _signal, _update, _context) {
+      try {
+        const s = memoryStats();
+        const lines = [
+          `Total entries: ${s.totalEntries}`,
+          `By type: ${Object.entries(s.byType).map(([k, v]) => `${k}: ${v}`).join(", ") || "none"}`,
+          `By project: ${Object.entries(s.byProject).map(([k, v]) => `${k}: ${v}`).join(", ") || "none"}`,
+          `Avg importance: ${s.averageImportance}`,
+          `Episodes logged: ${s.totalEpisodes}`,
+          `Deprecated: ${s.deprecatedCount}`,
+          `Retrieval success: ${(s.avgRetrievalSuccess * 100).toFixed(0)}%`,
+          `Oldest entry: ${new Date(s.oldestEntry).toLocaleDateString()}`,
+          `Newest entry: ${new Date(s.newestEntry).toLocaleDateString()}`,
+        ];
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to get memory stats: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // Tool: Consolidate memory
+  pi.registerTool({
+    name: "memory_consolidate",
+    label: "Consolidate Memory",
+    description: "Run memory consolidation: merge similar entries, prune expired ones, and recalculate importance scores. Run periodically to keep the memory system healthy.",
+    parameters: Type.Object({}),
+    async execute(id, params, _signal, _update, _context) {
+      try {
+        const result = await consolidateMemory();
+        return { content: [{ type: "text", text: `Consolidation complete: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Consolidation failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Session Memory / Task State Tracking Commands & Hooks
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1745,9 +1910,57 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
-  // Event Hook: Setup HUD on session start
+  // Command: Show persistent memory statistics
+  pi.registerCommand("memory-stats", {
+    description: "Display persistent memory statistics and recent entries.",
+    async handler(args, ctx) {
+      try {
+        const s = memoryStats();
+        const recent = getRecent(3);
+        let msg = `🧠 **Persistent Memory Stats**\n\n- Total entries: ${s.totalEntries}\n- By type: ${Object.entries(s.byType).map(([k, v]) => `${k}: ${v}`).join(", ") || "none"}\n- By project: ${Object.entries(s.byProject).map(([k, v]) => `${k}: ${v}`).join(", ") || "none"}\n- Avg importance: ${s.averageImportance}\n- Episodes: ${s.totalEpisodes}\n- Deprecated: ${s.deprecatedCount}\n- Retrieval success rate: ${(s.avgRetrievalSuccess * 100).toFixed(0)}%\n`;
+        if (recent.length) {
+          msg += `\n**Recent accesses:**\n${recent.map(e => `- [${e.type}] ${e.content.slice(0, 100)}`).join("\n")}`;
+        }
+        pi.sendMessage({ role: "system" as any, content: [{ type: "text", text: msg }] });
+      } catch (e: any) {
+        ctx.ui.notify(`Failed to read memory stats: ${e.message}`, "error");
+      }
+    },
+    async execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // Command: Run memory consolidation manually
+  pi.registerCommand("consolidate", {
+    description: "Manually trigger memory consolidation: merge duplicates, prune expired entries, recalibrate importance.",
+    async handler(args, ctx) {
+      try {
+        const result = await consolidateMemory();
+        ctx.ui.notify(`Consolidation done: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed`, "info");
+      } catch (e: any) {
+        ctx.ui.notify(`Consolidation failed: ${e.message}`, "error");
+      }
+    },
+    async execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // Event Hook: Setup HUD on session start, run consolidation for crash recovery
   pi.on("session_start", async (_event, ctx) => {
     setupWidget(ctx);
+    try {
+      const result = await consolidateMemory();
+      if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
+        ctx.ui.notify(
+          `Startup consolidation: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed`,
+          "info"
+        );
+      }
+    } catch (e) {
+      // silent — consolidation should never crash startup
+    }
   });
 
   // Event Hook: Inject task memory into system prompt
@@ -1757,6 +1970,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 2. **Immediate Delegation:** If the user asks you to "use a subagent", "delegate to subagent", "run subagent", or mentions a specific subagent name (like 'reviewer', 'builder', or 'researcher') to perform a task:
    - You MUST immediately call the \`delegate_to_subagent\` (or \`delegate_parallel_tasks\`) tool.
    - Do NOT read the file or attempt to analyze or execute the task yourself before delegating. Let the sub-agent handle it.
+3. **No Autonomous Actions:** When the user asks you to search for information or look something up, use the appropriate tool (web_search, memory_search) and report the findings back concisely. Do NOT create files, start projects, or take any other actions beyond what the user explicitly asked for. If you cannot find the information, say "I don't know" — do not fabricate answers or take unrelated actions.
 `;
 
     const sessionFile = ctx.sessionManager.getSessionFile();
@@ -1785,6 +1999,11 @@ ${state.state_notes || "None"}
       }
     }
 
+    // Inject persistent memory context (non-blocking, cached file read)
+    const projectDir = path.basename(ctx.cwd || process.cwd()) || "global";
+    const memBlock = buildMemoryContextBlock(projectDir);
+    extraPrompt += memBlock;
+
     return {
       systemPrompt: event.systemPrompt + extraPrompt
     };
@@ -1801,6 +2020,7 @@ ${state.state_notes || "None"}
     if (hasToolCalls) return;
 
     updateSessionMemoryInBackground(event, ctx);
+    autoExtractMemory(event, ctx);
   });
 
   // Helper function to update task memory in background
@@ -1898,7 +2118,7 @@ Do not write any other conversational text or explanations. Return only the JSON
     } catch (e: any) {
       // Log error to debug file for senior developer analysis
       try {
-        const debugLogPath = path.join(process.env.HOME || "/home/nishant", ".pi", "agent", "memory-debug.log");
+        const debugLogPath = path.join(os.homedir(), ".pi", "agent", "memory-debug.log");
         fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] Error: ${e.stack || e.message}\n`, "utf8");
       } catch (logErr) {}
     } finally {
@@ -1906,10 +2126,122 @@ Do not write any other conversational text or explanations. Return only the JSON
     }
   }
 
+  let isAutoExtracting = false;
+
+  async function autoExtractMemory(event: any, ctx: ExtensionContext) {
+    if (isAutoExtracting) return;
+    isAutoExtracting = true;
+
+    try {
+      const branch = ctx.sessionManager.getBranch();
+      const messages = branch
+        .filter((e: any) => e.type === "message")
+        .map((e: any) => e.message);
+
+      if (messages.length < 2) return;
+
+      const lastMsgs = messages.slice(-4).filter((m: any) => m.role === "user" || m.role === "assistant").slice(-2);
+      if (lastMsgs.length < 2) return;
+
+      const lastExchange = lastMsgs.map((m: any) => {
+        let text = "";
+        if (typeof m.content === "string") text = m.content;
+        else if (Array.isArray(m.content)) {
+          text = m.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+        }
+        return `${m.role.toUpperCase()}: ${text.slice(0, 1500)}`;
+      }).join("\n\n");
+
+      const model = resolveFastModel(ctx);
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) return;
+
+      const project = path.basename(ctx.cwd || process.cwd()) || "global";
+
+      const prompt = `You are a memory extraction agent. Analyze the conversation exchange below and decide if any IMPORTANT information should be saved to persistent memory.
+
+Rules for what to save:
+- User preferences or configuration choices ("I prefer X", "use Y instead of Z")
+- Architecture decisions ("we decided to use X library")
+- Bug fixes and their solutions
+- Project conventions or patterns discovered
+- Important context about the codebase
+- User corrections or changes to previous preferences ("actually use Y instead of X")
+
+Do NOT save:
+- Transient conversation (greetings, small talk)
+- Step-by-step task progress (that's tracked separately)
+- Information that's obviously temporary
+
+If nothing important is found, respond with: {"store": false}
+If something should be saved, respond with JSON:
+{
+  "store": true,
+  "content": "The fact or decision to remember, written as a clear statement",
+  "type": "fact" | "decision" | "preference" | "pattern",
+  "importance": <number 1-10>,
+  "tags": ["tag1", "tag2"],
+  "contradicts": "If the user is correcting/changing a previous statement, quote what they are now contradicting. Otherwise omit this field."
+}
+
+Conversation:
+${lastExchange}
+
+Respond ONLY with the JSON object. No other text.`;
+
+      const response = await completeSimple(model, {
+        messages: [{ role: "user", content: prompt, timestamp: Date.now() }]
+      }, {
+        apiKey: auth.apiKey,
+        headers: auth.headers,
+        reasoning: "off" as any
+      });
+
+      const text = response.content
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join("\n");
+
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+
+      if (parsed && parsed.store && parsed.content) {
+        const importance = Math.min(10, Math.max(1, Math.floor(parsed.importance ?? 5)));
+        const type = parsed.type || "fact";
+        const tags = parsed.tags || [];
+        const validTypes = ["fact", "decision", "preference", "pattern"];
+        if (validTypes.includes(type)) {
+          const newId = await storeMemory(parsed.content, type, importance, project, tags, 180);
+          if (parsed.contradicts) {
+            await markContradicted(parsed.contradicts, newId);
+          }
+        }
+      }
+    } catch (e: any) {
+      try {
+        const debugLogPath = path.join(os.homedir(), ".pi", "agent", "memory-debug.log");
+        fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] AutoExtract error: ${e.message}\n`, "utf8");
+      } catch {}
+    } finally {
+      isAutoExtracting = false;
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Session lifecycle — cleanup on shutdown
   // ─────────────────────────────────────────────────────────────────────────
   pi.on("session_shutdown", async (_event, ctx) => {
+    try {
+      const result = await consolidateMemory();
+      if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
+        ctx.ui.notify(
+          `Memory consolidated: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed`,
+          "info"
+        );
+      }
+    } catch (e) {
+      // silent — consolidation should never crash shutdown
+    }
     stopGlobalAnimation();
     activeTrackers.clear();
     activeInvalidators.clear();

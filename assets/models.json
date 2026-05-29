@@ -2,7 +2,7 @@
   "providers": {
     "nvidia": {
       "api": "openai-completions",
-      "apiKey": "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",
+      "apiKey": "set-via-env-var",
       "baseUrl": "https://integrate.api.nvidia.com/v1",
       "models": [
         {

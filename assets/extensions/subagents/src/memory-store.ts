@@ -1,0 +1,457 @@
+import type { MemoryEntry, SearchResult, MemoryStats, MemoryType } from "./memory-types";
+import { embed, cosineSimilarity } from "./memory-embedding";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+
+const MEMORY_DIR = path.join(os.homedir(), ".pi/agent/memory");
+const SEMANTIC_FILE = path.join(MEMORY_DIR, "semantic.json");
+const EPISODES_DIR = path.join(MEMORY_DIR, "episodes");
+
+let cache: MemoryEntry[] | null = null;
+let cacheTs = 0;
+const CACHE_TTL = 30_000;
+
+let writeQueue = Promise.resolve();
+
+function ensureDirs(): void {
+  if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
+  if (!fs.existsSync(EPISODES_DIR)) fs.mkdirSync(EPISODES_DIR, { recursive: true });
+}
+
+function migrateEntry(e: any): MemoryEntry {
+  return {
+    id: e.id,
+    content: e.content,
+    type: e.type,
+    importance: e.importance ?? 5,
+    project: e.project ?? "global",
+    embedding: e.embedding ?? [],
+    tags: e.tags ?? [],
+    created: e.created ?? new Date().toISOString(),
+    lastAccessed: e.lastAccessed ?? e.created ?? new Date().toISOString(),
+    accessCount: e.accessCount ?? 0,
+    retrievalCount: e.retrievalCount ?? 0,
+    retrievalSuccessCount: e.retrievalSuccessCount ?? 0,
+    ttl: e.ttl ?? new Date(Date.now() + 90 * 86_400_000).toISOString(),
+    deprecated: e.deprecated ?? false,
+    correctedById: e.correctedById ?? undefined,
+  };
+}
+
+function load(): MemoryEntry[] {
+  ensureDirs();
+  const now = Date.now();
+  if (cache && now - cacheTs < CACHE_TTL) return cache;
+
+  if (!fs.existsSync(SEMANTIC_FILE)) {
+    cache = [];
+    cacheTs = now;
+    return cache;
+  }
+
+  try {
+    const raw = fs.readFileSync(SEMANTIC_FILE, "utf8");
+    const rawEntries: any[] = JSON.parse(raw);
+    const entries = rawEntries.map(migrateEntry);
+    const valid = entries.filter(e => !e.ttl || new Date(e.ttl).getTime() > now);
+    if (valid.length !== entries.length) {
+      const json = JSON.stringify(valid, null, 2);
+      fs.writeFileSync(SEMANTIC_FILE, json, "utf8");
+    }
+    cache = valid;
+    cacheTs = now;
+    return valid;
+  } catch {
+    cache = [];
+    cacheTs = now;
+    return cache;
+  }
+}
+
+function save(entries: MemoryEntry[]): void {
+  ensureDirs();
+  fs.writeFileSync(SEMANTIC_FILE, JSON.stringify(entries, null, 2), "utf8");
+  cache = entries;
+  cacheTs = Date.now();
+}
+
+async function withWriteLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  const prev = writeQueue;
+  let nextResolve: (value?: unknown) => void;
+  writeQueue = new Promise(resolve => { nextResolve = resolve; });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    nextResolve!();
+  }
+}
+
+function mutate(fn: (entries: MemoryEntry[]) => void): void {
+  const entries = load();
+  fn(entries);
+  save(entries);
+}
+
+function genId(content: string): string {
+  return crypto.createHash("sha256").update(content + Date.now()).digest("hex").slice(0, 16);
+}
+
+function computeAdaptiveTTL(importance: number, accessCount: number): number {
+  const baseDays = 90;
+  const accessFactor = 1 + Math.log2(Math.max(1, accessCount));
+  const importanceFactor = importance / 5;
+  return Math.round(baseDays * accessFactor * importanceFactor);
+}
+
+function computeRecencyMultiplier(lastAccessed: string): number {
+  const elapsed = Date.now() - new Date(lastAccessed).getTime();
+  const oneDay = 86_400_000;
+  const oneWeek = 7 * oneDay;
+  if (elapsed < oneDay) return 0.10;
+  if (elapsed < oneWeek) return 0.05;
+  return 0;
+}
+
+function computeKeywordMultiplier(query: string, entry: MemoryEntry): number {
+  const qLower = query.toLowerCase();
+  for (const tag of entry.tags) {
+    if (qLower.includes(tag.toLowerCase())) return 0.12;
+  }
+  const tokens = qLower.split(/\s+/);
+  for (const token of tokens) {
+    if (token.length > 3 && entry.content.toLowerCase().includes(token)) return 0.08;
+  }
+  return 0;
+}
+
+function multiSignalScore(
+  semanticScore: number,
+  query: string,
+  entry: MemoryEntry,
+): number {
+  const keyword = computeKeywordMultiplier(query, entry);
+  const recency = computeRecencyMultiplier(entry.lastAccessed);
+  const importanceBonus = Math.max(-0.06, Math.min(0.08, (entry.importance - 5) * 0.02));
+
+  const multiplier = 1 + keyword + recency + importanceBonus;
+  const adjusted = semanticScore * multiplier;
+  return Math.min(1, Math.max(0, adjusted));
+}
+
+function recalibrateNow(entry: MemoryEntry): void {
+  const ageMs = Date.now() - new Date(entry.created).getTime();
+  const daysSinceCreation = Math.max(0.01, ageMs / 86_400_000);
+  const accessRate = entry.accessCount / daysSinceCreation;
+
+  if (entry.deprecated) {
+    const currentTtl = new Date(entry.ttl).getTime();
+    const fasterExpiry = Date.now() + 7 * 86_400_000;
+    if (fasterExpiry < currentTtl) {
+      entry.ttl = new Date(fasterExpiry).toISOString();
+    }
+    return;
+  }
+
+  const retrievalSuccessRate =
+    entry.retrievalCount > 0
+      ? entry.retrievalSuccessCount / entry.retrievalCount
+      : 0.5;
+
+  let newImportance = entry.importance;
+
+  if (accessRate > 0.5 && retrievalSuccessRate > 0.6) {
+    newImportance = Math.min(10, entry.importance + 0.2);
+  } else if (accessRate < 0.05 && retrievalSuccessRate < 0.2) {
+    newImportance = Math.max(1, entry.importance - 0.3);
+  } else if (retrievalSuccessRate > 0.8) {
+    newImportance = Math.min(10, entry.importance + 0.1);
+  } else if (retrievalSuccessRate < 0.1 && entry.retrievalCount > 3) {
+    newImportance = Math.max(1, entry.importance - 0.5);
+  }
+
+  if (newImportance !== entry.importance) {
+    entry.importance = Math.round(newImportance * 10) / 10;
+    const newTtlDays = computeAdaptiveTTL(entry.importance, entry.accessCount);
+    entry.ttl = new Date(Date.now() + newTtlDays * 86_400_000).toISOString();
+  }
+}
+
+export async function store(
+  content: string,
+  type: MemoryType,
+  importance: number,
+  project: string,
+  tags: string[],
+  ttlDays?: number,
+): Promise<string> {
+  const embedding = await embed(content);
+  const ttlDaysFinal = ttlDays ?? computeAdaptiveTTL(importance, 1);
+  const entryId = genId(content + type);
+
+  return withWriteLock(async () => {
+    const entries = load();
+
+    const exact = entries.find(e => e.content === content && e.type === type);
+    if (exact) {
+      exact.lastAccessed = new Date().toISOString();
+      exact.accessCount++;
+      exact.importance = Math.max(exact.importance, importance);
+      if (tags.length) exact.tags = [...new Set([...exact.tags, ...tags])];
+      if (exact.deprecated) exact.deprecated = false;
+      recalibrateNow(exact);
+      save(entries);
+      return exact.id;
+    }
+
+    for (const existing of entries) {
+      if (existing.project === project && cosineSimilarity(embedding, existing.embedding) > 0.90) {
+        existing.lastAccessed = new Date().toISOString();
+        existing.accessCount++;
+        existing.importance = Math.max(existing.importance, importance);
+        if (tags.length) existing.tags = [...new Set([...existing.tags, ...tags])];
+        if (existing.deprecated) existing.deprecated = false;
+        recalibrateNow(existing);
+        save(entries);
+        return existing.id;
+      }
+    }
+
+    const ttl = new Date(Date.now() + ttlDaysFinal * 86_400_000).toISOString();
+    const entry: MemoryEntry = {
+      id: entryId,
+      content,
+      type,
+      importance,
+      project,
+      embedding,
+      tags,
+      created: new Date().toISOString(),
+      lastAccessed: new Date().toISOString(),
+      accessCount: 1,
+      retrievalCount: 0,
+      retrievalSuccessCount: 0,
+      ttl,
+      deprecated: false,
+    };
+
+    recalibrateNow(entry);
+    entries.push(entry);
+    save(entries);
+    return entry.id;
+  });
+}
+
+export async function search(
+  query: string,
+  k = 5,
+  project?: string,
+  recordSuccess = false,
+): Promise<SearchResult[]> {
+  const qv = await embed(query);
+  const entries = load();
+  if (!entries.length) return [];
+
+  const scored: SearchResult[] = [];
+
+  for (const entry of entries) {
+    if (entry.deprecated) continue;
+    if (project && entry.project !== project && entry.project !== "global") continue;
+    const semanticScore = cosineSimilarity(qv, entry.embedding);
+    const finalScore = multiSignalScore(semanticScore, query, entry);
+    scored.push({ entry, score: finalScore });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const MIN_SCORE = 0.55;
+  const aboveThreshold = scored.filter(s => s.score >= MIN_SCORE);
+  const top = aboveThreshold.slice(0, k);
+  const secondTier = scored.filter(s => s.score >= MIN_SCORE * 0.7).slice(k, k + 5);
+
+  withWriteLock(() => {
+    const fresh = load();
+    const now = new Date().toISOString();
+    for (const { entry } of top) {
+      const freshEntry = fresh.find(e => e.id === entry.id);
+      if (freshEntry) {
+        freshEntry.lastAccessed = now;
+        freshEntry.accessCount++;
+        freshEntry.retrievalCount++;
+        if (recordSuccess) freshEntry.retrievalSuccessCount++;
+        recalibrateNow(freshEntry);
+      }
+    }
+    for (const { entry } of secondTier) {
+      const freshEntry = fresh.find(e => e.id === entry.id);
+      if (freshEntry) freshEntry.retrievalCount++;
+    }
+    save(fresh);
+  });
+
+  return top;
+}
+
+export async function consolidate(): Promise<{ merged: number; pruned: number; refreshed: number }> {
+  return withWriteLock(() => {
+    const entries = load();
+    const now = Date.now();
+    let merged = 0;
+    let pruned = 0;
+    let refreshed = 0;
+
+    const active = entries.filter(e => !e.deprecated);
+
+    for (let i = 0; i < active.length; i++) {
+      for (let j = i + 1; j < active.length; j++) {
+        const sim = cosineSimilarity(active[i].embedding, active[j].embedding);
+        if (sim > 0.88) {
+          const keeper = active[i].importance >= active[j].importance ? active[i] : active[j];
+          const dropper = keeper === active[i] ? active[j] : active[i];
+          keeper.tags = [...new Set([...keeper.tags, ...dropper.tags])];
+          keeper.accessCount += dropper.accessCount;
+          keeper.retrievalCount += dropper.retrievalCount;
+          keeper.retrievalSuccessCount += dropper.retrievalSuccessCount;
+          keeper.importance = Math.max(keeper.importance, dropper.importance);
+          keeper.lastAccessed = new Date(Math.max(
+            new Date(keeper.lastAccessed).getTime(),
+            new Date(dropper.lastAccessed).getTime(),
+          )).toISOString();
+          dropper.deprecated = true;
+          dropper.correctedById = keeper.id;
+          dropper.ttl = new Date(now + 7 * 86_400_000).toISOString();
+          merged++;
+        }
+      }
+    }
+
+    for (const entry of entries) {
+      if (entry.deprecated) continue;
+      const ttlTime = new Date(entry.ttl).getTime();
+      if (ttlTime < now) {
+        if (entry.importance < 3 || entry.accessCount < 2) {
+          entry.deprecated = true;
+          entry.ttl = new Date(now + 7 * 86_400_000).toISOString();
+          pruned++;
+        } else {
+          const newDays = computeAdaptiveTTL(entry.importance, entry.accessCount);
+          entry.ttl = new Date(now + newDays * 86_400_000).toISOString();
+          refreshed++;
+        }
+      }
+    }
+
+    if (merged > 0 || pruned > 0 || refreshed > 0) save(entries);
+    return { merged, pruned, refreshed };
+  });
+}
+
+export function stats(): MemoryStats {
+  const entries = load();
+  const byType: Record<string, number> = {};
+  const byProject: Record<string, number> = {};
+  let totalImp = 0;
+  let oldest = entries[0]?.created || new Date().toISOString();
+  let newest = entries[0]?.created || new Date().toISOString();
+  let deprecatedCount = 0;
+  let totalRetrievalSuccess = 0;
+  let totalRetrievalCount = 0;
+
+  for (const e of entries) {
+    if (e.deprecated) {
+      deprecatedCount++;
+      continue;
+    }
+    byType[e.type] = (byType[e.type] || 0) + 1;
+    byProject[e.project] = (byProject[e.project] || 0) + 1;
+    totalImp += e.importance;
+    if (e.created < oldest) oldest = e.created;
+    if (e.created > newest) newest = e.created;
+    totalRetrievalCount += e.retrievalCount;
+    totalRetrievalSuccess += e.retrievalSuccessCount;
+  }
+
+  let epCount = 0;
+  if (fs.existsSync(EPISODES_DIR)) {
+    try { epCount = fs.readdirSync(EPISODES_DIR).filter(f => f.endsWith(".md")).length; } catch {}
+  }
+
+  return {
+    totalEntries: entries.length,
+    byType,
+    byProject,
+    oldestEntry: oldest,
+    newestEntry: newest,
+    averageImportance: entries.length ? +(totalImp / entries.length).toFixed(1) : 0,
+    totalEpisodes: epCount,
+    deprecatedCount,
+    avgRetrievalSuccess: totalRetrievalCount > 0 ? +(totalRetrievalSuccess / totalRetrievalCount).toFixed(2) : 0,
+  };
+}
+
+export async function remove(id: string): Promise<boolean> {
+  return withWriteLock(() => {
+    const entries = load();
+    const idx = entries.findIndex(e => e.id === id);
+    if (idx === -1) return false;
+    entries.splice(idx, 1);
+    save(entries);
+    return true;
+  });
+}
+
+export function getRecent(k = 5): MemoryEntry[] {
+  return load()
+    .filter(e => !e.deprecated)
+    .sort((a, b) => new Date(b.lastAccessed).getTime() - new Date(a.lastAccessed).getTime())
+    .slice(0, k);
+}
+
+export function getTopByPriority(k = 5, project?: string): MemoryEntry[] {
+  const entries = load().filter(e => !e.deprecated);
+  const now = Date.now();
+
+  const scored = entries.map(e => {
+    const recency = computeRecencyMultiplier(e.lastAccessed);
+    const importance = e.importance / 10;
+    const accessFreq = e.accessCount / Math.max(1, (now - new Date(e.created).getTime()) / 86_400_000);
+    const freqScore = Math.min(1, accessFreq / 2);
+    const priority = importance * 0.4 + recency * 0.3 + freqScore * 0.3;
+    return { entry: e, score: priority };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, k).map(s => s.entry);
+}
+
+export async function markContradicted(oldContent: string, newEntryId: string): Promise<void> {
+  return withWriteLock(() => {
+    const entries = load();
+    const match = entries.find(e => e.content === oldContent);
+    if (match) {
+      match.deprecated = true;
+      match.correctedById = newEntryId;
+      match.ttl = new Date(Date.now() + 7 * 86_400_000).toISOString();
+      save(entries);
+    }
+  });
+}
+
+export async function searchExisting(query: string): Promise<MemoryEntry | null> {
+  const entries = load().filter(e => !e.deprecated);
+  if (!entries.length) return null;
+  const qv = await embed(query);
+  let best = null;
+  let bestScore = 0;
+  for (const entry of entries) {
+    const sim = cosineSimilarity(qv, entry.embedding);
+    if (sim > bestScore) {
+      bestScore = sim;
+      best = entry;
+    }
+    if (bestScore > 0.98) break;
+  }
+  return bestScore > 0.85 ? best : null;
+}

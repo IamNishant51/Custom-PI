@@ -10,7 +10,7 @@
     "update-and-publish": "node scripts/update-and-publish.js"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "latest"
+    "@earendil-works/pi-coding-agent": "0.77.0"
   },
   "keywords": [
     "pi",

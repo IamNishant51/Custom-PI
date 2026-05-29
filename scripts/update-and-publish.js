@@ -1,9 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
 
-const HOME = process.env.HOME || '/home/nishant';
-const PI_DIR = path.join(HOME, '.pi', 'agent');
+const PI_DIR = path.join(os.homedir(), '.pi', 'agent');
 const PACK_DIR = path.resolve(__dirname, '..');
 
 console.log('🔄 Syncing local configurations to package assets...');
@@ -16,9 +16,12 @@ const filesToSync = [
   { src: 'agents/builder.md', dest: 'agents/builder.md' },
   { src: 'agents/researcher.md', dest: 'agents/researcher.md' },
   { src: 'agents/reviewer.md', dest: 'agents/reviewer.md' },
-  { src: 'agents/operator.md', dest: 'agents/operator.md' },
   { src: 'extensions/subagents/package.json', dest: 'extensions/subagents/package.json' },
-  { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' }
+  { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' },
+  { src: 'extensions/subagents/src/memory-types.ts', dest: 'extensions/subagents/src/memory-types.ts' },
+  { src: 'extensions/subagents/src/memory-embedding.ts', dest: 'extensions/subagents/src/memory-embedding.ts' },
+  { src: 'extensions/subagents/src/memory-store.ts', dest: 'extensions/subagents/src/memory-store.ts' },
+  { src: 'extensions/subagents/src/memory-retrieval.ts', dest: 'extensions/subagents/src/memory-retrieval.ts' }
 ];
 
 const assetDirs = [

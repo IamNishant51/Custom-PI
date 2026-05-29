@@ -2,10 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn, execSync } = require('child_process');
 
-const HOME = process.env.HOME || process.env.USERPROFILE || '/home/nishant';
-const PI_DIR = path.join(HOME, '.pi', 'agent');
+const PI_DIR = path.join(os.homedir(), '.pi', 'agent');
 
 const args = process.argv.slice(2);
 
@@ -74,9 +74,13 @@ const filesToCopy = [
   { src: 'agents/builder.md', dest: 'agents/builder.md' },
   { src: 'agents/researcher.md', dest: 'agents/researcher.md' },
   { src: 'agents/reviewer.md', dest: 'agents/reviewer.md' },
-  { src: 'agents/operator.md', dest: 'agents/operator.md' },
+  // operator.md removed — not needed
   { src: 'extensions/subagents/package.json', dest: 'extensions/subagents/package.json' },
-  { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' }
+  { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' },
+  { src: 'extensions/subagents/src/memory-types.ts', dest: 'extensions/subagents/src/memory-types.ts' },
+  { src: 'extensions/subagents/src/memory-embedding.ts', dest: 'extensions/subagents/src/memory-embedding.ts' },
+  { src: 'extensions/subagents/src/memory-store.ts', dest: 'extensions/subagents/src/memory-store.ts' },
+  { src: 'extensions/subagents/src/memory-retrieval.ts', dest: 'extensions/subagents/src/memory-retrieval.ts' }
 ];
 
 for (const f of filesToCopy) {
@@ -106,7 +110,6 @@ console.log('\x1b[32m✅ Configuration sync complete.\x1b[0m\n');
 
 // Render a gorgeous high-fidelity startup dashboard
 console.clear();
-const os = require('os');
 const cpuModel = os.cpus()[0]?.model || 'Unknown';
 const nodeVersion = process.version;
 const platform = process.platform + '-' + os.arch();
@@ -135,8 +138,8 @@ console.log("\x1b[38;5;135m┌────────────────�
 printBoxLine(`  \x1b[38;5;51mCUSTOM-PI ADVANCED DEVELOPER CONSOLE\x1b[0m \x1b[38;5;121mv${customPiVersion}\x1b[0m`);
 console.log(`\x1b[38;5;135m├────────────────────────────────────────────────────────────────────────┤\x1b[0m`);
 printBoxLine(`  \x1b[38;5;226mEngine:\x1b[0m custom-pi core      \x1b[38;5;226mNode.js:\x1b[0m ${nodeVersion.padEnd(8)}     \x1b[38;5;226mPlatform:\x1b[0m ${platform}`);
-printBoxLine(`  \x1b[38;5;226mVault:\x1b[0m ~/.pi/agent/obsidian_memory        \x1b[38;5;226mTheme:\x1b[0m custom-pi-quantum`);
-printBoxLine(`  \x1b[38;5;226mSwarm Status:\x1b[0m online (builder/researcher/reviewer/operator)`);
+printBoxLine(`  \x1b[38;5;226mMemory:\x1b[0m ~/.pi/agent/memory/semantic.json  \x1b[38;5;226mTheme:\x1b[0m custom-pi-quantum`);
+printBoxLine(`  \x1b[38;5;226mSwarm Status:\x1b[0m online (builder/researcher/reviewer)`);
 printBoxLine(`  \x1b[38;5;226mHardware:\x1b[0m ${cpuModel.slice(0, 56)}`);
 console.log("\x1b[38;5;135m└────────────────────────────────────────────────────────────────────────┘\x1b[0m\n");
 console.log('\x1b[38;5;121m⚡ Starting custom-pi core console...\x1b[0m\n');
