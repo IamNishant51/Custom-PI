@@ -1,50 +1,77 @@
 # custom-pi
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/IamNishant51/Custom-PI/main/pi-logo-on-dark.svg" alt="custom-pi Logo" width="160" />
+  <img src="custom-pi-logo.svg" alt="CUSTOM-PI Logo" width="100%" />
 </p>
 
 <p align="center">
-  A highly-optimized and aesthetically premium wrapper for the core Pi Coding Agent.
+  <b>An ultra-premium, responsive wrapper and extension suite for the core Pi Coding Agent.</b>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/custom-pi"><img src="https://img.shields.io/npm/v/custom-pi.svg?style=flat-flat&color=A9B665" alt="NPM Version" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-7DAEA3.svg?style=flat-flat" alt="License: MIT" /></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-C9A0DC.svg?style=flat-flat" alt="Node Version" /></a>
+  <a href="https://www.npmjs.com/package/custom-pi"><img src="https://img.shields.io/npm/v/custom-pi.svg?style=for-the-badge&color=ff007f&logo=npm" alt="NPM Version" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-a122ff.svg?style=for-the-badge" alt="License: MIT" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-00f0ff.svg?style=for-the-badge&logo=node.js" alt="Node Version" /></a>
+  <a href="https://obsidian.md"><img src="https://img.shields.io/badge/RAG-Obsidian-00ffcc.svg?style=for-the-badge&logo=obsidian" alt="RAG Link" /></a>
 </p>
 
 ---
 
-custom-pi is an enhanced, highly-optimized, and aesthetically premium wrapper for the core Pi Coding Agent (@earendil-works/pi-coding-agent).
+## ⚡ Overview
 
-It supercharges the autonomous software engineering experience by integrating a parallel sub-agent swarm, advanced prompt-injection protection, real-time TUI progress dashboards, and a session-specific task state memory engine.
-
----
-
-## Key Enhancements
-
-### 1. Parallel Sub-Agent Swarm (Multi-Agent Swarm)
-Delegate complex multi-file, research, and testing tasks to a team of specialized background sub-agents:
-* **builder**: Full-stack Next.js developer expert equipped to write error-free backend APIs and responsive frontends.
-* **researcher**: Tracing expert that explores directory trees, reads files, and analyzes logic flows across codebases.
-* **reviewer**: A critical design and code auditor focusing on security (OWASP), performance bottlenecks, WCAG accessibility, and architectural consistency.
-* **Dynamic Spawn:** Autonomously create specialized sub-agents on the fly using /create_subagent.
-
-### 2. Input Sanitization & Hijack Protection (Anti-Pollution)
-Prevents prompt-injection and instruction-hijacking. When the agent reads design specifications or guidelines (e.g. Pi_DESIGN.md) containing imperative statements ("Do X", "Do not do Y"), the prompt protection engine isolates the contents as passive data. The agent is strictly locked to your conversation goals and never gets distracted.
-
-### 3. Session Task State Memory (RAG-Optimized)
-Keeps the agent focused on long-running multi-step tasks. Appends a structured, temporary task state (goals, completed items, active task, pending items) directly into the agent prompt context. Use /memory to view current state and /memory-reset to clear it.
-
-### 4. OOM-Free Animated TUI Dashboards
-Includes a beautiful, rounded box-border TUI panel system styled after modern CLI designs. Features Braille animation spinners, dot pulses, and cycling reasoning verbs. The engine utilizes key-based Map invalidations, guaranteeing a zero-leak, OOM-free rendering loop during parallel execution.
+`custom-pi` wraps the core Pi Coding Agent (`@earendil-works/pi-coding-agent`) with advanced multi-agent orchestrations, real-time telemetry HUD dashboards, long-term memory systems, and anti-hijack guardrails. It is designed to look, feel, and function like an enterprise command center.
 
 ---
 
-## Installation
+## 🛠️ Key Enhancements
 
-To install custom-pi and synchronize all custom extensions and templates automatically:
+### 1. Parallel Sub-Agent Swarm
+Delegate complex engineering, auditing, and research tasks to specialized background agents running concurrently:
+
+| Sub-Agent | Core Specialization & Tools |
+| :--- | :--- |
+| **`builder`** | Expert Next.js developer equipped to write error-free APIs and frontends. |
+| **`researcher`** | Code explorer that traverses directory trees, reads logs, and tracks logic flows. |
+| **`reviewer`** | Critical auditor verifying security (OWASP), performance, and WCAG accessibility. |
+| **`operator`** | OS operator capable of launching local GUI applications, opening web tools, and managing files. |
+
+> [!TIP]
+> You can dynamically generate specialized sub-agents on the fly using `/create_subagent` command.
+
+```mermaid
+graph TD
+    User([User Prompt]) --> CustomPI[custom-pi Core CLI]
+    CustomPI --> HUD[Quantum HUD Status Dashboard]
+    CustomPI --> Swarm[Sub-Agent Swarm Manager]
+    Swarm --> Builder[Builder Sub-Agent]
+    Swarm --> Researcher[Researcher Sub-Agent]
+    Swarm --> Reviewer[Reviewer Sub-Agent]
+    Swarm --> Operator[Operator Sub-Agent]
+    
+    Builder & Researcher & Reviewer & Operator --> Tools[Local & Web Tools]
+    Tools --> RAG[Obsidian RAG Memory]
+    Tools --> Filesystem[Local Filesystem]
+    Tools --> Web[Web Search & Fetch]
+```
+
+### 2. Quantum Telemetry HUD (Heads-Up Display)
+Overhauls the TUI to render a real-time system stats dashboard at the top of your editor. 
+* Displays CPU load, RAM usage, and active RAG connection status.
+* Live-monitors active sub-agents, showing their current turns, elapsed execution times, and called tools in real-time.
+* Styled with cyberpunk double-line unicode borders (`╔ ═ ╗`) and responsive columns that adapt automatically to your terminal width.
+
+### 3. Session Memory & RAG Integration
+* **Task State Memory**: Tracks your active goals, completed checklists, and current subtasks. Context is updated in the background and injected directly into system prompts, eliminating hallucinations after context compactions.
+* **Obsidian RAG**: Auto-detects local Obsidian vaults and links memory directly to `Agent_Memory.md` to persist user facts, configurations, and decisions across sessions.
+
+### 4. Input Sanitization & Anti-Pollution
+Protects the LLM against prompt-injection and instruction-hijacking. When reading files containing design guides or strict rules (e.g. `Pi_DESIGN.md`), `custom-pi` treats them as passive data objects, locking the agent's focus exclusively to your goals.
+
+---
+
+## 📦 Installation
+
+To install `custom-pi` and auto-sync configurations globally:
 
 ```bash
 npm install -g custom-pi
@@ -52,55 +79,53 @@ npm install -g custom-pi
 
 ---
 
-## Usage
+## 🚀 Usage
 
-Launch the customized agent in interactive mode from any project directory:
+Start the agent in interactive mode from any workspace directory:
 
 ```bash
 custom-pi
 ```
 
-You can pass standard Pi options and initial prompts directly:
-
-```bash
-# Non-interactive file review
-custom-pi -p "use reviewer subagent to review the file on my Desktop named Pi_DESIGN.md"
-
-# Run with a specific model cycling setting
-custom-pi --models "gemini/gemini-2.5-flash,gemini/gemini-2.5-pro"
-```
-
----
-
-## Commands
-
-Execute these special slash commands inside the active session chat:
-
-* /memory - Renders the current session's active, completed, and pending subtask list directly inside the terminal console.
-* /memory-reset - Clears the active session's task state memory file.
-* /list-subagents - Lists all currently loaded specialized sub-agents and their allowed tool configurations.
+### Command Examples:
+* **Interactive Mode**: Starts the terminal with the Quantum HUD dashboard loaded.
+* **Non-Interactive Tasks**: 
+  ```bash
+  custom-pi -p "review /Desktop/Pi_DESIGN.md using the reviewer agent"
+  ```
+* **Specific Model Chains**:
+  ```bash
+  custom-pi --models "gemini/gemini-2.5-flash,gemini/gemini-2.5-pro"
+  ```
 
 ---
 
-## Synchronizing & Backing Up Configurations
+## 💬 Slash Commands
 
-To update the NPM package whenever you modify your settings, custom prompt (SYSTEM.md), subagents, or extensions locally:
+Execute these commands inside the chat console:
 
-1. Open a terminal inside the package directory:
+* `/memory` — Displays active task state memory (current task, pending checklist, goal).
+* `/memory-reset` — Resets active session state tracking.
+* `/list_subagents` — Shows all active sub-agents and their configurations.
+
+---
+
+## 🔄 Configuration Sync
+
+If you customize settings, system instructions, or sub-agents locally:
+
+1. **Staging**: Sync local configuration directories to assets:
    ```bash
    cd ~/Desktop/pi-custom-pack
-   ```
-2. Run the update script. It will copy your active local ~/.pi/agent/ configuration, bump the patch version, and publish it to the npm registry:
-   ```bash
    npm run update-and-publish
    ```
-3. To update your devices to the latest sync, run:
+2. **Global Update**: Update all devices to the latest published build:
    ```bash
    npm update -g custom-pi
    ```
 
 ---
 
-## License
+## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Licensed under the [MIT License](LICENSE).

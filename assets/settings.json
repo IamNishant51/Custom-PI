@@ -12,7 +12,7 @@
   "terminal": {
     "showTerminalProgress": true
   },
-  "theme": "claude-code",
+  "theme": "custom-pi-quantum",
   "compaction": {
     "enabled": true,
     "reserveTokens": 1024,

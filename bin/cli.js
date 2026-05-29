@@ -52,6 +52,7 @@ console.log('\x1b[36m🚀 Synchronizing custom Pi configurations...\x1b[0m');
 const destDirs = [
   PI_DIR,
   path.join(PI_DIR, 'agents'),
+  path.join(PI_DIR, 'themes'),
   path.join(PI_DIR, 'extensions'),
   path.join(PI_DIR, 'extensions', 'subagents'),
   path.join(PI_DIR, 'extensions', 'subagents', 'src')
@@ -69,6 +70,7 @@ const filesToCopy = [
   { src: 'SYSTEM.md', dest: 'SYSTEM.md' },
   { src: 'settings.json', dest: 'settings.json' },
   { src: 'models.json', dest: 'models.json' },
+  { src: 'themes/custom-pi-quantum.json', dest: 'themes/custom-pi-quantum.json' },
   { src: 'agents/builder.md', dest: 'agents/builder.md' },
   { src: 'agents/researcher.md', dest: 'agents/researcher.md' },
   { src: 'agents/reviewer.md', dest: 'agents/reviewer.md' },
