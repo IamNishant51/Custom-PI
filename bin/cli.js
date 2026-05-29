@@ -82,6 +82,10 @@ const filesToCopy = [
 for (const f of filesToCopy) {
   const srcPath = path.join(assetsDir, f.src);
   const destPath = path.join(PI_DIR, f.dest);
+  const destParent = path.dirname(destPath);
+  if (!fs.existsSync(destParent)) {
+    fs.mkdirSync(destParent, { recursive: true });
+  }
   if (fs.existsSync(srcPath)) {
     fs.copyFileSync(srcPath, destPath);
   }
@@ -98,7 +102,44 @@ if (fs.existsSync(path.join(extDir, 'package.json')) && !fs.existsSync(path.join
   }
 }
 
-console.log('\x1b[32m✅ Configuration sync complete. Starting Pi...\x1b[0m\n');
+console.log('\x1b[32m✅ Configuration sync complete.\x1b[0m\n');
+
+// Render a gorgeous high-fidelity startup dashboard
+console.clear();
+const os = require('os');
+const cpuModel = os.cpus()[0]?.model || 'Unknown';
+const nodeVersion = process.version;
+const platform = process.platform + '-' + os.arch();
+
+const banner = [
+  "\x1b[38;5;198m  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗\x1b[0m",
+  "\x1b[38;5;201m ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║\x1b[0m",
+  "\x1b[38;5;135m ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║\x1b[0m",
+  "\x1b[38;5;57m ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║\x1b[0m",
+  "\x1b[38;5;51m ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║\x1b[0m",
+  "\x1b[38;5;45m  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝\x1b[0m",
+].join("\n");
+
+console.log(banner);
+
+const innerWidth = 72;
+function printBoxLine(content) {
+  const stripAnsi = (str) => str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  const visibleLen = stripAnsi(content).length;
+  const paddingNeeded = innerWidth - visibleLen;
+  const padding = ' '.repeat(Math.max(0, paddingNeeded));
+  console.log(`\x1b[38;5;135m│\x1b[0m${content}${padding}\x1b[38;5;135m│\x1b[0m`);
+}
+
+console.log("\x1b[38;5;135m┌────────────────────────────────────────────────────────────────────────┐\x1b[0m");
+printBoxLine(`  \x1b[38;5;51mCUSTOM-PI ADVANCED DEVELOPER CONSOLE\x1b[0m \x1b[38;5;121mv${customPiVersion}\x1b[0m`);
+console.log(`\x1b[38;5;135m├────────────────────────────────────────────────────────────────────────┤\x1b[0m`);
+printBoxLine(`  \x1b[38;5;226mEngine:\x1b[0m custom-pi core      \x1b[38;5;226mNode.js:\x1b[0m ${nodeVersion.padEnd(8)}     \x1b[38;5;226mPlatform:\x1b[0m ${platform}`);
+printBoxLine(`  \x1b[38;5;226mVault:\x1b[0m ~/.pi/agent/obsidian_memory        \x1b[38;5;226mTheme:\x1b[0m custom-pi-quantum`);
+printBoxLine(`  \x1b[38;5;226mSwarm Status:\x1b[0m online (builder/researcher/reviewer/operator)`);
+printBoxLine(`  \x1b[38;5;226mHardware:\x1b[0m ${cpuModel.slice(0, 56)}`);
+console.log("\x1b[38;5;135m└────────────────────────────────────────────────────────────────────────┘\x1b[0m\n");
+console.log('\x1b[38;5;121m⚡ Starting custom-pi core console...\x1b[0m\n');
 
 // Spawn the globally installed 'pi' binary, forwarding args and pipes without deprecation shell warning on Unix
 const piProcess = spawn('pi', args, {

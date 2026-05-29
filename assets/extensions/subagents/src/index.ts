@@ -7,6 +7,7 @@ import { execSync } from "node:child_process";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
 import chalk from "chalk";
+import os from "node:os";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  TYPE DEFINITIONS
@@ -43,26 +44,26 @@ interface SubAgentProgress {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const C = {
-  orange:     "#D7995F",
-  amber:      "#E5A366",
-  coral:      "#E06C75",
-  warmRed:    "#EA6962",
-  sage:       "#A9B665",
-  teal:       "#7DAEA3",
-  lavender:   "#C9A0DC",
-  sky:        "#89B482",
-  sand:       "#D4BE98",
-  cream:      "#DDC7A1",
-  dusty:      "#665C54",
-  stone:      "#3C3836",
-  slate:      "#504945",
-  night:      "#1A1A1A",
-  charcoal:   "#222020",
-  deepBrown:  "#282424",
-  warmBlack:  "#1D2021",
-  forestTint: "#1D2D2A",
-  emberTint:  "#2D1F1F",
-  mutedText:  "#7C6F64",
+  orange:     "#ff007f", // Neon pink (accent)
+  amber:      "#ffd700", // Neon yellow (warning)
+  coral:      "#ff3366", // Bright red-pink (error)
+  warmRed:    "#ff3366", // Bright red-pink (error)
+  sage:       "#00ffcc", // Mint green (success)
+  teal:       "#00f0ff", // Neon cyan (accent)
+  lavender:   "#a122ff", // Vivid purple (accent)
+  sky:        "#00ffcc", // Mint green (success)
+  sand:       "#c5cbd3", // Off-white text
+  cream:      "#e2e8f0", // White text
+  dusty:      "#7a6b90", // Muted purple text
+  stone:      "#231834", // Dim border
+  slate:      "#4c3a60", // Muted border
+  night:      "#08060d", // Dark background
+  charcoal:   "#150b24", // User message bg
+  deepBrown:  "#1d102e", // Custom message bg
+  warmBlack:  "#0e0817", // Tool pending bg
+  forestTint: "#081d19", // Tool success bg
+  emberTint:  "#210912", // Tool error bg
+  mutedText:  "#7a6b90", // Muted purple text
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -136,9 +137,9 @@ function getStatusVerb(): string {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const BOX = {
-  tl: "╭", tr: "╮", bl: "╰", br: "╯",
-  h: "─", v: "│",
-  ltee: "├", rtee: "┤",
+  tl: "╔", tr: "╗", bl: "╚", br: "╝",
+  h: "═", v: "║",
+  ltee: "╠", rtee: "╣",
   // Inner box (for nested panels in parallel view)
   itl: "┌", itr: "┐", ibl: "└", ibr: "┘",
 };
@@ -194,6 +195,35 @@ function innerBoxLine(content: string, width: number, colorFn: (s: string) => st
 
 function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]|\x1B\].*?\x07|\x1B\[.*?m/g, "");
+}
+
+function truncateToWidth(str: string, width: number): string {
+  if (stripAnsi(str).length <= width) return str;
+
+  let result = "";
+  let visibleLen = 0;
+  let inAnsi = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === "\x1B") {
+      inAnsi = true;
+      result += char;
+    } else if (inAnsi) {
+      result += char;
+      if (char.match(/[a-zA-Z]/)) {
+        inAnsi = false;
+      }
+    } else {
+      if (visibleLen < width) {
+        result += char;
+        visibleLen++;
+      } else {
+        break;
+      }
+    }
+  }
+  return result + "\x1B[0m"; // Reset formatting at end
 }
 
 function elapsed(startTime: number, endTime?: number): string {
@@ -786,49 +816,119 @@ class SubAgentListCard implements Component {
 }
 
 /**
- * Active Sub-Agent Widget
- * Persistent widget shown above the editor when agents are running
+ * Quantum HUD Widget
+ * Persistent real-time dashboard shown above the editor displaying system telemetry,
+ * active project memory/RAG state, and running sub-agents swarm status.
  */
-class SubAgentWidget implements Component {
-  dispose?: () => void;
+class QuantumHUDWidget implements Component {
+  private timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor() {}
+  constructor(private ctx: any) {
+    // Live update telemetry every 2 seconds
+    this.timer = setInterval(() => {
+      try {
+        this.ctx.invalidate();
+      } catch (e) {}
+    }, 2000);
+  }
+
+  dispose() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
 
   invalidate() {}
 
   render(width: number): string[] {
+    const w = Math.min(width, 95);
+    const borderColor = (s: string) => chalk.hex(C.slate)(s);
+    const lines: string[] = [];
+
+    // System Stats
+    const memTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
+    const memFree = (os.freemem() / 1024 / 1024 / 1024).toFixed(1);
+    const memUsed = ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(1);
+    const memPercent = (((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(0);
+    const cpuLoad = os.loadavg()[0].toFixed(1);
+
+    // Active subagents list
     const running = Array.from(activeTrackers.values()).filter(
       t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
     );
 
-    if (running.length === 0) return [];
+    // Dynamic responsive display elements based on terminal width w
+    let label = "❖ CUSTOM-PI QUANTUM HUD";
+    let cpu = `CPU: ${cpuLoad}L`;
+    let ram = `RAM: ${memPercent}% (${memUsed}G/${memTotal}G)`;
+    
+    const memoryFile = path.join(process.env.HOME || "/home/nishant", ".pi/agent/obsidian_memory/Agent_Memory.md");
+    const vaultLinked = fs.existsSync(memoryFile);
+    let rag = vaultLinked ? chalk.hex(C.teal)("[ RAG: Linked ]") : chalk.hex(C.dusty)("[ RAG: Offline ]");
+    
+    let swarm = running.length > 0
+      ? chalk.hex(C.orange)(`[ Swarm: ${running.length} active ]`)
+      : chalk.hex(C.sage)("[ Swarm: Idle ]");
 
-    const w = Math.min(width, 90);
-    const borderColor = (s: string) => chalk.hex(C.stone)(s);
-    const lines: string[] = [];
+    if (w < 90) {
+      label = "❖ CUSTOM-PI";
+      ram = `RAM: ${memPercent}%`;
+    }
+    if (w < 70) {
+      cpu = `${cpuLoad}L`;
+      rag = vaultLinked ? chalk.hex(C.teal)("RAG") : "";
+      swarm = running.length > 0 ? chalk.hex(C.orange)(`Swarm:${running.length}`) : "";
+    }
+    if (w < 55) {
+      label = "❖ PI";
+      ram = `${memPercent}%`;
+    }
 
-    const spinner = chalk.hex(C.teal)(getSpinner());
+    const parts = [label, cpu, ram, rag, swarm].filter(Boolean);
+    const rawStatsLine = parts.join(chalk.hex(C.slate)(" │ "));
+    
+    // Truncate to w - 4 to guarantee no overflow
+    const statsLine = truncateToWidth(rawStatsLine, w - 4);
+    const padding = w - 4 - stripAnsi(statsLine).length;
+    const paddedStatsLine = statsLine + " ".repeat(Math.max(0, padding));
+
     lines.push(
-      chalk.hex(C.stone)(BOX.itl + BOX.h + BOX.h) +
-      chalk.hex(C.teal).bold(` ${spinner} Active Agents `) +
-      chalk.hex(C.stone)(BOX.h.repeat(Math.max(0, w - 20)) + BOX.itr)
+      borderColor("╔" + "═".repeat(w - 2) + "╗")
+    );
+    lines.push(
+      borderColor("║") + " " + paddedStatsLine + " " + borderColor("║")
     );
 
-    for (const agent of running) {
-      const spr = chalk.hex(C.amber)(getSpinner());
-      const name = chalk.hex(C.cream).bold(agent.name);
-      const turn = chalk.hex(C.sand)(`Turn ${agent.turn}/${agent.maxTurns}`);
-      const tool = agent.currentTool ? chalk.hex(C.lavender)(agent.currentTool) : chalk.hex(C.dusty)("thinking");
-      const time = chalk.hex(C.dusty)(`${elapsed(agent.startTime)}`);
+    // If there are running subagents, show their telemetry in a sub-section
+    if (running.length > 0) {
+      lines.push(
+        borderColor("╠" + "═".repeat(w - 2) + "╣")
+      );
+      for (const agent of running) {
+        const spr = chalk.hex(C.orange)(getSpinner());
+        const name = chalk.hex(C.cream).bold(agent.name);
+        const turn = chalk.hex(C.amber)(`Turn ${agent.turn}/${agent.maxTurns}`);
+        const tool = agent.currentTool ? chalk.hex(C.lavender)(agent.currentTool) : chalk.hex(C.dusty)("thinking");
+        const time = chalk.hex(C.dusty)(`⏱ ${elapsed(agent.startTime)}`);
 
-      const content = `${spr} ${name}  ${turn}  ${tool}  ${time}`;
-      lines.push(innerBoxLine(content, w, borderColor));
+        // Dynamically compress agent telemetry line on small screens
+        let rawLine = "";
+        if (w < 70) {
+          rawLine = `   ${spr} ${name} ⬡ ${turn} ⬡ ${time}`;
+        } else {
+          rawLine = `   ${spr} ${name} ⬡ ${turn} ⬡ ${tool} ⬡ ${time}`;
+        }
+
+        const agentLine = truncateToWidth(rawLine, w - 4);
+        const linePad = w - 4 - stripAnsi(agentLine).length;
+        lines.push(borderColor("║") + " " + agentLine + " ".repeat(Math.max(0, linePad)) + " " + borderColor("║"));
+      }
     }
 
     lines.push(
-      chalk.hex(C.stone)(BOX.ibl + BOX.h.repeat(Math.max(0, w - 2)) + BOX.ibr)
+      borderColor("╚" + "═".repeat(w - 2) + "╝")
     );
-    lines.push(""); // spacing
 
     return lines;
   }
@@ -1190,7 +1290,6 @@ class SubAgentRuntime {
 `;
 
     const messages = [
-      { role: "system" as const, content: this.config.systemPrompt + subAgentGuardrails, timestamp: Date.now() },
       { role: "user" as const, content: task, timestamp: Date.now() },
     ];
 
@@ -1210,6 +1309,7 @@ class SubAgentRuntime {
       this.ctx.ui.setStatus("subagents", `${getSpinner()} ${this.config.name} (turn ${turnCount}/${MAX_TURNS})`);
 
       const response = await completeSimple(model, {
+        systemPrompt: this.config.systemPrompt + subAgentGuardrails,
         messages: messages as any,
         tools: tools.length > 0 ? tools : undefined,
       }, {
@@ -1293,38 +1393,21 @@ class SubAgentRuntime {
 //  WIDGET MANAGEMENT — Persistent Dashboard
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let widgetInstance: SubAgentWidget | null = null;
-let widgetUpdateTimer: ReturnType<typeof setInterval> | null = null;
+let widgetInstance: QuantumHUDWidget | null = null;
 let activeTuiInstance: any = null;
 
 function setupWidget(ctx: ExtensionContext) {
   if (widgetInstance) return;
 
-  widgetInstance = new SubAgentWidget();
+  widgetInstance = new QuantumHUDWidget(ctx);
 
   const key = "subagent-dashboard-widget";
   const invalidator = () => {
-    const hasActive = Array.from(activeTrackers.values()).some(
-      t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
-    );
-    if (!hasActive) {
-      teardownWidget(ctx);
-    } else if (activeTuiInstance) {
+    if (activeTuiInstance) {
       activeTuiInstance.requestRender();
     }
   };
   activeInvalidators.set(key, invalidator);
-
-  if (!widgetUpdateTimer) {
-    widgetUpdateTimer = setInterval(() => {
-      const hasActive = Array.from(activeTrackers.values()).some(
-        t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
-      );
-      if (!hasActive) {
-        teardownWidget(ctx);
-      }
-    }, 1000);
-  }
 
   ctx.ui.setWidget("subagent-dashboard", (tui: any, _theme: any) => {
     activeTuiInstance = tui;
@@ -1334,12 +1417,11 @@ function setupWidget(ctx: ExtensionContext) {
 
 function teardownWidget(ctx: ExtensionContext) {
   ctx.ui.setWidget("subagent-dashboard", undefined);
-  if (widgetUpdateTimer) {
-    clearInterval(widgetUpdateTimer);
-    widgetUpdateTimer = null;
-  }
   activeInvalidators.delete("subagent-dashboard-widget");
-  widgetInstance = null;
+  if (widgetInstance) {
+    widgetInstance.dispose();
+    widgetInstance = null;
+  }
   activeTuiInstance = null;
 }
 
@@ -1621,7 +1703,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   // Command: Show current session memory
   pi.registerCommand("memory", {
     description: "Display the active session's task memory status.",
-    async handler(ctx, args) {
+    async handler(args, ctx) {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         ctx.ui.notify("No active session file found.", "error");
@@ -1653,15 +1735,15 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         ctx.ui.notify(`Failed to read memory: ${e.message}`, "error");
       }
     },
-    async execute(ctx, args) {
-      return (this as any).handler(ctx, args);
+    async execute(args, ctx) {
+      return (this as any).handler(args, ctx);
     }
   });
 
   // Command: Reset session memory
   pi.registerCommand("memory-reset", {
     description: "Reset the active session's task memory.",
-    async handler(ctx, args) {
+    async handler(args, ctx) {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         ctx.ui.notify("No active session file found.", "error");
@@ -1679,9 +1761,14 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         ctx.ui.notify("No session memory to reset.", "info");
       }
     },
-    async execute(ctx, args) {
-      return (this as any).handler(ctx, args);
+    async execute(args, ctx) {
+      return (this as any).handler(args, ctx);
     }
+  });
+
+  // Event Hook: Setup HUD on session start
+  pi.on("session_start", async (_event, ctx) => {
+    setupWidget(ctx);
   });
 
   // Event Hook: Inject task memory into system prompt
@@ -1829,8 +1916,12 @@ Do not write any other conversational text or explanations. Return only the JSON
       if (parsed && typeof parsed === "object") {
         fs.writeFileSync(stateFile, JSON.stringify(parsed, null, 2), "utf8");
       }
-    } catch (e) {
-      // Fail silently in background
+    } catch (e: any) {
+      // Log error to debug file for senior developer analysis
+      try {
+        const debugLogPath = path.join(process.env.HOME || "/home/nishant", ".pi", "agent", "memory-debug.log");
+        fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] Error: ${e.stack || e.message}\n`, "utf8");
+      } catch (logErr) {}
     } finally {
       isUpdatingMemory = false;
     }
