@@ -25,6 +25,7 @@
           "id": "google/gemma-4-e4b",
           "maxTokens": 32768,
           "name": "Gemma 4 E4B",
+          "input": ["text", "image"],
           "reasoning": false
         }
       ]

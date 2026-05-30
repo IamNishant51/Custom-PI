@@ -37,7 +37,7 @@ function loadModels() {
             provider,
             baseUrl: m.baseUrl || cfg.baseUrl || `http://127.0.0.1:1234/v1`,
             reasoning: !!m.reasoning,
-            input: m.input || ["text"],
+            input: m.input || ["text", "image"],
             cost: m.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             contextWindow: m.contextWindow || 4096,
             maxTokens: m.maxTokens || 2048,
@@ -58,7 +58,7 @@ function makeFallbackModel() {
   return {
     id: "google/gemma-4-e4b", name: "Gemma 4 E4B", provider: "lmstudio",
     api: "openai-completions", baseUrl: "http://127.0.0.1:1234/v1",
-    reasoning: false, input: ["text"],
+    reasoning: false, input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 4096, maxTokens: 2048,
   };
@@ -69,7 +69,7 @@ function normalizeModel(m) {
     id: m.id, name: m.name || m.id,
     api: m.api || "openai-completions", provider: m.provider || "lmstudio",
     baseUrl: m.baseUrl || "http://127.0.0.1:1234/v1",
-    reasoning: !!m.reasoning, input: m.input || ["text"],
+    reasoning: !!m.reasoning, input: m.input || ["text", "image"],
     cost: m.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: m.contextWindow || 4096, maxTokens: m.maxTokens || 2048,
   };
@@ -85,7 +85,8 @@ function resolveModel() {
   const models = loadModels();
   const defaultId = settings.defaultModel || "gemma-4-e4b";
   const found = models.find(m => m.id === defaultId || `${m.provider}/${m.id}` === defaultId);
-  return found || models[0] || { id: defaultId, provider: settings.defaultProvider || "lmstudio", api: "openai-completions" };
+  const resolved = found || models[0] || { id: defaultId, provider: settings.defaultProvider || "lmstudio", api: "openai-completions" };
+  return normalizeModel(resolved);
 }
 
 function getModelAuth(model) {

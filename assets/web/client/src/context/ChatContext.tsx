@@ -73,7 +73,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const sendMessage = useCallback((overrideText?: string, attachments?: any[]) => {
     const text = typeof overrideText === "string" ? overrideText.trim() : input.trim();
-    if (!text || !ws || loading) return;
+    const hasAttachments = attachments && attachments.length > 0;
+    if ((!text && !hasAttachments) || !ws || loading) return;
     setItems(prev => [...prev, {
       id: nextId(),
       type: "user",
