@@ -1,10 +1,11 @@
 {
-  "defaultModel": "qwen3.5:9b",
-  "defaultProvider": "ollama",
+  "defaultModel": "google/gemma-4-e4b",
+  "defaultProvider": "lmstudio",
   "defaultThinkingLevel": "high",
   "editorPaddingX": 6,
   "hideThinkingBlock": false,
-  "lastChangelogVersion": "0.77.0",
+  "collapseChangelog": true,
+  "lastChangelogVersion": "99.99.99",
   "packages": [
     "npm:@ollama/pi-web-search"
   ],
