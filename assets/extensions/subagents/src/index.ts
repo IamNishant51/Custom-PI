@@ -20,6 +20,11 @@ import { initNudgeState, incrementTurn, shouldNudgeMemory, shouldNudgeSkill, res
 import { runMemoryReview, runSkillReview, runPreCompressionFlush } from "./background-review";
 import { startCronJobs, stopCronJobs, isCronRunning } from "./cron-scheduler";
 import { ensureSession, insertMessage, searchSession, closeDb } from "./state-db";
+import {
+  vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
+} from "./secret-vault";
+import { trackCost, getSessionCosts, getCostSummary, getBudgetConfig, setBudgetConfig } from "./cost-tracker";
+import { recordWorkProduct, getWorkProducts, getWorkProductSummary, clearWorkProducts } from "./work-products";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 
@@ -1138,7 +1143,9 @@ class SubAgentRuntime {
         case "read": {
           const filePath = args.path;
           if (!filePath) return "Error: Missing path argument.";
-          return await fs.promises.readFile(this.safeResolve(filePath), "utf8");
+          const result = await fs.promises.readFile(this.safeResolve(filePath), "utf8");
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch {}
+          return result;
         }
         case "write": {
           const filePath = args.path;
@@ -1147,6 +1154,7 @@ class SubAgentRuntime {
           const targetDir = path.dirname(this.safeResolve(filePath));
           await fs.promises.mkdir(targetDir, { recursive: true });
           await fs.promises.writeFile(this.safeResolve(filePath), content, "utf8");
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "create", content.slice(0, 200)); } catch {}
           return `Successfully wrote file: ${filePath}`;
         }
         case "edit": {
@@ -1168,6 +1176,7 @@ class SubAgentRuntime {
           }
           const newContent = currentContent.replace(findText, replaceText);
           await fs.promises.writeFile(fullPath, newContent, "utf8");
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "modify", replaceText.slice(0, 200)); } catch {}
           return `Successfully edited file: ${filePath}`;
         }
         case "ls": {
@@ -1410,6 +1419,16 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
         headers: auth.headers,
         reasoning: this.config.thinking as any || undefined,
       }));
+
+      // Track cost
+      try {
+        const usage = response.usage;
+        const inTokens = usage?.inputTokens || usage?.inputTokens || 0;
+        const outTokens = usage?.outputTokens || usage?.outputTokens || 0;
+        const provider = model.provider || "unknown";
+        const modelId = model.id || "unknown";
+        trackCost(this.trackerId, this.config.name, provider, modelId, inTokens, outTokens);
+      } catch {}
 
       messages.push({
         role: "assistant",
@@ -2073,6 +2092,211 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Secrets Vault Tools — AES-256-GCM encrypted storage
+  // ─────────────────────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "vault_set",
+    label: "Vault Set Secret",
+    description: "Store a secret value (API key, token, password) into the encrypted vault. The vault is encrypted with AES-256-GCM and stored at ~/.pi/agent/.vault/.",
+    parameters: Type.Object({
+      key: Type.String({ description: "Name of the secret (e.g., 'MY_API_KEY')" }),
+      value: Type.String({ description: "The secret value to encrypt and store" }),
+    }),
+    async execute(_id, params, _signal, _update, _context) {
+      try {
+        vaultSet(params.key, params.value);
+        return { content: [{ type: "text", text: `Secret '${params.key}' stored securely in vault.` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to store secret: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "vault_get",
+    label: "Vault Get Secret",
+    description: "Retrieve a secret value from the encrypted vault by its key name.",
+    parameters: Type.Object({
+      key: Type.String({ description: "Name of the secret to retrieve" }),
+    }),
+    async execute(_id, params, _signal, _update, _context) {
+      try {
+        const value = vaultGet(params.key);
+        if (value === null) {
+          return { content: [{ type: "text", text: `Secret '${params.key}' not found in vault.` }], isError: true };
+        }
+        return { content: [{ type: "text", text: value }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to retrieve secret: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "vault_delete",
+    label: "Vault Delete Secret",
+    description: "Delete a secret from the encrypted vault by its key name.",
+    parameters: Type.Object({
+      key: Type.String({ description: "Name of the secret to delete" }),
+    }),
+    async execute(_id, params, _signal, _update, _context) {
+      try {
+        const ok = vaultDelete(params.key);
+        if (ok) {
+          return { content: [{ type: "text", text: `Secret '${params.key}' deleted from vault.` }] };
+        }
+        return { content: [{ type: "text", text: `Secret '${params.key}' not found.` }], isError: true };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to delete secret: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "vault_list",
+    label: "Vault List Secrets",
+    description: "List all stored secret key names in the encrypted vault (values are not shown).",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _update, _context) {
+      try {
+        const keys = vaultList();
+        if (keys.length === 0) {
+          return { content: [{ type: "text", text: "Vault is empty. Use vault_set to store secrets." }] };
+        }
+        return { content: [{ type: "text", text: `Stored secrets:\n${keys.map(k => `  - ${k}`).join("\n")}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to list vault: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "vault_health",
+    label: "Vault Health",
+    description: "Check the encrypted vault's health and status.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _update, _context) {
+      try {
+        const health = vaultHealth();
+        return { content: [{ type: "text", text: `Vault status: ${health.ok ? "healthy" : "unhealthy"}\n${health.message}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Vault check failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Cost Tracking Tools — token budget management
+  // ─────────────────────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "budget_config",
+    label: "Budget Configuration",
+    description: "Get or update the token/cost budget configuration. Set limits to prevent runaway spending. Call without arguments to see current config.",
+    parameters: Type.Object({
+      maxSessionTokens: Type.Optional(Type.Number({ description: "Max tokens per session" })),
+      maxDailyTokens: Type.Optional(Type.Number({ description: "Max tokens per day" })),
+      maxSessionCostUsd: Type.Optional(Type.Number({ description: "Max USD cost per session" })),
+      maxDailyCostUsd: Type.Optional(Type.Number({ description: "Max USD cost per day" })),
+      warningThreshold: Type.Optional(Type.Number({ description: "Warning threshold 0-1 (e.g., 0.8 = warn at 80%)" })),
+    }),
+    async execute(_id, params, _signal, _update, _context) {
+      try {
+        if (params.maxSessionTokens !== undefined || params.maxDailyTokens !== undefined ||
+            params.maxSessionCostUsd !== undefined || params.maxDailyCostUsd !== undefined ||
+            params.warningThreshold !== undefined) {
+          setBudgetConfig({
+            ...(params.maxSessionTokens !== undefined && { maxSessionTokens: params.maxSessionTokens }),
+            ...(params.maxDailyTokens !== undefined && { maxDailyTokens: params.maxDailyTokens }),
+            ...(params.maxSessionCostUsd !== undefined && { maxSessionCostUsd: params.maxSessionCostUsd }),
+            ...(params.maxDailyCostUsd !== undefined && { maxDailyCostUsd: params.maxDailyCostUsd }),
+            ...(params.warningThreshold !== undefined && { warningThreshold: params.warningThreshold }),
+          });
+        }
+        const budget = getBudgetConfig();
+        const lines = [
+          `Budget Configuration:`,
+          `  Max session tokens: ${budget.maxSessionTokens.toLocaleString()}`,
+          `  Max daily tokens: ${budget.maxDailyTokens.toLocaleString()}`,
+          `  Max session cost: $${budget.maxSessionCostUsd?.toFixed(2) || "unlimited"}`,
+          `  Max daily cost: $${budget.maxDailyCostUsd?.toFixed(2) || "unlimited"}`,
+          `  Warning threshold: ${((budget.warningThreshold || 0.8) * 100).toFixed(0)}%`,
+        ];
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Budget config failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "budget_stats",
+    label: "Budget Statistics",
+    description: "Get token and cost statistics across all sessions. Shows total tokens used, total cost in USD, per-session breakdown, and budget status.",
+    parameters: Type.Object({
+      sessionId: Type.Optional(Type.String({ description: "Optional session ID to filter by" })),
+    }),
+    async execute(_id, params, _signal, _update, _context) {
+      try {
+        if (params.sessionId) {
+          const costs = getSessionCosts(params.sessionId);
+          if (costs.length === 0) {
+            return { content: [{ type: "text", text: `No costs recorded for session '${params.sessionId}'.` }] };
+          }
+          const totalTokens = costs.reduce((s, c) => s + c.totalTokens, 0);
+          const totalCost = costs.reduce((s, c) => s + c.costUsd, 0);
+          return { content: [{ type: "text", text: `Session '${params.sessionId}': ${costs.length} API calls, ${totalTokens.toLocaleString()} tokens, $${totalCost.toFixed(6)}` }] };
+        }
+        const summary = getCostSummary();
+        const lines = [
+          `Cost Summary:`,
+          `  Total sessions: ${summary.totalSessions}`,
+          `  Total tokens: ${summary.totalTokens.toLocaleString()}`,
+          `  Total cost: $${summary.totalCostUsd.toFixed(6)}`,
+          `  Today tokens: ${summary.dailyTokens.toLocaleString()}`,
+          `  Today cost: $${summary.dailyCostUsd.toFixed(6)}`,
+        ];
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Budget stats failed: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Work Products Tool — track files created/modified by the agent
+  // ─────────────────────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "work_products",
+    label: "Work Products",
+    description: "List work products (files created, modified, read, or deleted) from the current or a specific session. Shows file paths, actions, agents, and timestamps.",
+    parameters: Type.Object({
+      sessionId: Type.Optional(Type.String({ description: "Optional session ID to filter by" })),
+      summary: Type.Optional(Type.Boolean({ description: "Set to true for a concise summary instead of full list" })),
+    }),
+    async execute(_id, params, _signal, _update, _context) {
+      try {
+        if (params.summary) {
+          const summary = getWorkProductSummary(params.sessionId);
+          return { content: [{ type: "text", text: summary }] };
+        }
+        const products = getWorkProducts(params.sessionId);
+        if (products.length === 0) {
+          return { content: [{ type: "text", text: "No work products recorded." }] };
+        }
+        const lines = products.map((p, i) =>
+          `${i + 1}. [${p.action}] ${p.filePath} — by ${p.agent} (${new Date(p.timestamp).toLocaleString()})`
+        );
+        return { content: [{ type: "text", text: `Work Products (${products.length}):\n${lines.join("\n")}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Failed to get work products: ${e.message}` }], isError: true };
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Current Session Search Tool — prevent AI forgetting in long conversations
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -2299,6 +2523,15 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     if (!embedOk) {
       ctx.ui.notify("Ollama embedding endpoint not reachable. Install ollama and pull nomic-embed-text.", "warning");
     }
+    // Initialize secrets vault from environment
+    try {
+      const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN"];
+      const imported = await vaultImportFromEnv(vaultKeys);
+      if (imported.length > 0) {
+        ctx.ui.notify(`Vault: imported ${imported.length} secrets from environment`, "info");
+      }
+    } catch {}
+
     // Set playful geometric thinking indicator
     const megaFrames = ["◐", "◓", "◑", "◒"];
     ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });

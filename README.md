@@ -177,6 +177,27 @@ Overhauls the TUI to render a real-time system stats dashboard at the top of you
 ### 11. Input Sanitization & Anti-Pollution
 Protects the LLM against prompt-injection and instruction-hijacking. Files containing design guides or strict rules are treated as **passive data objects** — the agent's focus stays locked to your goals.
 
+### 12. 🔐 Secrets Vault (AES-256-GCM)
+An encrypted secrets vault at `~/.pi/agent/.vault/` using AES-256-GCM encryption:
+- **Automatic import** from environment variables on session start (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, etc.)
+- Tools: `vault_set`, `vault_get`, `vault_delete`, `vault_list`, `vault_health`
+- Master key stored at `chmod 600`, vault entries encrypted individually
+- Import/export between vault and environment variables
+
+### 13. 💰 Token Cost Tracker & Budget Controls
+Tracks every API call's token usage and estimated cost across all sessions:
+- Per-model rate table (Anthropic, OpenAI, Google Gemini)
+- Session and daily budget limits with configurable warning thresholds (~80%)
+- Tools: `budget_config` (get/set limits), `budget_stats` (session or global summary)
+- Append-only JSONL log at `~/.pi/agent/costs/session-costs.jsonl`
+
+### 14. 📂 Work Products Tracker
+Records every file the agent creates, reads, modifies, or deletes:
+- Each entry includes: agent name, action, file path, hash, size, task context
+- Filterable by session ID
+- Tools: `work_products` (list or summary view)
+- JSONL log at `~/.pi/agent/work-products/products.jsonl`
+
 ---
 
 ## 📦 Installation
@@ -225,6 +246,9 @@ custom-pi
 - `memory_store` / `memory_search` / `memory_delete` — Semantic embedding memory
 - `memory_write` (add/replace/remove) — Curated MEMORY.md / USER.md entries
 - `search_current_session` — FTS5 trigram search across the entire conversation log
+- `vault_set` / `vault_get` / `vault_delete` / `vault_list` / `vault_health` — Encrypted secrets vault
+- `budget_config` / `budget_stats` — Token cost budget management
+- `work_products` — Track files created/modified by the agent
 
 ---
 
@@ -245,7 +269,12 @@ custom-pi
 ├── agents/                          # Sub-agent configs (builder, researcher, etc.)
 ├── themes/                          # TUI themes
 ├── logs/                            # Extension activity logs
-└── extensions/subagents/src/        # Extension source (20 modules)
+├── .vault/                          # Encrypted secrets vault (AES-256-GCM)
+├── costs/
+│   └── session-costs.jsonl          # Token/cost tracking log
+├── work-products/
+│   └── products.jsonl               # File change tracking log
+└── extensions/subagents/src/        # Extension source (23 modules)
 ```
 
 ---
@@ -266,7 +295,7 @@ If you customize settings, system instructions, or sub-agents locally:
 
 ---
 
-## 🧪 48 Unit Tests
+## 🧪 88 Unit Tests
 
 Every subsystem has dedicated tests:
 
@@ -279,6 +308,10 @@ Every subsystem has dedicated tests:
  ✓ skill-retrieval     — token-matching, usage boost, progressive disclosure
  ✓ memory-embedding    — cosine similarity, orthogonality
  ✓ tui-colors          — hex validation, keys
+ ✓ secret-vault        — AES-GCM roundtrip, CRUD, health check
+ ✓ cost-tracker        — cost recording, budget config, warnings
+ ✓ work-products       — file tracking, filtering, clear
+ ✓ cron-scheduler      — cron parsing, validation, next-tick, job registration
 ```
 
 ---

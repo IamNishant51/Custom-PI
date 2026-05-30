@@ -92,7 +92,10 @@ const filesToCopy = [
   { src: 'extensions/subagents/src/skill-store.ts', dest: 'extensions/subagents/src/skill-store.ts' },
   { src: 'extensions/subagents/src/skill-retrieval.ts', dest: 'extensions/subagents/src/skill-retrieval.ts' },
   { src: 'extensions/subagents/src/curator.ts', dest: 'extensions/subagents/src/curator.ts' },
-  { src: 'extensions/subagents/src/cron-scheduler.ts', dest: 'extensions/subagents/src/cron-scheduler.ts' }
+  { src: 'extensions/subagents/src/cron-scheduler.ts', dest: 'extensions/subagents/src/cron-scheduler.ts' },
+  { src: 'extensions/subagents/src/secret-vault.ts', dest: 'extensions/subagents/src/secret-vault.ts' },
+  { src: 'extensions/subagents/src/cost-tracker.ts', dest: 'extensions/subagents/src/cost-tracker.ts' },
+  { src: 'extensions/subagents/src/work-products.ts', dest: 'extensions/subagents/src/work-products.ts' }
 ];
 
 for (const f of filesToCopy) {
