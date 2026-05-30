@@ -29,6 +29,23 @@ declare module "chalk" {
   export default chalk;
 }
 
+declare module "better-sqlite3" {
+  interface Database {
+    prepare(sql: string): Statement;
+    exec(sql: string): void;
+    pragma(sql: string): any;
+    close(): void;
+  }
+  interface Statement {
+    run(...params: any[]): { changes: number; lastInsertRowid: number | bigint };
+    get(...params: any[]): any;
+    all(...params: any[]): any[];
+    bind(...params: any[]): Statement;
+  }
+  const Database: new (path: string, options?: { readonly?: boolean }) => Database;
+  export default Database;
+}
+
 declare module "@earendil-works/pi-ai" {
   export function completeSimple(model: any, options: {
     messages: any[];

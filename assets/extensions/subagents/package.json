@@ -1,11 +1,12 @@
 {
   "name": "pi-subagents",
-  "version": "0.1.0",
-  "description": "Extension to allow multiple sub-agents in Pi coding agent",
+  "version": "0.2.0",
+  "description": "Extension for sub-agents, memory system, skills, FTS5 session search, and curator",
   "main": "src/index.ts",
   "dependencies": {
     "chalk": "^5.6.2",
-    "yaml": "^2.4.1"
+    "yaml": "^2.4.1",
+    "better-sqlite3": "^12.10.0"
   },
   "pi": {
     "extensions": [
