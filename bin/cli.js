@@ -78,10 +78,21 @@ const filesToCopy = [
   // operator.md removed — not needed
   { src: 'extensions/subagents/package.json', dest: 'extensions/subagents/package.json' },
   { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' },
+  { src: 'extensions/subagents/src/types.d.ts', dest: 'extensions/subagents/src/types.d.ts' },
   { src: 'extensions/subagents/src/memory-types.ts', dest: 'extensions/subagents/src/memory-types.ts' },
   { src: 'extensions/subagents/src/memory-embedding.ts', dest: 'extensions/subagents/src/memory-embedding.ts' },
   { src: 'extensions/subagents/src/memory-store.ts', dest: 'extensions/subagents/src/memory-store.ts' },
-  { src: 'extensions/subagents/src/memory-retrieval.ts', dest: 'extensions/subagents/src/memory-retrieval.ts' }
+  { src: 'extensions/subagents/src/memory-retrieval.ts', dest: 'extensions/subagents/src/memory-retrieval.ts' },
+  { src: 'extensions/subagents/src/soul-loader.ts', dest: 'extensions/subagents/src/soul-loader.ts' },
+  { src: 'extensions/subagents/src/memory-file-store.ts', dest: 'extensions/subagents/src/memory-file-store.ts' },
+  { src: 'extensions/subagents/src/memory-nudge.ts', dest: 'extensions/subagents/src/memory-nudge.ts' },
+  { src: 'extensions/subagents/src/background-review.ts', dest: 'extensions/subagents/src/background-review.ts' },
+  { src: 'extensions/subagents/src/state-db.ts', dest: 'extensions/subagents/src/state-db.ts' },
+  { src: 'extensions/subagents/src/skill-types.ts', dest: 'extensions/subagents/src/skill-types.ts' },
+  { src: 'extensions/subagents/src/skill-store.ts', dest: 'extensions/subagents/src/skill-store.ts' },
+  { src: 'extensions/subagents/src/skill-retrieval.ts', dest: 'extensions/subagents/src/skill-retrieval.ts' },
+  { src: 'extensions/subagents/src/curator.ts', dest: 'extensions/subagents/src/curator.ts' },
+  { src: 'extensions/subagents/src/cron-scheduler.ts', dest: 'extensions/subagents/src/cron-scheduler.ts' }
 ];
 
 for (const f of filesToCopy) {
