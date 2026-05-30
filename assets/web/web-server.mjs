@@ -787,7 +787,7 @@ class WebSession {
 
       this._abort = new AbortController();
       this._turnAbort = this._abort;
-      let timeout = setTimeout(() => { if (this._abort) this._abort.abort(); }, 60000);
+      let timeout = setTimeout(() => { if (this._abort) this._abort.abort(); }, 600000);
 
       let stream, currentText = "", currentThinking = "";
       try {
