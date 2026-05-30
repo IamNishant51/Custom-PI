@@ -57,6 +57,21 @@ function initializeSchema(): void {
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (session_id) REFERENCES sessions(session_id)
     );
+
+    CREATE TABLE IF NOT EXISTS triplets (
+      id TEXT PRIMARY KEY,
+      subject_id TEXT NOT NULL,
+      subject_type TEXT NOT NULL,
+      subject_label TEXT NOT NULL,
+      predicate_type TEXT NOT NULL,
+      predicate_label TEXT NOT NULL,
+      object_id TEXT NOT NULL,
+      object_type TEXT NOT NULL,
+      object_label TEXT NOT NULL,
+      confidence_score REAL DEFAULT 1.0,
+      last_updated INTEGER,
+      source_session TEXT
+    );
   `);
 
   // Triggers to keep FTS index in sync
@@ -195,6 +210,84 @@ export function getMessageCount(sessionId: string): number {
   const d = openDb();
   const row = d.prepare("SELECT COUNT(*) as count FROM messages WHERE session_id = ?").get(sessionId) as any;
   return row?.count || 0;
+}
+
+export interface TripletRecord {
+  id: string;
+  subjectId: string;
+  subjectType: string;
+  subjectLabel: string;
+  predicateType: string;
+  predicateLabel: string;
+  objectId: string;
+  objectType: string;
+  objectLabel: string;
+  confidenceScore: number;
+  lastUpdated?: number;
+  sourceSession: string;
+}
+
+export function insertTriplet(record: TripletRecord): void {
+  const d = openDb();
+  const lastUpdated = Date.now();
+  d.prepare(`
+    INSERT INTO triplets (
+      id, subject_id, subject_type, subject_label, 
+      predicate_type, predicate_label, 
+      object_id, object_type, object_label, 
+      confidence_score, last_updated, source_session
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      confidence_score = ?,
+      last_updated = ?
+  `).run(
+    record.id, record.subjectId, record.subjectType, record.subjectLabel,
+    record.predicateType, record.predicateLabel,
+    record.objectId, record.objectType, record.objectLabel,
+    record.confidenceScore, lastUpdated, record.sourceSession,
+    record.confidenceScore, lastUpdated
+  );
+}
+
+export function queryTriplets(filter: {
+  subjectId?: string;
+  subjectType?: string;
+  predicateType?: string;
+  objectId?: string;
+  objectType?: string;
+}): TripletRecord[] {
+  const d = openDb();
+  let sql = "SELECT id, subject_id as subjectId, subject_type as subjectType, subject_label as subjectLabel, predicate_type as predicateType, predicate_label as predicateLabel, object_id as objectId, object_type as objectType, object_label as objectLabel, confidence_score as confidenceScore, last_updated as lastUpdated, source_session as sourceSession FROM triplets WHERE 1=1";
+  const params: any[] = [];
+  
+  if (filter.subjectId) {
+    sql += " AND subject_id = ?";
+    params.push(filter.subjectId);
+  }
+  if (filter.subjectType) {
+    sql += " AND subject_type = ?";
+    params.push(filter.subjectType);
+  }
+  if (filter.predicateType) {
+    sql += " AND predicate_type = ?";
+    params.push(filter.predicateType);
+  }
+  if (filter.objectId) {
+    sql += " AND object_id = ?";
+    params.push(filter.objectId);
+  }
+  if (filter.objectType) {
+    sql += " AND object_type = ?";
+    params.push(filter.objectType);
+  }
+  
+  return d.prepare(sql).all(...params) as TripletRecord[];
+}
+
+export function deleteTriplet(id: string): boolean {
+  const d = openDb();
+  const res = d.prepare("DELETE FROM triplets WHERE id = ?").run(id);
+  return res.changes > 0;
 }
 
 export function closeDb(): void {

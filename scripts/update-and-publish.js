@@ -37,6 +37,8 @@ const filesToSync = [
   { src: 'extensions/subagents/src/secret-vault.ts', dest: 'extensions/subagents/src/secret-vault.ts' },
   { src: 'extensions/subagents/src/cost-tracker.ts', dest: 'extensions/subagents/src/cost-tracker.ts' },
   { src: 'extensions/subagents/src/work-products.ts', dest: 'extensions/subagents/src/work-products.ts' },
+  { src: 'extensions/subagents/src/storage-driver.ts', dest: 'extensions/subagents/src/storage-driver.ts' },
+  { src: 'extensions/subagents/src/verification-engine.ts', dest: 'extensions/subagents/src/verification-engine.ts' },
   { src: 'web/web-server.mjs', dest: 'web/web-server.mjs' }
 ];
 

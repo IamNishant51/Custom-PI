@@ -25,6 +25,8 @@ import {
 } from "./secret-vault";
 import { trackCost, getSessionCosts, getCostSummary, getBudgetConfig, setBudgetConfig } from "./cost-tracker";
 import { recordWorkProduct, getWorkProducts, getWorkProductSummary, clearWorkProducts } from "./work-products";
+import { LocalStorageDriver, type StorageDriver } from "./storage-driver";
+import { runVerification } from "./verification-engine";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 
@@ -1066,6 +1068,7 @@ class SubAgentRuntime {
   private tracker: SubAgentProgress;
   private readonly systemPrompt: string;
   private static readonly MAX_TURNS = 3;
+  private storage: StorageDriver;
 
   public onProgress: ((msg: string) => void) | null = null;
 
@@ -1074,6 +1077,7 @@ class SubAgentRuntime {
     private config: AgentConfig,
     private trackerId: string
   ) {
+    this.storage = new LocalStorageDriver(this.ctx.cwd);
     this.tracker = {
       id: trackerId,
       name: config.name,
@@ -1143,7 +1147,7 @@ class SubAgentRuntime {
         case "read": {
           const filePath = args.path;
           if (!filePath) return "Error: Missing path argument.";
-          const result = await fs.promises.readFile(this.safeResolve(filePath), "utf8");
+          const result = await this.storage.readFile(filePath);
           try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch {}
           return result;
         }
@@ -1151,11 +1155,20 @@ class SubAgentRuntime {
           const filePath = args.path;
           const content = args.content;
           if (!filePath || content === undefined) return "Error: Missing path or content argument.";
-          const targetDir = path.dirname(this.safeResolve(filePath));
-          await fs.promises.mkdir(targetDir, { recursive: true });
-          await fs.promises.writeFile(this.safeResolve(filePath), content, "utf8");
+          
+          // Formal Verification check
+          const verify = await runVerification(content, "");
+          if (!verify.passed) {
+            return `Error: Write rejected by verification engine. Violations:\n${verify.errors.join("\n")}`;
+          }
+
+          await this.storage.writeFile(filePath, content);
           try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "create", content.slice(0, 200)); } catch {}
-          return `Successfully wrote file: ${filePath}`;
+          let resp = `Successfully wrote file: ${filePath}`;
+          if (verify.warnings.length > 0) {
+            resp += `\nWarnings:\n${verify.warnings.join("\n")}`;
+          }
+          return resp;
         }
         case "edit": {
           const filePath = args.path;
@@ -1164,24 +1177,34 @@ class SubAgentRuntime {
           if (!filePath || findText === undefined || replaceText === undefined) {
             return "Error: Missing path, find, or replace argument.";
           }
-          const fullPath = this.safeResolve(filePath);
-          try {
-            await fs.promises.access(fullPath);
-          } catch {
+          const exists = await this.storage.exists(filePath);
+          if (!exists) {
             return `Error: File not found: ${filePath}`;
           }
-          const currentContent = await fs.promises.readFile(fullPath, "utf8");
+          const currentContent = await this.storage.readFile(filePath);
           if (!currentContent.includes(findText)) {
             return `Error: The search block (find) was not found in the file.`;
           }
           const newContent = currentContent.replace(findText, replaceText);
-          await fs.promises.writeFile(fullPath, newContent, "utf8");
+
+          // Formal Verification check
+          const verify = await runVerification(replaceText, newContent);
+          if (!verify.passed) {
+            return `Error: Edit rejected by verification engine. Violations:\n${verify.errors.join("\n")}`;
+          }
+
+          await this.storage.writeFile(filePath, newContent);
           try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "modify", replaceText.slice(0, 200)); } catch {}
-          return `Successfully edited file: ${filePath}`;
+          let resp = `Successfully edited file: ${filePath}`;
+          if (verify.warnings.length > 0) {
+            resp += `\nWarnings:\n${verify.warnings.join("\n")}`;
+          }
+          return resp;
         }
         case "ls": {
           const dirPath = args.path || ".";
-          return (await fs.promises.readdir(this.safeResolve(dirPath))).join("\n");
+          const list = await this.storage.listDirectory(dirPath);
+          return list.map(f => `${f.name}${f.isDir ? "/" : ""}`).join("\n");
         }
         case "bash": {
           const command = args.command;
