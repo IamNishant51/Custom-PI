@@ -3,7 +3,8 @@ import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
+import readline from "node:readline";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
 import chalk from "chalk";
@@ -1561,6 +1562,209 @@ function teardownWidget(ctx: ExtensionContext) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function (pi: ExtensionAPI) {
+
+  // ── MCP Server Client Integration ─────────────────────────────────────────
+  const PI_DIR_GLOBAL = path.join(os.homedir(), ".pi", "agent");
+  const MCP_CONFIG_FILE_GLOBAL = path.join(PI_DIR_GLOBAL, "mcp-servers.json");
+
+  interface McpServerConfig {
+    name: string;
+    command: string;
+    args?: string[];
+    enabled: boolean;
+    description?: string;
+  }
+
+  function loadMcpConfigGlobal(): McpServerConfig[] {
+    let config: McpServerConfig[] = [];
+    try {
+      if (fs.existsSync(MCP_CONFIG_FILE_GLOBAL)) {
+        config = JSON.parse(fs.readFileSync(MCP_CONFIG_FILE_GLOBAL, "utf8"));
+      }
+    } catch {}
+
+    // Guarantee sequential-thinking exists and is enabled
+    const seqThinkingName = "sequential-thinking";
+    let seqThinking = config.find(s => s.name === seqThinkingName);
+    if (!seqThinking) {
+      seqThinking = {
+        name: seqThinkingName,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+        enabled: true,
+        description: "Sequential Thinking MCP Server for step-by-step reasoning"
+      };
+      config.push(seqThinking);
+      try {
+        fs.mkdirSync(path.dirname(MCP_CONFIG_FILE_GLOBAL), { recursive: true });
+        fs.writeFileSync(MCP_CONFIG_FILE_GLOBAL, JSON.stringify(config, null, 2));
+      } catch {}
+    } else {
+      if (!seqThinking.enabled) {
+        seqThinking.enabled = true;
+        try {
+          fs.writeFileSync(MCP_CONFIG_FILE_GLOBAL, JSON.stringify(config, null, 2));
+        } catch {}
+      }
+    }
+    return config;
+  }
+
+  const activeCliMcpServers = new Map<string, any>();
+
+  class McpCliConnection {
+    cfg: McpServerConfig;
+    proc: any;
+    tools: any[];
+    pendingRequests: Map<number, { resolve: Function; reject: Function }>;
+    nextRequestId: number;
+    initialized: boolean;
+
+    constructor(cfg: McpServerConfig) {
+      this.cfg = cfg;
+      this.proc = null;
+      this.tools = [];
+      this.pendingRequests = new Map();
+      this.nextRequestId = 1;
+      this.initialized = false;
+    }
+
+    async start() {
+      return new Promise<void>((resolve, reject) => {
+        try {
+          this.proc = spawn(this.cfg.command, this.cfg.args || [], {
+            stdio: ['pipe', 'pipe', 'inherit'],
+            shell: process.platform === 'win32'
+          });
+
+          this.proc.on('error', (err: any) => {
+            reject(err);
+          });
+
+          this.proc.on('exit', () => {
+            this.cleanup();
+          });
+
+          const rl = readline.createInterface({ input: this.proc.stdout });
+          rl.on('line', (line) => {
+            this.handleMessage(line);
+          });
+
+          this.initializeHandshake().then(() => {
+            resolve();
+          }).catch(reject);
+
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+
+    cleanup() {
+      this.initialized = false;
+      this.tools = [];
+      for (const req of this.pendingRequests.values()) {
+        req.reject(new Error("MCP server connection closed"));
+      }
+      this.pendingRequests.clear();
+      if (this.proc) {
+        try { this.proc.kill(); } catch {}
+        this.proc = null;
+      }
+    }
+
+    sendRequest(method: string, params: any) {
+      return new Promise<any>((resolve, reject) => {
+        if (!this.proc) return reject(new Error("MCP server not running"));
+        const id = this.nextRequestId++;
+        const req = { jsonrpc: "2.0", id, method, params };
+        this.pendingRequests.set(id, { resolve, reject });
+        this.proc.stdin.write(JSON.stringify(req) + "\n");
+      });
+    }
+
+    sendNotification(method: string, params: any) {
+      if (!this.proc) return;
+      const notification = { jsonrpc: "2.0", method, params };
+      this.proc.stdin.write(JSON.stringify(notification) + "\n");
+    }
+
+    handleMessage(line: string) {
+      try {
+        const msg = JSON.parse(line);
+        if (msg.id !== undefined) {
+          const pending = this.pendingRequests.get(msg.id);
+          if (pending) {
+            this.pendingRequests.delete(msg.id);
+            if (msg.error) {
+              pending.reject(new Error(msg.error.message || "Unknown MCP error"));
+            } else {
+              pending.resolve(msg.result);
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    async initializeHandshake() {
+      await this.sendRequest("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "custom-pi-client", version: "1.0.0" }
+      });
+
+      this.sendNotification("notifications/initialized", {});
+      this.initialized = true;
+
+      const toolsResult = await this.sendRequest("tools/list", {});
+      this.tools = toolsResult.tools || [];
+    }
+
+    async callTool(name: string, args: any) {
+      const res = await this.sendRequest("tools/call", { name, arguments: args });
+      return res;
+    }
+  }
+
+  // Load and register MCP tools
+  const servers = loadMcpConfigGlobal();
+  for (const s of servers) {
+    if (s.enabled) {
+      const conn = new McpCliConnection(s);
+      activeCliMcpServers.set(s.name, conn);
+      conn.start().then(() => {
+        // Register each tool in the extension
+        for (const t of conn.tools) {
+          pi.registerTool({
+            name: t.name,
+            label: t.name.split(/[-_]/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+            description: t.description || `MCP Tool ${t.name}`,
+            parameters: t.inputSchema || Type.Object({}),
+            async execute(id, params, signal, update, context) {
+              const res = await conn.callTool(t.name, params);
+              if (!res || !res.content) {
+                return { content: [{ type: "text", text: "Empty output" }] };
+              }
+              const content = res.content.map((c: any) => {
+                if (c.type === "text") return { type: "text", text: c.text };
+                return { type: "text", text: JSON.stringify(c) };
+              });
+              return { content };
+            }
+          });
+        }
+      }).catch(err => {
+        logger.error(`[MCP-CLI] Failed to load server ${s.name}: ${err.message}`);
+      });
+    }
+  }
+
+  // Clean up children on exit
+  process.on("exit", () => {
+    for (const conn of activeCliMcpServers.values()) {
+      conn.cleanup();
+    }
+  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tool 1: List all subagents — with beautiful table rendering

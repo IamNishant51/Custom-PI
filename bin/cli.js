@@ -76,6 +76,7 @@ const filesToCopy = [
   { src: 'SYSTEM.md', dest: 'SYSTEM.md' },
   { src: 'settings.json', dest: 'settings.json' },
   { src: 'models.json', dest: 'models.json' },
+  { src: 'mcp-servers.json', dest: 'mcp-servers.json', onlyIfMissing: true },
   { src: 'themes/custom-pi-quantum.json', dest: 'themes/custom-pi-quantum.json' },
   { src: 'agents/builder.md', dest: 'agents/builder.md' },
   { src: 'agents/researcher.md', dest: 'agents/researcher.md' },
@@ -109,6 +110,9 @@ const filesToCopy = [
 for (const f of filesToCopy) {
   const srcPath = path.join(assetsDir, f.src);
   const destPath = path.join(PI_DIR, f.dest);
+  if (f.onlyIfMissing && fs.existsSync(destPath)) {
+    continue;
+  }
   const destParent = path.dirname(destPath);
   if (!fs.existsSync(destParent)) {
     fs.mkdirSync(destParent, { recursive: true });
