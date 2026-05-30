@@ -1,127 +1,102 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import Markdown from "./Markdown";
-import { AsciiLightning, AsciiArrowRight, AsciiSend } from "./Icons";
+import { useChat, type ChatItem } from "../context/ChatContext";
 
-interface ChatMessage {
-  role: "user" | "assistant" | "tool-call" | "tool-result";
-  content: string;
-  name?: string;
-}
+const TUI_BANNER = `  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗
+ ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║
+ ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║
+ ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║
+ ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
+  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝`;
 
-interface ChatViewProps {
-  ws: WebSocket | null;
-}
-
-export default function ChatView({ ws }: ChatViewProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [connected, setConnected] = useState(false);
+export default function ChatView() {
+  const { items, loading, input, setInput, sendMessage, sendInterrupt, connected } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, streamingText]);
-
-  const onMessage = useRef<(event: MessageEvent) => void>(null!);
-
-  useEffect(() => {
-    if (!ws) { setConnected(false); return; }
-    setConnected(ws.readyState === WebSocket.OPEN);
-
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-
-    const handler = (event: MessageEvent) => {
-      const data = JSON.parse(event.data);
-      switch (data.type) {
-        case "session_start":
-          setLoading(true);
-          setStreamingText("");
-          break;
-        case "token":
-          setStreamingText(prev => prev + data.text);
-          break;
-        case "tool_call":
-          setMessages(prev => [...prev, { role: "tool-call", content: data.name, name: data.name }]);
-          break;
-        case "tool_result":
-          setMessages(prev => [...prev, { role: "tool-result", content: (data.result || "").slice(0, 500), name: data.name }]);
-          break;
-        case "done":
-          setMessages(prev => [...prev, { role: "assistant", content: data.content }]);
-          setStreamingText("");
-          setLoading(false);
-          break;
-        case "error":
-          setMessages(prev => [...prev, { role: "assistant", content: `Error: ${data.message}` }]);
-          setStreamingText("");
-          setLoading(false);
-          break;
-      }
-    };
-    onMessage.current = handler;
-    ws.onmessage = handler;
-
-    return () => { ws.onmessage = null; };
-  }, [ws]);
-
-  const sendMessage = useCallback(() => {
-    const text = input.trim();
-    if (!text || !ws || loading) return;
-    setMessages(prev => [...prev, { role: "user", content: text }]);
-    setInput("");
-    ws.send(JSON.stringify({ type: "chat", message: text }));
-  }, [input, ws, loading]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
-  if (!connected && !ws) {
-    return (
-      <div className="chat-container">
-        <div className="empty-state" style={{ padding: 40 }}>
-          <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
-          <div className="empty-state-title">Connecting to server...</div>
-        </div>
-      </div>
-    );
-  }
+  const handleCopyClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains("copy-btn")) {
+      const container = target.closest(".code-block-container");
+      if (container) {
+        const codeLines = container.querySelectorAll(".code-line .line-content, .diff-line .line-content");
+        let textToCopy = "";
+        if (codeLines.length > 0) {
+          textToCopy = Array.from(codeLines).map(el => (el as HTMLElement).innerText).join("\n");
+        } else {
+          const codeEl = container.querySelector("code");
+          textToCopy = codeEl ? codeEl.innerText : "";
+        }
+
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          const oldText = target.innerText;
+          target.innerText = "Copied!";
+          target.classList.add("copied");
+          setTimeout(() => {
+            target.innerText = oldText;
+            target.classList.remove("copied");
+          }, 2000);
+        });
+      }
+    }
+  };
+
+  const handleActionChipClick = (text: string) => {
+    setInput(text);
+    inputRef.current?.focus();
+  };
 
   return (
-    <div className="chat-container">
+    <div className="chat-container" onClick={handleCopyClick}>
       <div className="chat-messages">
-        {messages.length === 0 && !loading && (
-          <div className="empty-state">
-            <div className="empty-state-marker">[CUSTOM-PI v1]</div>
-            <div className="empty-state-title">ready</div>
+        {items.length === 0 && !loading && (
+          <div className="chat-empty">
+            <pre className="ascii-welcome-logo">{TUI_BANNER}</pre>
+            <div className="empty-state-subtitle">CUSTOMIZED PI CODING AGENT</div>
             <div className="empty-state-desc">
-              Your AI-powered development assistant. Ask me anything about your codebase, delegate tasks, or manage your project.
+              Parallel Multi-Agent Coordinator & Development Sandbox.
+            </div>
+            <div className="empty-state-chips">
+              <button className="action-chip" onClick={() => handleActionChipClick("What can you do?")}>
+                &gt; What can you do?
+              </button>
+              <button className="action-chip" onClick={() => handleActionChipClick("Explain the codebase structure")}>
+                &gt; Explain codebase
+              </button>
+              <button className="action-chip" onClick={() => handleActionChipClick("Review current work products")}>
+                &gt; Review products
+              </button>
             </div>
           </div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}`}>
-            {msg.role === "tool-call" && <><span className="tool-name"><AsciiLightning size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> {msg.name}</span></>}
-            {msg.role === "tool-result" && <><span style={{ color: "var(--charcoal)" }}><AsciiArrowRight size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> {msg.name}:</span> {msg.content}</>}
-            {msg.role === "assistant" && <Markdown content={msg.content} />}
-            {msg.role === "user" && msg.content}
-          </div>
+
+        {items.map(item => (
+          <ChatItemRenderer key={item.id} item={item} />
         ))}
-        {loading && streamingText && (
-          <div className="message assistant"><Markdown content={streamingText} /><span className="streaming-cursor" /></div>
-        )}
-        {loading && !streamingText && (
-          <div className="typing-indicator">
+
+        {loading && items.length > 0 && items[items.length - 1].type === "tool_call" && items[items.length - 1].status === "running" && (
+          <div className="typing-dots">
             <div className="typing-dot" />
             <div className="typing-dot" />
             <div className="typing-dot" />
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
+
       <div className="chat-input-area">
+        {loading && (
+          <button className="chat-stop-btn" onClick={sendInterrupt}>
+            ■ Stop
+          </button>
+        )}
         <textarea
           ref={inputRef}
           className="chat-input"
@@ -133,9 +108,182 @@ export default function ChatView({ ws }: ChatViewProps) {
           disabled={loading || !connected}
         />
         <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim() || !connected}>
-          {loading ? "..." : <AsciiSend size={16} />}
+          &gt;
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Item Renderer ──────────────────────────────────────
+
+function ChatItemRenderer({ item }: { item: ChatItem }) {
+  switch (item.type) {
+    case "user":
+      return <UserMessage content={item.content} />;
+    case "thinking":
+      return <ThinkingBlock content={item.content} isStreaming={item.isStreaming} />;
+    case "tool_call":
+      return (
+        <ToolCallItem
+          name={item.toolName || ""}
+          args={item.toolArgs || ""}
+          status={item.status || "running"}
+          result={item.content}
+        />
+      );
+    case "assistant":
+      return <AssistantMessage content={item.content} isStreaming={item.isStreaming} />;
+    case "error":
+      return <ErrorMessage content={item.content} />;
+    default:
+      return null;
+  }
+}
+
+// ── User Message ───────────────────────────────────────
+
+function UserMessage({ content }: { content: string }) {
+  return (
+    <div className="msg msg-user stagger-item">
+      <div className="msg-label">You</div>
+      <div className="msg-content">{content}</div>
+    </div>
+  );
+}
+
+// ── Thinking Block ─────────────────────────────────────
+
+const THINKING_PLACEHOLDERS = [
+  "Analyzing context", "Searching memory", "Processing request",
+  "Connecting dots", "Formulating approach", "Reviewing codebase",
+  "Weighing options", "Building strategy", "Checking logic",
+  "Gathering insights", "Reasoning through", "Evaluating paths",
+];
+
+function ThinkingBlock({ content, isStreaming }: {
+  content: string;
+  isStreaming?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const ref = useRef<HTMLDivElement>(null);
+  const [maxH, setMaxH] = useState("0px");
+  const [placeholderIdx, setPlaceholderIdx] = useState(0);
+  const [charPos, setCharPos] = useState(0);
+
+  useEffect(() => {
+    if (!isStreaming) { setCharPos(0); return; }
+    const interval = setInterval(() => {
+      setCharPos(prev => {
+        const current = THINKING_PLACEHOLDERS[placeholderIdx];
+        if (prev >= current.length) {
+          const nextIdx = (placeholderIdx + 1) % THINKING_PLACEHOLDERS.length;
+          setPlaceholderIdx(nextIdx);
+          return 0;
+        }
+        return prev + 1;
+      });
+    }, 50);
+    return () => clearInterval(interval);
+  }, [isStreaming, placeholderIdx]);
+
+  useEffect(() => {
+    if (ref.current) setMaxH(expanded ? `${ref.current.scrollHeight}px` : "0px");
+  }, [expanded, content]);
+
+  const placeholderText = THINKING_PLACEHOLDERS[placeholderIdx].slice(0, charPos);
+
+  return (
+    <div className="msg msg-thinking stagger-item">
+      <button className="thinking-header" onClick={() => setExpanded(v => !v)}>
+        <span className={`thinking-chevron ${expanded ? "rotated" : ""}`}>▸</span>
+        <span className="thinking-label">Reasoning</span>
+      </button>
+      <div
+        className="thinking-body"
+        style={{
+          maxHeight: maxH,
+          transition: "max-height 0.25s ease",
+        }}
+      >
+        <div ref={ref} className="thinking-content">
+          {isStreaming ? (
+            <span className="thinking-placeholder">{placeholderText}</span>
+          ) : (
+            <Markdown content={content} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tool Call Item ─────────────────────────────────────
+
+function ToolCallItem({ name, args, status, result }: {
+  name: string;
+  args: string;
+  status: "running" | "completed" | "error";
+  result: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const statusIcon = status === "running" ? "●" : status === "completed" ? "✓" : "✗";
+  const statusClass = status === "running" ? "running" : status === "completed" ? "completed" : "error";
+
+  return (
+    <div className={`msg msg-tool stagger-item ${statusClass}`}>
+      <button className="tool-header" onClick={() => setExpanded(v => !v)}>
+        <span className="tool-status-icon">{statusIcon}</span>
+        <span className="tool-name-label">{name}</span>
+        <span className={`tool-chevron ${expanded ? "rotated" : ""}`}>▸</span>
+      </button>
+      <div
+        className="tool-body"
+        style={{
+          display: "grid",
+          gridTemplateRows: expanded ? "1fr" : "0fr",
+          transition: "grid-template-rows 0.2s ease",
+        }}
+      >
+        <div className="tool-inner">
+          {args && (
+            <div className="tool-section">
+              <div className="tool-section-label">Arguments</div>
+              <pre className="tool-code">{args}</pre>
+            </div>
+          )}
+          {result && (
+            <div className="tool-section">
+              <div className="tool-section-label">Result</div>
+              <pre className="tool-code tool-result-text">{result}</pre>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Assistant Message ──────────────────────────────────
+
+function AssistantMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+  return (
+    <div className="msg msg-assistant stagger-item">
+      <div className="msg-label">Assistant</div>
+      <Markdown content={content} />
+      {isStreaming && <span className="streaming-cursor" />}
+    </div>
+  );
+}
+
+// ── Error Message ──────────────────────────────────────
+
+function ErrorMessage({ content }: { content: string }) {
+  return (
+    <div className="msg msg-error stagger-item">
+      <div className="msg-label">Error</div>
+      <div className="msg-content">{content}</div>
     </div>
   );
 }

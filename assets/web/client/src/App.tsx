@@ -11,34 +11,24 @@ import MCPPanel from "./components/MCPPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import { ToasterProvider } from "./components/Toast";
 import { AsciiMenu } from "./components/Icons";
+import { ChatProvider, useChat } from "./context/ChatContext";
 
 export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "work-products" | "agents" | "mcp" | "settings";
 
 export default function App() {
+  return (
+    <ChatProvider>
+      <ToasterProvider>
+        <AppContent />
+      </ToasterProvider>
+    </ChatProvider>
+  );
+}
+
+function AppContent() {
   const [activeView, setActiveView] = useState<View>("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [ws, setWs] = useState<WebSocket | null>(null);
-
-  useEffect(() => {
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    let closed = false;
-
-    function connect() {
-      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      const socket = new WebSocket(`${protocol}//${location.host}/ws`);
-      socket.onopen = () => { if (!closed) setWs(socket); };
-      socket.onclose = () => {
-        if (!closed) {
-          setWs(null);
-          reconnectTimer = setTimeout(connect, 2000);
-        }
-      };
-      socket.onerror = () => socket.close();
-    }
-
-    connect();
-    return () => { closed = true; clearTimeout(reconnectTimer); };
-  }, []);
+  const { ws, connected } = useChat();
 
   const navigate = (view: View) => {
     setActiveView(view);
@@ -46,39 +36,48 @@ export default function App() {
   };
 
   return (
-    <ToasterProvider>
-      <div className="layout">
-        <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
-        <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-          <Sidebar activeView={activeView} onNavigate={navigate} wsConnected={ws !== null} />
-        </div>
-        <div className="main-area">
-          <TopBar activeView={activeView} wsConnected={ws !== null} onMenuClick={() => setSidebarOpen(o => !o)} />
-          <div className="content-area">
-            <Suspense fallback={<div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>}>
-              <ViewRenderer activeView={activeView} ws={ws} />
-            </Suspense>
-          </div>
+    <div className="layout">
+      <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
+      <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <Sidebar activeView={activeView} onNavigate={navigate} wsConnected={connected} />
+      </div>
+      <div className="main-area">
+        <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
+        <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""}`}>
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>}>
+            <div style={{ display: activeView === "chat" ? "flex" : "none", flex: 1, flexDirection: "column", height: "100%", width: "100%" }}>
+              <ChatView />
+            </div>
+            <div style={{ display: activeView === "dashboard" ? "block" : "none", height: "100%", width: "100%" }}>
+              <Dashboard />
+            </div>
+            <div style={{ display: activeView === "vault" ? "block" : "none", height: "100%", width: "100%" }}>
+              <VaultPanel />
+            </div>
+            <div style={{ display: activeView === "budget" ? "block" : "none", height: "100%", width: "100%" }}>
+              <BudgetPanel />
+            </div>
+            <div style={{ display: activeView === "memory" ? "block" : "none", height: "100%", width: "100%" }}>
+              <MemoryPanel />
+            </div>
+            <div style={{ display: activeView === "work-products" ? "block" : "none", height: "100%", width: "100%" }}>
+              <WorkProductsPanel />
+            </div>
+            <div style={{ display: activeView === "agents" ? "block" : "none", height: "100%", width: "100%" }}>
+              <SubAgentPanel ws={ws} />
+            </div>
+            <div style={{ display: activeView === "mcp" ? "block" : "none", height: "100%", width: "100%" }}>
+              <MCPPanel />
+            </div>
+            <div style={{ display: activeView === "settings" ? "block" : "none", height: "100%", width: "100%" }}>
+              <SettingsPanel />
+            </div>
+          </Suspense>
         </div>
       </div>
-    </ToasterProvider>
+    </div>
   );
 }
-
-const ViewRenderer = memo(function ViewRenderer({ activeView, ws }: { activeView: View; ws: WebSocket | null }) {
-  switch (activeView) {
-    case "chat": return <ChatView ws={ws} />;
-    case "dashboard": return <Dashboard />;
-    case "vault": return <VaultPanel />;
-    case "budget": return <BudgetPanel />;
-    case "memory": return <MemoryPanel />;
-    case "work-products": return <WorkProductsPanel />;
-    case "agents": return <SubAgentPanel ws={ws} />;
-    case "mcp": return <MCPPanel />;
-    case "settings": return <SettingsPanel />;
-    default: return <Dashboard />;
-  }
-});
 
 const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { activeView: string; wsConnected: boolean; onMenuClick: () => void }) {
   const labels: Record<string, string> = {

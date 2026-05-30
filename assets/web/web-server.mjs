@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PI_DIR = path.join(os.homedir(), ".pi", "agent");
 const CLIENT_DIR = path.join(__dirname, "client", "dist");
 const PORT = parseInt(process.env.WEB_PORT || "4321", 10);
+const HOST = process.env.WEB_HOST || "127.0.0.1";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -749,21 +750,28 @@ NOT available: web_search, web_fetch, create_subagent, grep_search (use grep), m
 class WebSession {
   constructor() {
     this.messages = [];
+    this._abort = null;
     try { this.model = resolveModel(); } catch { this.model = { id: "gemma-4-e4b", provider: "lmstudio", api: "openai-completions" }; }
     this.systemPrompt = loadSystemPrompt();
+  }
+
+  interrupt() {
+    if (this._abort) { this._abort.abort(); this._abort = null; }
   }
 
   async handleMessage(userMessage, cwd, onEvent) {
     this.messages.push({ role: "user", content: [{ type: "text", text: userMessage }], timestamp: Date.now() });
 
+    let toolCallIndex = 0;
     const MAX_TURNS = 10;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const auth = getModelAuth(this.model);
 
-      let abort = new AbortController();
-      let timeout = setTimeout(() => abort.abort(), 60000);
+      this._abort = new AbortController();
+      this._turnAbort = this._abort;
+      let timeout = setTimeout(() => { if (this._abort) this._abort.abort(); }, 60000);
 
-      let stream, currentText = "";
+      let stream, currentText = "", currentThinking = "";
       try {
         stream = streamSimple(this.model, {
           systemPrompt: this.systemPrompt,
@@ -773,7 +781,7 @@ class WebSession {
           apiKey: auth.apiKey,
           headers: auth.headers,
           reasoning: (loadSettings().defaultThinkingLevel || "off"),
-          signal: abort.signal,
+          signal: this._abort.signal,
         });
       } catch (e) {
         clearTimeout(timeout);
@@ -786,18 +794,22 @@ class WebSession {
           if (event.type === "text_delta") {
             currentText += event.delta;
             onEvent({ type: "token", text: event.delta });
+          } else if (event.type === "reasoning_delta" || event.type === "thinking_delta") {
+            currentThinking += event.delta;
+            onEvent({ type: "thinking_delta", delta: event.delta });
           }
         }
       } catch (e) {
         clearTimeout(timeout);
         if (e.name === "AbortError") {
-          onEvent({ type: "error", message: "Model timed out (60s). Check that your local AI server is running, or configure a working model in Settings." });
+          onEvent({ type: "interrupted" });
         } else {
           onEvent({ type: "error", message: `Model error: ${e.message}. Check Settings to configure your model.` });
         }
         return;
       }
       clearTimeout(timeout);
+      this._abort = null;
 
       let finalMessage;
       try { finalMessage = await stream.result(); } catch (e) {
@@ -824,17 +836,19 @@ class WebSession {
       // Execute tool calls
       for (const tc of toolCalls) {
         const args = tc.arguments || tc.input || {};
-        onEvent({ type: "tool_call", name: tc.name, args });
+        const id = tc.id || `tc_${Date.now()}_${toolCallIndex++}`;
+        onEvent({ type: "tool_call", id, name: tc.name, args });
         let resultText;
+        let isError = false;
         try { resultText = await executeTool(tc.name, args, cwd); }
-        catch (e) { resultText = `Error: ${e.message}`; }
-        onEvent({ type: "tool_result", name: tc.name, result: resultText.slice(0, 1000) });
+        catch (e) { resultText = `Error: ${e.message}`; isError = true; }
+        onEvent({ type: "tool_result", id, name: tc.name, result: resultText.slice(0, 1000), isError });
         this.messages.push({
           role: "toolResult",
-          toolCallId: tc.id,
+          toolCallId: id,
           toolName: tc.name,
           content: [{ type: "text", text: resultText }],
-          isError: resultText.startsWith("Error:"),
+          isError,
           timestamp: Date.now(),
         });
       }
@@ -1130,6 +1144,10 @@ async function main() {
         }
       }
 
+      if (data.type === "interrupt") {
+        if (session) session.interrupt();
+      }
+
       if (data.type === "memory_search") {
         try { socket.send(JSON.stringify({ type: "memory_results", results: memorySearch(data.query, data.k ?? 5) })); }
         catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
@@ -1146,8 +1164,8 @@ async function main() {
   // ── Start ──────────────────────────────────────────────────────────────
 
   try {
-    await app.listen({ port: PORT, host: "0.0.0.0" });
-    console.log(`\n  ✦ Custom-PI Web UI running at http://localhost:${PORT}\n`);
+    await app.listen({ port: PORT, host: HOST });
+    console.log(`\n  ✦ Custom-PI Web UI running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}\n`);
   } catch (e) {
     console.error(`Failed to start server: ${e.message}`);
     process.exit(1);
