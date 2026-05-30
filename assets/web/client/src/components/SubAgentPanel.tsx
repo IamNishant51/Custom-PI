@@ -37,6 +37,22 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [finalSummary, setFinalSummary] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState<{ agentId: string; toolName: string; status: "requested" | "created" } | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+
+  interface SavedTeam {
+    name: string;
+    goal: string;
+    agents: Array<{
+      id: string;
+      role: string;
+      tools: string[];
+      task: string;
+    }>;
+    createdAt: string;
+  }
+
+  const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([]);
+  const [teamNameInput, setTeamNameInput] = useState("");
+  const [showSaveModal, setShowSaveModal] = useState(false);
   
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
@@ -201,6 +217,90 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     return () => ws.removeEventListener("message", handleMessage);
   }, [ws, toast]);
 
+  const fetchSavedTeams = useCallback(async () => {
+    try {
+      const res = await fetch("/api/swarm/teams");
+      if (res.ok) {
+        const data = await res.json();
+        setSavedTeams(data.teams || []);
+      }
+    } catch (err) {
+      console.error("Failed to load saved swarm teams", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSavedTeams();
+  }, [fetchSavedTeams]);
+
+  const launchSavedTeam = useCallback((team: SavedTeam) => {
+    if (!ws) return;
+    ws.send(JSON.stringify({
+      type: "swarm_saved_team",
+      goal: team.goal,
+      agents: team.agents
+    }));
+    setSwarmStatus("planning");
+    setActiveGoal(team.goal);
+    setCeoLogs([`[CEO] Launching saved swarm team: "${team.name}". Goal: "${team.goal}"`]);
+    setAgents([]);
+    setFinalSummary(null);
+    setProvisioning(null);
+    setSelectedAgentId(null);
+    toast(`Running saved team: ${team.name}`, "success");
+  }, [ws, toast]);
+
+  const saveCurrentTeam = async () => {
+    if (!teamNameInput.trim()) {
+      toast("Please enter a team name.", "error");
+      return;
+    }
+    try {
+      const agentsPayload = agents.map(a => ({
+        id: a.id,
+        role: a.role,
+        tools: a.tools,
+        task: a.currentTask || ""
+      }));
+      const res = await fetch("/api/swarm/teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: teamNameInput.trim(),
+          goal: activeGoal,
+          agents: agentsPayload
+        })
+      });
+      if (res.ok) {
+        toast(`Team "${teamNameInput}" saved successfully!`, "success");
+        setTeamNameInput("");
+        setShowSaveModal(false);
+        fetchSavedTeams();
+      } else {
+        const err = await res.json() as any;
+        toast(`Error: ${err.message || "Failed to save team"}`, "error");
+      }
+    } catch (err: any) {
+      toast(`Failed to save team: ${err.message}`, "error");
+    }
+  };
+
+  const deleteSavedTeam = async (name: string) => {
+    try {
+      const res = await fetch("/api/swarm/teams/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (res.ok) {
+        toast(`Team "${name}" deleted.`, "success");
+        fetchSavedTeams();
+      }
+    } catch (err) {
+      console.error("Failed to delete saved team", err);
+    }
+  };
+
   const startSwarm = useCallback(() => {
     if (!goal.trim() || !ws || swarmStatus === "running" || swarmStatus === "planning") return;
     ws.send(JSON.stringify({ type: "swarm_goal", goal }));
@@ -236,20 +336,68 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     <div className="swarm-container">
       {/* ── Goal Input Bar (Visible when idle, done, or error) ── */}
       {(swarmStatus === "idle" || swarmStatus === "done" || swarmStatus === "error") && (
-        <div className="card goal-card">
-          <div className="card-header font-bold text-lg">Define Swarm Objectives</div>
-          <p className="card-desc">Enter a high-level goal. The CEO agent will build a custom sub-agent team, design and provision custom tools on demand, and compile the final results.</p>
-          <div className="goal-input-wrapper">
-            <textarea
-              className="goal-input"
-              rows={2}
-              placeholder="e.g. Write a script that checks current system CPU load, stores it in cpu_log.txt, and sends a terminal alert if it exceeds 80%..."
-              value={goal}
-              onChange={e => setGoal(e.target.value)}
-            />
-            <button className="btn btn-primary btn-launch" onClick={startSwarm} disabled={!goal.trim() || !ws}>
-              Launch Swarm Team
-            </button>
+        <div className="saved-teams-grid">
+          {/* Define Swarm Objectives */}
+          <div className="card goal-card" style={{ height: "fit-content" }}>
+            <div className="card-header font-bold text-lg">Define Swarm Objectives</div>
+            <p className="card-desc">Enter a high-level goal. The CEO agent will build a custom sub-agent team, design and provision custom tools on demand, and compile the final results.</p>
+            <div className="goal-input-wrapper">
+              <textarea
+                className="goal-input"
+                rows={2}
+                placeholder="e.g. Write a script that checks current system CPU load, stores it in cpu_log.txt, and sends a terminal alert if it exceeds 80%..."
+                value={goal}
+                onChange={e => setGoal(e.target.value)}
+              />
+              <button className="btn btn-primary btn-launch" onClick={startSwarm} disabled={!goal.trim() || !ws}>
+                Launch Swarm Team
+              </button>
+            </div>
+          </div>
+
+          {/* Saved Swarm Teams Library */}
+          <div className="card goal-card" style={{ display: "flex", flexDirection: "column" }}>
+            <div className="card-header font-bold text-lg">Saved Swarm Teams</div>
+            <p className="card-desc">Launch previously saved custom agent teams directly without re-planning.</p>
+            <div className="saved-teams-container">
+              {savedTeams.length === 0 ? (
+                <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mute)", fontSize: 13, fontFamily: "var(--font-mono)" }}>
+                  No saved teams yet. Run a swarm and save its composition to see it here!
+                </div>
+              ) : (
+                savedTeams.map((team, idx) => (
+                  <div key={idx} className="saved-team-card">
+                    <div className="saved-team-info">
+                      <h4>{team.name}</h4>
+                      <div className="saved-team-goal">"{team.goal}"</div>
+                      <div className="saved-team-agent-tags">
+                        {team.agents.map((agent, aIdx) => (
+                          <span key={aIdx} className="saved-team-agent-tag">
+                            {agent.id}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="saved-team-actions">
+                      <button 
+                        className="btn btn-secondary btn-small"
+                        onClick={() => deleteSavedTeam(team.name)}
+                        style={{ color: "var(--danger)" }}
+                      >
+                        Delete
+                      </button>
+                      <button 
+                        className="btn btn-primary btn-small"
+                        onClick={() => launchSavedTeam(team)}
+                        disabled={!ws}
+                      >
+                        Launch Team
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -265,6 +413,15 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 <h3 className="goal-text">"{activeGoal}"</h3>
               </div>
               <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                {agents.length > 0 && (
+                  <button 
+                    className="btn btn-secondary text-xs" 
+                    onClick={() => setShowSaveModal(true)}
+                    style={{ padding: "6px 12px", height: "auto", display: "flex", alignItems: "center", gap: 4 }}
+                  >
+                    💾 Save Team
+                  </button>
+                )}
                 <div style={{ textAlign: "right" }}>
                   <span className="text-muted text-xs font-mono">ELAPSED TIME</span>
                   <div className="time-text font-mono font-bold">{formatTime(elapsedTime)}</div>
@@ -417,6 +574,32 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Save Team Modal ── */}
+      {showSaveModal && (
+        <div className="modal-overlay">
+          <div className="card modal-card" style={{ maxWidth: 400, width: "100%", padding: 24 }}>
+            <h3 className="text-white font-bold text-lg mb-2">Save Swarm Team</h3>
+            <p className="text-muted text-xs mb-4">Give this custom team composition a memorable name to run it instantly in the future.</p>
+            <input
+              type="text"
+              className="goal-input"
+              style={{ width: "100%", marginBottom: 16, height: "auto" }}
+              placeholder="e.g. Doc QA Coder Team"
+              value={teamNameInput}
+              onChange={e => setTeamNameInput(e.target.value)}
+            />
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button className="btn btn-secondary" onClick={() => { setShowSaveModal(false); setTeamNameInput(""); }}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={saveCurrentTeam}>
+                Save Team
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -2043,3 +2043,121 @@ select {
   from { transform: translateY(-10px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* ── Swarm Teams Styles ─────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-card {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  animation: springUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.saved-teams-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+}
+
+@media (min-width: 768px) {
+  .saved-teams-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.saved-teams-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-sm);
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.saved-team-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.saved-team-card:hover {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.02);
+}
+
+.saved-team-info h4 {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.saved-team-goal {
+  font-size: 12px;
+  color: var(--mute);
+  margin-top: 4px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.saved-team-agent-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.saved-team-agent-tag {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+}
+
+.saved-team-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px dashed var(--hairline);
+  padding-top: var(--spacing-sm);
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 11px;
+  height: 24px;
+}

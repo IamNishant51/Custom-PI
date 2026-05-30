@@ -20,6 +20,25 @@ const HOST = process.env.WEB_HOST || "127.0.0.1";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+const TEAMS_FILE = path.join(PI_DIR, "swarm-teams.json");
+
+function loadSwarmTeams() {
+  try {
+    if (fs.existsSync(TEAMS_FILE)) {
+      return JSON.parse(fs.readFileSync(TEAMS_FILE, "utf8"));
+    }
+  } catch {}
+  return [];
+}
+
+function saveSwarmTeams(teams) {
+  try {
+    fs.writeFileSync(TEAMS_FILE, JSON.stringify(teams, null, 2));
+  } catch (err) {
+    console.error("[Web Server] Failed to save swarm teams:", err);
+  }
+}
+
 function loadSettings() {
   try { return JSON.parse(fs.readFileSync(path.join(PI_DIR, "settings.json"), "utf8")); }
   catch { return {}; }
@@ -1216,78 +1235,18 @@ async function handleSubAgent(socket, agentId, task) {
   socket.send(JSON.stringify({ type: "subagent_done", agentId, result: "Max turns reached." }));
 }
 
-async function handleSwarmGoal(socket, goal) {
-  socket.send(JSON.stringify({ type: "swarm_start", goal }));
-  socket.send(JSON.stringify({ type: "ceo_thought", message: `CEO Agent initialized. Analyzing goal: "${goal}"` }));
-
+async function executeSwarmCampaign(socket, goal, agents) {
   const model = resolveModel();
   const auth = getModelAuth(model);
 
-  // 1. CEO Plan Formulation
-  let plan = { agents: [] };
-  try {
-    const planPrompt = `You are the CEO of a multi-agent swarm development team.
-Your task is to break down the user's high-level goal: "${goal}" into a team of 2 to 3 specialized sub-agents.
-Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch.
-
-Return your plan strictly as a JSON object with this shape:
-{
-  "agents": [
-    {
-      "id": "researcher", // alphanumeric, lowercase
-      "role": "Description of the agent's specialization",
-      "tools": ["web_search", "web_fetch"],
-      "task": "Specific task for this agent"
-    }
-  ]
-}`;
-
-    const stream = streamSimple(model, {
-      systemPrompt: "You formulate multi-agent plans. Output JSON only.",
-      messages: [{ role: "user", content: [{ type: "text", text: planPrompt }] }],
-    }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
-
-    let rawResponse = "";
-    for await (const event of stream) {
-      if (event.type === "text_delta") rawResponse += event.delta;
-    }
-    const result = await stream.result();
-    
-    // Parse JSON from response
-    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      plan = JSON.parse(jsonMatch[0]);
-    }
-  } catch (err) {
-    console.error("[Swarm CEO] Planning failed, falling back to default plan:", err);
-  }
-
-  // Fallback if planning fails
-  if (!plan.agents || plan.agents.length === 0) {
-    plan.agents = [
-      {
-        id: "researcher",
-        role: "Gathers requirements and analyzes files",
-        tools: ["list_dir", "glob", "grep", "web_search"],
-        task: `Research specifications and requirements to achieve: ${goal}`
-      },
-      {
-        id: "coder",
-        role: "Implements scripts and code updates",
-        tools: ["view_file", "write", "edit", "bash"],
-        task: `Write code and scripts to implement: ${goal}`
-      }
-    ];
-  }
-
   // Send plan to client
-  socket.send(JSON.stringify({ type: "ceo_plan", agents: plan.agents }));
+  socket.send(JSON.stringify({ type: "ceo_plan", agents }));
 
   const agentResults = {};
   const activeTools = getActiveTools();
 
   // 2. Sequential Agent Execution Loop
-  for (const agent of plan.agents) {
+  for (const agent of agents) {
     socket.send(JSON.stringify({ type: "ceo_thought", message: `Activating sub-agent '${agent.id}' for task: ${agent.task}` }));
     socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
 
@@ -1438,6 +1397,73 @@ Please write a brief summary report for the USER detailing what the sub-agents h
   socket.send(JSON.stringify({ type: "ceo_summary", summary }));
 }
 
+async function handleSwarmGoal(socket, goal) {
+  socket.send(JSON.stringify({ type: "swarm_start", goal }));
+  socket.send(JSON.stringify({ type: "ceo_thought", message: `CEO Agent initialized. Analyzing goal: "${goal}"` }));
+
+  const model = resolveModel();
+  const auth = getModelAuth(model);
+
+  // 1. CEO Plan Formulation
+  let plan = { agents: [] };
+  try {
+    const planPrompt = `You are the CEO of a multi-agent swarm development team.
+Your task is to break down the user's high-level goal: "${goal}" into a team of 2 to 3 specialized sub-agents.
+Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch.
+
+Return your plan strictly as a JSON object with this shape:
+{
+  "agents": [
+    {
+      "id": "researcher", // alphanumeric, lowercase
+      "role": "Description of the agent's specialization",
+      "tools": ["web_search", "web_fetch"],
+      "task": "Specific task for this agent"
+    }
+  ]
+}`;
+
+    const stream = streamSimple(model, {
+      systemPrompt: "You formulate multi-agent plans. Output JSON only.",
+      messages: [{ role: "user", content: [{ type: "text", text: planPrompt }] }],
+    }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+    let rawResponse = "";
+    for await (const event of stream) {
+      if (event.type === "text_delta") rawResponse += event.delta;
+    }
+    const result = await stream.result();
+    
+    // Parse JSON from response
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      plan = JSON.parse(jsonMatch[0]);
+    }
+  } catch (err) {
+    console.error("[Swarm CEO] Planning failed, falling back to default plan:", err);
+  }
+
+  // Fallback if planning fails
+  if (!plan.agents || plan.agents.length === 0) {
+    plan.agents = [
+      {
+        id: "researcher",
+        role: "Gathers requirements and analyzes files",
+        tools: ["list_dir", "glob", "grep", "web_search"],
+        task: `Research specifications and requirements to achieve: ${goal}`
+      },
+      {
+        id: "coder",
+        role: "Implements scripts and code updates",
+        tools: ["view_file", "write", "edit", "bash"],
+        task: `Write code and scripts to implement: ${goal}`
+      }
+    ];
+  }
+
+  await executeSwarmCampaign(socket, goal, plan.agents);
+}
+
 // ── Server ─────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1573,6 +1599,35 @@ async function main() {
   // Sub-agents
   app.get("/api/agents", async () => ({ agents: listAgents() }));
 
+  // Swarm Teams Storage
+  app.get("/api/swarm/teams", async () => ({ teams: loadSwarmTeams() }));
+  app.post("/api/swarm/teams", async (req) => {
+    const { name, goal, agents } = req.body;
+    if (!name || !agents || !Array.isArray(agents)) {
+      throw new Error("Invalid request body. Name and agents array are required.");
+    }
+    const teams = loadSwarmTeams();
+    const existingIndex = teams.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+    const newTeam = { name, goal, agents, createdAt: new Date().toISOString() };
+    if (existingIndex >= 0) {
+      teams[existingIndex] = newTeam;
+    } else {
+      teams.push(newTeam);
+    }
+    saveSwarmTeams(teams);
+    return { ok: true, team: newTeam };
+  });
+  app.post("/api/swarm/teams/delete", async (req) => {
+    const { name } = req.body;
+    if (!name) {
+      throw new Error("Name is required.");
+    }
+    const teams = loadSwarmTeams();
+    const updated = teams.filter(t => t.name.toLowerCase() !== name.toLowerCase());
+    saveSwarmTeams(updated);
+    return { ok: true };
+  });
+
   // Memory
   app.post("/api/memory/search", async (req) => ({ results: memorySearch(req.body.query, req.body.k ?? 5) }));
   app.post("/api/memory/store", async (req) => {
@@ -1632,6 +1687,15 @@ async function main() {
       if (data.type === "swarm_goal") {
         const { goal } = data;
         try { await handleSwarmGoal(socket, goal); }
+        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
+      }
+
+      if (data.type === "swarm_saved_team") {
+        const { goal, agents } = data;
+        try {
+          socket.send(JSON.stringify({ type: "swarm_start", goal }));
+          await executeSwarmCampaign(socket, goal, agents);
+        }
         catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
       }
     });
