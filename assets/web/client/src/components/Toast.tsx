@@ -8,13 +8,13 @@ export function useToast() { return useContext(ToastContext); }
 
 let toastId = 0;
 
-export function Toaster({ children }: { children?: React.ReactNode }) {
+export function ToasterProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
     const id = ++toastId;
     setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
   }, []);
 
   return (

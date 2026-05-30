@@ -1,4 +1,8 @@
 import { View } from "../App";
+import {
+  AsciiChat, AsciiDashboard, AsciiVault, AsciiBudget, AsciiMemory,
+  AsciiWorkProducts, AsciiAgents, AsciiMCP, AsciiSettings,
+} from "./Icons";
 
 interface SidebarProps {
   activeView: View;
@@ -6,38 +10,43 @@ interface SidebarProps {
   wsConnected: boolean;
 }
 
-const NAV_ITEMS: { view: View; icon: string; label: string }[] = [
-  { view: "chat", icon: "💬", label: "Chat" },
-  { view: "dashboard", icon: "📊", label: "Dashboard" },
-  { view: "vault", icon: "🔐", label: "Secrets Vault" },
-  { view: "budget", icon: "💰", label: "Budget" },
-  { view: "memory", icon: "🧠", label: "Memory" },
-  { view: "work-products", icon: "📂", label: "Work Products" },
+const NAV_ITEMS: { view: View; icon: typeof AsciiChat; label: string }[] = [
+  { view: "chat", icon: AsciiChat, label: "Chat" },
+  { view: "dashboard", icon: AsciiDashboard, label: "Dashboard" },
+  { view: "vault", icon: AsciiVault, label: "Secrets Vault" },
+  { view: "budget", icon: AsciiBudget, label: "Budget" },
+  { view: "memory", icon: AsciiMemory, label: "Memory" },
+  { view: "work-products", icon: AsciiWorkProducts, label: "Work Products" },
+  { view: "agents", icon: AsciiAgents, label: "Sub-Agents" },
+  { view: "mcp", icon: AsciiMCP, label: "MCP Servers" },
+  { view: "settings", icon: AsciiSettings, label: "Settings" },
 ];
 
 export default function Sidebar({ activeView, onNavigate, wsConnected }: SidebarProps) {
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <span>✦</span>
         <span>CUSTOM-PI</span>
       </div>
       <div className="sidebar-nav">
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.view}
-            className={`nav-item ${activeView === item.view ? "active" : ""}`}
-            onClick={() => onNavigate(item.view)}
-          >
-            <span className="nav-icon">{item.icon}</span>
-            <span>{item.label}</span>
-          </button>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.view}
+              className={`nav-item ${activeView === item.view ? "active" : ""}`}
+              onClick={() => onNavigate(item.view)}
+            >
+              <span className="nav-marker">{activeView === item.view ? "[x]" : "[ ]"}</span>
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </div>
-      <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-muted)" }}>
+      <div style={{ padding: "8px 16px", borderTop: "1px solid var(--hairline)", fontSize: 11, color: "var(--mute)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div className="status-dot" style={{ background: wsConnected ? "var(--accent-green)" : "var(--accent-red)" }} />
-          {wsConnected ? "Server Connected" : "Disconnected"}
+          <div className="status-dot" style={{ background: wsConnected ? "var(--success)" : "var(--danger)" }} />
+          {wsConnected ? "connected" : "offline"}
         </div>
       </div>
     </div>

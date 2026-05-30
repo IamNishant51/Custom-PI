@@ -21,25 +21,25 @@ export default function Dashboard() {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-label">Total Tokens</div>
-          <div className="stat-value" style={{ color: "var(--accent-blue)" }}>
+          <div className="stat-value">
             {stats ? stats.totalTokens?.toLocaleString() : "—"}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Cost</div>
-          <div className="stat-value" style={{ color: "var(--accent-green)" }}>
+          <div className="stat-value">
             {stats ? `$${stats.totalCostUsd?.toFixed(4)}` : "—"}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Sessions</div>
-          <div className="stat-value" style={{ color: "var(--accent-orange)" }}>
+          <div className="stat-value">
             {stats ? stats.totalSessions : "—"}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Memory Entries</div>
-          <div className="stat-value" style={{ color: "var(--accent-pink)" }}>
+          <div className="stat-value">
             {memory ? memory.totalEntries : "—"}
           </div>
         </div>
@@ -68,7 +68,7 @@ export default function Dashboard() {
       {vaultHealth && (
         <div className="card">
           <div className="card-header">Vault Status</div>
-          <div style={{ fontSize: 13, color: "var(--accent-green)" }}>{vaultHealth}</div>
+          <div style={{ fontSize: 13, color: "var(--success)" }}>{vaultHealth}</div>
         </div>
       )}
     </div>

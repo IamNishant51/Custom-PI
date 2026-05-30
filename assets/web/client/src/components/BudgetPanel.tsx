@@ -28,19 +28,19 @@ export default function BudgetPanel() {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-label">Total Tokens</div>
-          <div className="stat-value" style={{ color: "var(--accent-blue)" }}>{stats?.totalTokens?.toLocaleString() || "—"}</div>
+          <div className="stat-value">{stats?.totalTokens?.toLocaleString() || "—"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Cost</div>
-          <div className="stat-value" style={{ color: "var(--accent-green)" }}>${stats?.totalCostUsd?.toFixed(4) || "—"}</div>
+          <div className="stat-value">${stats?.totalCostUsd?.toFixed(4) || "—"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Today Tokens</div>
-          <div className="stat-value" style={{ color: "var(--accent-orange)" }}>{stats?.dailyTokens?.toLocaleString() || "—"}</div>
+          <div className="stat-value">{stats?.dailyTokens?.toLocaleString() || "—"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Today Cost</div>
-          <div className="stat-value" style={{ color: "var(--accent-pink)" }}>${stats?.dailyCostUsd?.toFixed(4) || "—"}</div>
+          <div className="stat-value">${stats?.dailyCostUsd?.toFixed(4) || "—"}</div>
         </div>
       </div>
 
@@ -49,15 +49,15 @@ export default function BudgetPanel() {
         {editMode ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 400 }}>
             <div>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Max Session Tokens</label>
-              <input type="number" value={form.maxSessionTokens} onChange={e => setForm(f => ({ ...f, maxSessionTokens: parseInt(e.target.value) || 0 }))} />
+              <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Max Session Tokens</label>
+<input type="number" value={form.maxSessionTokens} onChange={e => setForm(f => ({ ...f, maxSessionTokens: parseInt(e.target.value) || 0 }))} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Max Daily Tokens</label>
-              <input type="number" value={form.maxDailyTokens} onChange={e => setForm(f => ({ ...f, maxDailyTokens: parseInt(e.target.value) || 0 }))} />
+              <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Max Daily Tokens</label>
+<input type="number" value={form.maxDailyTokens} onChange={e => setForm(f => ({ ...f, maxDailyTokens: parseInt(e.target.value) || 0 }))} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Warning Threshold</label>
+              <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Warning Threshold</label>
               <input type="number" step="0.1" min="0" max="1" value={form.warningThreshold} onChange={e => setForm(f => ({ ...f, warningThreshold: parseFloat(e.target.value) || 0.8 }))} />
             </div>
             <div style={{ display: "flex", gap: 8 }}>

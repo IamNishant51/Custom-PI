@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useToast } from "./Toast";
+import Markdown from "./Markdown";
 
 interface MemoryEntry {
   id: string;
@@ -60,17 +61,17 @@ export default function MemoryPanel() {
       <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <div className="stat-card">
           <div className="stat-label">Total Entries</div>
-          <div className="stat-value" style={{ color: "var(--accent-blue)", fontSize: 20 }}>{stats?.totalEntries || "—"}</div>
+          <div className="stat-value" style={{ fontSize: 20 }}>{stats?.totalEntries || "—"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">By Type</div>
-          <div style={{ fontSize: 11, marginTop: 4, color: "var(--text-secondary)" }}>
+          <div style={{ fontSize: 11, marginTop: 4, color: "var(--muted)" }}>
             {stats?.byType ? Object.entries(stats.byType).map(([k, v]) => `${k}: ${v}`).join(", ") : "—"}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Avg Importance</div>
-          <div className="stat-value" style={{ color: "var(--accent-orange)", fontSize: 20 }}>{stats?.averageImportance || "—"}</div>
+          <div className="stat-value" style={{ fontSize: 20 }}>{stats?.averageImportance || "—"}</div>
         </div>
       </div>
 
@@ -112,8 +113,8 @@ export default function MemoryPanel() {
               {results.map((r, i) => (
                 <tr key={r.id || i}>
                   <td>{i + 1}</td>
-                  <td><span style={{ color: r.type === "decision" ? "var(--accent-orange)" : r.type === "skill" ? "var(--accent-green)" : "var(--accent-blue)" }}>{r.type}</span></td>
-                  <td style={{ maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.content}</td>
+                  <td><span style={{ fontWeight: 700, color: r.type === "decision" ? "var(--ink)" : r.type === "skill" ? "var(--success)" : "var(--body)" }}>{r.type}</span></td>
+                  <td style={{ maxWidth: 400, maxHeight: 60, overflow: "hidden" }}><Markdown content={r.content} /></td>
                   <td>{r.score ? `${(r.score * 100).toFixed(0)}%` : "—"}</td>
                 </tr>
               ))}

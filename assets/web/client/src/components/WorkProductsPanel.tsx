@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Markdown from "./Markdown";
 
 interface WorkProduct {
   id: string;
@@ -26,10 +27,10 @@ export default function WorkProductsPanel() {
   }, []);
 
   const actionColors: Record<string, string> = {
-    create: "var(--accent-green)",
-    modify: "var(--accent-orange)",
-    read: "var(--accent-blue)",
-    delete: "var(--accent-red)",
+    create: "var(--success)",
+    modify: "var(--ink)",
+    read: "var(--charcoal)",
+    delete: "var(--danger)",
   };
 
   return (
@@ -54,10 +55,10 @@ export default function WorkProductsPanel() {
               <tbody>
                 {products.map((p, i) => (
                   <tr key={p.id || i}>
-                    <td><span style={{ color: actionColors[p.action] || "var(--text-primary)", fontWeight: 600 }}>{p.action}</span></td>
+                    <td><span style={{ color: actionColors[p.action] || "var(--ink)", fontWeight: 500 }}>{p.action}</span></td>
                     <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>{p.filePath}</td>
                     <td>{p.agent}</td>
-                    <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{p.timestamp ? new Date(p.timestamp).toLocaleString() : "—"}</td>
+                    <td style={{ fontSize: 12, color: "var(--muted)" }}>{p.timestamp ? new Date(p.timestamp).toLocaleString() : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -67,7 +68,7 @@ export default function WorkProductsPanel() {
       ) : (
         <div className="card">
           <div className="card-header">Summary</div>
-          <div style={{ fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{summary || "No summary available."}</div>
+          <Markdown content={summary || "No summary available."} />
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useToast } from "./Toast";
+import { AsciiEye, AsciiTrash, AsciiRefresh } from "./Icons";
 
 export default function VaultPanel() {
   const [keys, setKeys] = useState<string[]>([]);
@@ -80,7 +81,7 @@ export default function VaultPanel() {
           <div className="card-header">Vault Health</div>
           <div style={{ fontSize: 13 }}>
             <div style={{ marginBottom: 8 }}>Keys stored: <strong>{keys.length}</strong></div>
-            <button className="btn btn-ghost" onClick={refreshKeys}>Refresh</button>
+            <button className="btn btn-ghost" onClick={refreshKeys} style={{ display: "flex", alignItems: "center", gap: 4 }}><AsciiRefresh size={14} /> refresh</button>
           </div>
         </div>
       </div>
@@ -102,17 +103,21 @@ export default function VaultPanel() {
                   <td style={{ fontWeight: 600 }}>{key}</td>
                   <td>
                     {revealed[key] ? (
-                      <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--accent-orange)" }}>{revealed[key]}</span>
+                      <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--ink)" }}>{revealed[key]}</span>
                     ) : (
-                      <span style={{ color: "var(--text-muted)" }}>••••••••</span>
+                      <span style={{ color: "var(--muted-soft)" }}>********</span>
                     )}
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-ghost" onClick={() => revealSecret(key)}>
-                        {revealed[key] ? "Hide" : "Reveal"}
+                      <button className="btn btn-ghost" onClick={() => revealSecret(key)} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <AsciiEye size={14} />
+                        {revealed[key] ? "hide" : "show"}
                       </button>
-                      <button className="btn btn-danger" onClick={() => deleteSecret(key)}>Delete</button>
+                      <button className="btn btn-ghost" onClick={() => deleteSecret(key)} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--danger)" }}>
+                        <AsciiTrash size={14} />
+                        del
+                      </button>
                     </div>
                   </td>
                 </tr>
