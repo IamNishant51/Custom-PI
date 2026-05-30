@@ -766,11 +766,8 @@ class WebSession {
         if (att.type && att.type.startsWith("image/")) {
           content.push({
             type: "image",
-            source: {
-              type: "base64",
-              media_type: att.type,
-              data: att.data
-            }
+            mimeType: att.type,
+            data: att.data
           });
         } else {
           content.push({
