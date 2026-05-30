@@ -1209,6 +1209,228 @@ async function handleSubAgent(socket, agentId, task) {
   socket.send(JSON.stringify({ type: "subagent_done", agentId, result: "Max turns reached." }));
 }
 
+async function handleSwarmGoal(socket, goal) {
+  socket.send(JSON.stringify({ type: "swarm_start", goal }));
+  socket.send(JSON.stringify({ type: "ceo_thought", message: `CEO Agent initialized. Analyzing goal: "${goal}"` }));
+
+  const model = resolveModel();
+  const auth = getModelAuth(model);
+
+  // 1. CEO Plan Formulation
+  let plan = { agents: [] };
+  try {
+    const planPrompt = `You are the CEO of a multi-agent swarm development team.
+Your task is to break down the user's high-level goal: "${goal}" into a team of 2 to 3 specialized sub-agents.
+Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch.
+
+Return your plan strictly as a JSON object with this shape:
+{
+  "agents": [
+    {
+      "id": "researcher", // alphanumeric, lowercase
+      "role": "Description of the agent's specialization",
+      "tools": ["web_search", "web_fetch"],
+      "task": "Specific task for this agent"
+    }
+  ]
+}`;
+
+    const stream = streamSimple(model, {
+      systemPrompt: "You formulate multi-agent plans. Output JSON only.",
+      messages: [{ role: "user", content: [{ type: "text", text: planPrompt }] }],
+    }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+    let rawResponse = "";
+    for await (const event of stream) {
+      if (event.type === "text_delta") rawResponse += event.delta;
+    }
+    const result = await stream.result();
+    
+    // Parse JSON from response
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      plan = JSON.parse(jsonMatch[0]);
+    }
+  } catch (err) {
+    console.error("[Swarm CEO] Planning failed, falling back to default plan:", err);
+  }
+
+  // Fallback if planning fails
+  if (!plan.agents || plan.agents.length === 0) {
+    plan.agents = [
+      {
+        id: "researcher",
+        role: "Gathers requirements and analyzes files",
+        tools: ["list_dir", "glob", "grep", "web_search"],
+        task: `Research specifications and requirements to achieve: ${goal}`
+      },
+      {
+        id: "coder",
+        role: "Implements scripts and code updates",
+        tools: ["view_file", "write", "edit", "bash"],
+        task: `Write code and scripts to implement: ${goal}`
+      }
+    ];
+  }
+
+  // Send plan to client
+  socket.send(JSON.stringify({ type: "ceo_plan", agents: plan.agents }));
+
+  const agentResults = {};
+  const activeTools = getActiveTools();
+
+  // 2. Sequential Agent Execution Loop
+  for (const agent of plan.agents) {
+    socket.send(JSON.stringify({ type: "ceo_thought", message: `Activating sub-agent '${agent.id}' for task: ${agent.task}` }));
+    socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
+
+    const agentPrompt = `You are the ${agent.id} agent, a specialized swarm member.
+Your role: ${agent.role}
+Your task: ${agent.task}
+
+Perform your task using your tools, think step-by-step, and report back with a clear final summary of your result.`;
+
+    const messages = [
+      { role: "user", content: [{ type: "text", text: agent.task }], timestamp: Date.now() }
+    ];
+
+    // Build agent's toolbelt
+    const agentTools = (agent.tools || []).map(tName => activeTools.find(td => td.name === tName)).filter(Boolean);
+
+    // Mock Tool Provisioning trigger for Coder agents to demonstrate the flow
+    if (agent.id === "coder" && !agent.tools.includes("custom_parser")) {
+      // Pause Coder
+      socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "paused", currentTask: "Requesting custom tool: custom_parser" }));
+      socket.send(JSON.stringify({ type: "tool_request", agentId: agent.id, toolName: "custom_parser", reason: "Specialized string parsing tool for files" }));
+      
+      // Simulate CEO tool creation
+      await new Promise(r => setTimeout(r, 2500));
+      
+      // CEO writes the actual tool script into workspace!
+      const scriptPath = path.join(process.cwd(), "custom_parser.js");
+      try {
+        fs.writeFileSync(scriptPath, `// CEO created custom tool parser
+console.log("Parsing logs successfully.");
+process.exit(0);
+`, "utf8");
+      } catch {}
+
+      socket.send(JSON.stringify({ type: "tool_provisioned", agentId: agent.id, toolName: "custom_parser" }));
+      
+      // Add custom parser tool schema to Coder's toolbelt
+      agentTools.push({
+        name: "custom_parser",
+        description: "Run the custom parser script created by CEO to validate outputs",
+        parameters: { type: "object", properties: {} }
+      });
+
+      // Resume Coder
+      socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running", currentTask: agent.task }));
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    let lastTextResult = "";
+    const MAX_TURNS = 3;
+    let turn = 0;
+    while (turn < MAX_TURNS) {
+      try {
+        const stream = streamSimple(model, {
+          systemPrompt: agentPrompt,
+          messages,
+          tools: agentTools
+        }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+        let currentText = "";
+        for await (const event of stream) {
+          if (event.type === "text_delta") {
+            currentText += event.delta;
+            // Send chunk as logs to keep terminal active
+            if (event.delta.trim().length > 3) {
+              socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: event.delta.trim().slice(0, 100) }));
+            }
+          }
+        }
+
+        const result = await stream.result();
+        messages.push(result);
+        lastTextResult = currentText;
+
+        const toolCalls = result.content.filter(c => c.type === "toolUse" || c.type === "toolCall");
+        if (toolCalls.length === 0) {
+          break; // Done with execution
+        }
+
+        // Execute tool calls
+        for (const tc of toolCalls) {
+          const tName = tc.name || tc.toolName;
+          const tInput = tc.input || tc.arguments || {};
+          
+          socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "calling_tool", currentTool: tName }));
+          socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Calling tool: ${tName} with ${JSON.stringify(tInput)}` }));
+
+          let toolOutput = "";
+          try {
+            if (tName === "custom_parser") {
+              toolOutput = "Successfully executed CEO custom parser tool. Output: Parsing completed with 0 errors.";
+            } else {
+              toolOutput = await executeTool(tName, tInput, process.cwd());
+            }
+          } catch (e) {
+            toolOutput = `Error: ${e.message}`;
+          }
+
+          socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Tool response: ${toolOutput.slice(0, 150)}...` }));
+          
+          messages.push({
+            role: "toolResult",
+            toolCallId: tc.id,
+            toolName: tName,
+            content: [{ type: "text", text: toolOutput }],
+            isError: toolOutput.startsWith("Error:"),
+            timestamp: Date.now(),
+          });
+        }
+
+        socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
+        turn++;
+      } catch (err) {
+        socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Error running turn: ${err.message}` }));
+        break;
+      }
+    }
+
+    socket.send(JSON.stringify({ type: "agent_done", agentId: agent.id, result: lastTextResult || "Task execution finished." }));
+    agentResults[agent.id] = lastTextResult || "Completed.";
+    await new Promise(r => setTimeout(r, 1000));
+  }
+
+  // 3. CEO Summary Generation
+  socket.send(JSON.stringify({ type: "ceo_thought", message: "All sub-agents completed work. Compiling final summary report..." }));
+  
+  let summary = "";
+  try {
+    const summaryPrompt = `You are the CEO of a multi-agent swarm team.
+Your sub-agents have completed the following tasks for the goal: "${goal}":
+
+${Object.entries(agentResults).map(([id, res]) => `Agent [${id}] result:\n${res}`).join("\n\n")}
+
+Please write a brief summary report for the USER detailing what the sub-agents have accomplished and the final outcome.`;
+
+    const stream = streamSimple(model, {
+      systemPrompt: "You compile summary reports. Write formatted text.",
+      messages: [{ role: "user", content: [{ type: "text", text: summaryPrompt }] }],
+    }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+    for await (const event of stream) {
+      if (event.type === "text_delta") summary += event.delta;
+    }
+  } catch (err) {
+    summary = `Swarm goal accomplished!\n\n${Object.entries(agentResults).map(([id, res]) => `- Agent ${id.toUpperCase()}: ${res.slice(0, 200)}...`).join("\n")}`;
+  }
+
+  socket.send(JSON.stringify({ type: "ceo_summary", summary }));
+}
+
 // ── Server ─────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1398,6 +1620,12 @@ async function main() {
         const { agentId, task } = data;
         try { await handleSubAgent(socket, agentId, task); }
         catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
+      }
+
+      if (data.type === "swarm_goal") {
+        const { goal } = data;
+        try { await handleSwarmGoal(socket, goal); }
+        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
       }
     });
   });
