@@ -593,7 +593,7 @@ class McpConnection {
         console.log(`[MCP] Starting server: ${this.cfg.name} (${this.cfg.command} ${(this.cfg.args || []).join(" ")})`);
         
         this.proc = spawn(this.cfg.command, this.cfg.args || [], {
-          stdio: ['pipe', 'pipe', 'inherit'],
+          stdio: ['pipe', 'pipe', 'pipe'],
           shell: process.platform === 'win32'
         });
 
@@ -611,6 +611,13 @@ class McpConnection {
         rl.on('line', (line) => {
           this.handleMessage(line);
         });
+
+        if (this.proc.stderr) {
+          const rlErr = readline.createInterface({ input: this.proc.stderr });
+          rlErr.on('line', (line) => {
+            console.error(`[MCP Server ${this.cfg.name} Stderr] ${line}`);
+          });
+        }
 
         this.initializeHandshake().then(() => {
           resolve();

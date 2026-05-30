@@ -771,7 +771,7 @@ class QuantumHUDWidget implements Component {
   invalidate() {}
 
   render(width: number): string[] {
-    const w = Math.min(width, 95);
+    const w = Math.min(width, 120);
     const borderColor = (s: string) => chalk.hex(C.slate)(s);
     const lines: string[] = [];
 
@@ -1633,7 +1633,7 @@ export default function (pi: ExtensionAPI) {
       return new Promise<void>((resolve, reject) => {
         try {
           this.proc = spawn(this.cfg.command, this.cfg.args || [], {
-            stdio: ['pipe', 'pipe', 'inherit'],
+            stdio: ['pipe', 'pipe', 'pipe'],
             shell: process.platform === 'win32'
           });
 
@@ -1649,6 +1649,13 @@ export default function (pi: ExtensionAPI) {
           rl.on('line', (line) => {
             this.handleMessage(line);
           });
+
+          if (this.proc.stderr) {
+            const rlErr = readline.createInterface({ input: this.proc.stderr });
+            rlErr.on('line', (line) => {
+              logger.debug(`[MCP Server ${this.cfg.name} Stderr] ${line}`);
+            });
+          }
 
           this.initializeHandshake().then(() => {
             resolve();
