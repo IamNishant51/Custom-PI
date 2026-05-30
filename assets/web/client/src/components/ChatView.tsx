@@ -154,13 +154,6 @@ function UserMessage({ content }: { content: string }) {
 
 // ── Thinking Block ─────────────────────────────────────
 
-const THINKING_PLACEHOLDERS = [
-  "Analyzing context", "Searching memory", "Processing request",
-  "Connecting dots", "Formulating approach", "Reviewing codebase",
-  "Weighing options", "Building strategy", "Checking logic",
-  "Gathering insights", "Reasoning through", "Evaluating paths",
-];
-
 function ThinkingBlock({ content, isStreaming }: {
   content: string;
   isStreaming?: boolean;
@@ -168,30 +161,10 @@ function ThinkingBlock({ content, isStreaming }: {
   const [expanded, setExpanded] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
   const [maxH, setMaxH] = useState("0px");
-  const [placeholderIdx, setPlaceholderIdx] = useState(0);
-  const [charPos, setCharPos] = useState(0);
-
-  useEffect(() => {
-    if (!isStreaming) { setCharPos(0); return; }
-    const interval = setInterval(() => {
-      setCharPos(prev => {
-        const current = THINKING_PLACEHOLDERS[placeholderIdx];
-        if (prev >= current.length) {
-          const nextIdx = (placeholderIdx + 1) % THINKING_PLACEHOLDERS.length;
-          setPlaceholderIdx(nextIdx);
-          return 0;
-        }
-        return prev + 1;
-      });
-    }, 50);
-    return () => clearInterval(interval);
-  }, [isStreaming, placeholderIdx]);
 
   useEffect(() => {
     if (ref.current) setMaxH(expanded ? `${ref.current.scrollHeight}px` : "0px");
   }, [expanded, content]);
-
-  const placeholderText = THINKING_PLACEHOLDERS[placeholderIdx].slice(0, charPos);
 
   return (
     <div className="msg msg-thinking stagger-item">
@@ -207,11 +180,12 @@ function ThinkingBlock({ content, isStreaming }: {
         }}
       >
         <div ref={ref} className="thinking-content">
-          {isStreaming ? (
-            <span className="thinking-placeholder">{placeholderText}</span>
-          ) : (
+          {content ? (
             <Markdown content={content} />
+          ) : (
+            <span className="thinking-placeholder">Thinking...</span>
           )}
+          {isStreaming && <span className="streaming-cursor" />}
         </div>
       </div>
     </div>
