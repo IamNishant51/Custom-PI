@@ -44,7 +44,7 @@ Delegate complex engineering, auditing, and research tasks to specialized backgr
 | **`builder`** | Expert Next.js developer equipped to write error-free APIs and frontends. |
 | **`researcher`** | Code explorer that traverses directory trees, reads logs, and tracks logic flows. |
 | **`reviewer`** | Critical auditor verifying security (OWASP), performance, and WCAG accessibility. |
-| **`operator`** | OS operator capable of launching local GUI applications, opening web tools, and managing files. |
+
 
 > [!TIP]
 > You can dynamically generate specialized sub-agents on the fly using `/create_subagent` command.
@@ -80,10 +80,9 @@ graph TD
         Swarm --> Builder[Builder]
         Swarm --> Researcher[Researcher]
         Swarm --> Reviewer[Reviewer]
-        Swarm --> Operator[Operator]
     end
 
-    Builder & Researcher & Reviewer & Operator --> Tools[Local & Web Tools]
+    Builder & Researcher & Reviewer --> Tools[Local & Web Tools]
     Tools --> RAG[Obsidian RAG Memory]
     Tools --> Filesystem[Local Filesystem]
     Tools --> Web[Web Search & Fetch]
