@@ -8,7 +8,7 @@ scripts/
 .env
 .env.local
 .env.*
-dist/
+/dist/
 *.tmp.*
 .DS_Store
 *.swp

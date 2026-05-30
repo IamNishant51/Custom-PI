@@ -192,6 +192,24 @@ Tracks every API call's token usage and estimated cost across all sessions:
 - Append-only JSONL log at `~/.pi/agent/costs/session-costs.jsonl`
 
 ### 14. 📂 Work Products Tracker
+
+### 15. 🌐 Web UI (Local Web Application)
+When `custom-pi` is installed, launch a full web UI alongside the CLI:
+- **Chat interface** with streaming LLM responses, tool call visualization, and conversation history
+- **Dashboard** with live stats: token usage, cost, sessions, memory entries, model list
+- **Secrets Vault manager** — add, reveal, delete encrypted secrets visually
+- **Budget panel** — view token/cost stats, configure session/daily limits and warning thresholds
+- **Memory browser** — search, store, and browse persistent facts with type/importance filters
+- **Work Products viewer** — explore every file the agent created or modified, with action/agent/timestamp
+- **Real-time updates** via WebSocket — tool calls, streaming tokens, and agent progress
+
+```bash
+# Build the web client (one-time)
+npm run build:web
+
+# Launch the web UI (served at http://localhost:4321)
+custom-pi web
+```
 Records every file the agent creates, reads, modifies, or deletes:
 - Each entry includes: agent name, action, file path, hash, size, task context
 - Filterable by session ID
@@ -274,7 +292,10 @@ custom-pi
 │   └── session-costs.jsonl          # Token/cost tracking log
 ├── work-products/
 │   └── products.jsonl               # File change tracking log
-└── extensions/subagents/src/        # Extension source (23 modules)
+├── web/
+│   ├── web-server.mjs              # Web UI server (Fastify + WebSocket)
+│   └── client/dist/                # Built React frontend
+└── extensions/subagents/src/        # Extension source (22 modules)
 ```
 
 ---

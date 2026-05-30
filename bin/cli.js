@@ -9,6 +9,12 @@ const PI_DIR = path.join(os.homedir(), '.pi', 'agent');
 
 const args = process.argv.slice(2);
 
+// Handle "web" subcommand — launch web UI instead of CLI
+if (args.includes('web') && !args.includes('--help') && !args.includes('-h')) {
+  require('./web.js');
+  return; // web.js spawns its own process, don't continue to spawn pi
+}
+
 // Load custom-pi package version
 let customPiVersion = '1.0.0';
 try {

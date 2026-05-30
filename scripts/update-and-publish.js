@@ -36,7 +36,8 @@ const filesToSync = [
   { src: 'extensions/subagents/src/cron-scheduler.ts', dest: 'extensions/subagents/src/cron-scheduler.ts' },
   { src: 'extensions/subagents/src/secret-vault.ts', dest: 'extensions/subagents/src/secret-vault.ts' },
   { src: 'extensions/subagents/src/cost-tracker.ts', dest: 'extensions/subagents/src/cost-tracker.ts' },
-  { src: 'extensions/subagents/src/work-products.ts', dest: 'extensions/subagents/src/work-products.ts' }
+  { src: 'extensions/subagents/src/work-products.ts', dest: 'extensions/subagents/src/work-products.ts' },
+  { src: 'web/web-server.mjs', dest: 'web/web-server.mjs' }
 ];
 
 const assetDirs = [
@@ -62,6 +63,14 @@ for (const f of filesToSync) {
   } else {
     console.warn(`- Warning: Source file not found in active config: ${srcPath}`);
   }
+}
+
+// Build web client
+console.log('\n🔨 Building web client...');
+try {
+  execSync('npm run build:web', { cwd: PACK_DIR, stdio: 'inherit' });
+} catch (e) {
+  console.warn('⚠️ Web client build failed (non-fatal):', e.message);
 }
 
 console.log('\n📈 Bumping package version...');
