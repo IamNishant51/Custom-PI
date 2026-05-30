@@ -32,7 +32,7 @@ console.log(`\x1b[36m✦ Starting Custom-PI Web Server...\x1b[0m`);
 console.log(`\x1b[36m  Port: ${PORT}\x1b[0m\n`);
 
 // Run with node directly (server is .mjs ESM)
-const child = spawn('node', [SERVER_DEST], {
+const child = spawn('node', [SERVER_SRC], {
   stdio: 'inherit',
   env: { ...process.env, WEB_PORT: PORT },
   shell: process.platform === 'win32',
