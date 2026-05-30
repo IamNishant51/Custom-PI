@@ -26,22 +26,22 @@ interface AgentVisualState {
   lastUpdated: number;
 }
 
-// Fixed positions in 3D space for standard agents
+// 3D coordinates optimized for visual balance and hierarchy
 const AGENT_POSITIONS: Record<string, THREE.Vector3> = {
-  ceo: new THREE.Vector3(0, 2.5, 0),
-  builder: new THREE.Vector3(-2.5, -0.5, 1.5),
-  researcher: new THREE.Vector3(2.5, -0.5, 1.5),
-  reviewer: new THREE.Vector3(0, -2.0, -1.0),
-  default: new THREE.Vector3(0, 0, 0), // fallback
+  ceo: new THREE.Vector3(0, 2.2, 0),
+  builder: new THREE.Vector3(-3.2, -0.4, 1.2),
+  researcher: new THREE.Vector3(3.2, -0.4, 1.2),
+  reviewer: new THREE.Vector3(0, -1.8, -1.8),
+  default: new THREE.Vector3(0, 0, 0),
 };
 
-// Node colors based on status
+// Curated futuristic neon color palette
 const STATUS_COLORS = {
-  idle: 0x4f46e5,       // Indigo
-  running: 0xa855f7,    // Purple
-  calling_tool: 0x06b6d4, // Cyan
-  done: 0x10b981,       // Green
-  error: 0xef4444,      // Red
+  idle: 0x4f46e5,       // Neon Indigo
+  running: 0xd946ef,    // Intense Fuchsia
+  calling_tool: 0x06b6d4, // Cyan Glow
+  done: 0x10b981,       // Cyber Green
+  error: 0xf43f5e,      // Crimson Red
 };
 
 export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
@@ -53,10 +53,9 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [logs, setLogs] = useState<Array<{ text: string; type: string; timestamp: string }>>([]);
   const { toast } = useToast();
 
-  // Reference for the Three.js viewport canvas
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Swarm visual state tracking
+  // States dictionary for the React layer
   const [agentStates, setAgentStates] = useState<Record<string, AgentVisualState>>({
     ceo: { status: "idle", currentTool: "", task: "", lastUpdated: 0 },
     builder: { status: "idle", currentTool: "", task: "", lastUpdated: 0 },
@@ -64,7 +63,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     reviewer: { status: "idle", currentTool: "", task: "", lastUpdated: 0 },
   });
 
-  // Trackers ref for Three.js render loop access
+  // Hot ref for immediate frame-loop updates
   const agentStatesRef = useRef<Record<string, AgentVisualState>>({
     ceo: { status: "idle", currentTool: "", task: "", lastUpdated: 0 },
     builder: { status: "idle", currentTool: "", task: "", lastUpdated: 0 },
@@ -72,7 +71,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     reviewer: { status: "idle", currentTool: "", task: "", lastUpdated: 0 },
   });
 
-  // Load available agents
+  // Load agents on startup
   useEffect(() => {
     fetch("/api/agents")
       .then(r => r.json())
@@ -80,7 +79,6 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
         setAgents(d.agents || []);
         if (d.agents?.length > 0) {
           setSelectedAgent(d.agents[0].name);
-          // Initialize states
           const initialStates: Record<string, AgentVisualState> = {};
           d.agents.forEach((a: AgentInfo) => {
             initialStates[a.name.toLowerCase()] = { status: "idle", currentTool: "", task: "", lastUpdated: 0 };
@@ -92,7 +90,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
       .catch(() => {});
   }, []);
 
-  // Listen to WebSocket subagent notifications
+  // Sync WebSocket messages to visual statuses
   useEffect(() => {
     if (!ws) return;
 
@@ -121,14 +119,14 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
         setActiveTab("swarm");
         updateState({ status: "running", task: data.task || "", currentTool: "" });
         setLogs(prev => [...prev, {
-          text: `✦ Started ${data.agentId}: ${data.task?.slice(0, 100)}`,
+          text: `✦ Activated ${data.agentId}: ${data.task?.slice(0, 100)}`,
           type: "start",
           timestamp: timeStr
         }]);
       } else if (data.type === "subagent_tool") {
         updateState({ status: "calling_tool", currentTool: data.name || "" });
         setLogs(prev => [...prev, {
-          text: `  ↳ ${data.agentId} calling tool: [${data.name}]`,
+          text: `  [${data.agentId}] executes ${data.name}`,
           type: "tool",
           timestamp: timeStr
         }]);
@@ -137,7 +135,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
         setRunning(false);
         toast(`Sub-agent ${data.agentId} completed`, "success");
         setLogs(prev => [...prev, {
-          text: `✔ Completed ${data.agentId}`,
+          text: `✔ Swarm member ${data.agentId} idle (completed)`,
           type: "done",
           timestamp: timeStr
         }]);
@@ -146,7 +144,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
         setRunning(false);
         toast(`Sub-agent error: ${data.message}`, "error");
         setLogs(prev => [...prev, {
-          text: `❌ Error ${data.agentId}: ${data.message}`,
+          text: `❌ Failure ${data.agentId}: ${data.message}`,
           type: "error",
           timestamp: timeStr
         }]);
@@ -161,7 +159,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     if (!selectedAgent || !task.trim() || !ws || running) return;
     const timeStr = new Date().toLocaleTimeString();
     setLogs(prev => [...prev, {
-      text: `▶ Delegating tasks to ${selectedAgent}...`,
+      text: `📡 Establishing neural swarm connection with ${selectedAgent}...`,
       type: "delegate",
       timestamp: timeStr
     }]);
@@ -169,7 +167,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     setTask("");
   }, [selectedAgent, task, ws, running]);
 
-  // Three.js Render Logic
+  // Redundant safety checks during Three.js instantiation
   useEffect(() => {
     if (activeTab !== "swarm" || !canvasRef.current) return;
 
@@ -178,114 +176,150 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     if (!parent) return;
 
     const width = parent.clientWidth;
-    const height = Math.max(350, parent.clientHeight || 450);
+    const height = Math.max(380, parent.clientHeight || 500);
 
-    // 1. Scene setup
+    // 1. Scene & Atmosphere Setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a0a);
-    scene.fog = new THREE.FogExp2(0x0a0a0a, 0.08);
+    scene.background = new THREE.Color(0x070708); // Ultra deep space blue-black
+    scene.fog = new THREE.FogExp2(0x070708, 0.07);
 
-    // 2. Camera setup
-    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 100);
-    camera.position.set(0, 0, 8);
+    // 2. Camera Setup
+    const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 100);
+    camera.position.set(0, 1.5, 9.5);
 
-    // 3. Renderer setup
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // 3. WebGL Renderer
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    // 4. Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.15);
-    scene.add(ambientLight);
+    // 4. Advanced Lighting Systems
+    const ambient = new THREE.AmbientLight(0x11111d, 0.4);
+    scene.add(ambient);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(5, 10, 7);
-    scene.add(dirLight);
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    mainLight.position.set(10, 15, 10);
+    scene.add(mainLight);
 
-    // Glowing point lights
+    // Neon spot lights at node positions
     const pointLights: Record<string, THREE.PointLight> = {};
     Object.entries(AGENT_POSITIONS).forEach(([name, pos]) => {
       if (name === "default") return;
-      const pl = new THREE.PointLight(STATUS_COLORS.idle, 1.5, 6);
+      const pl = new THREE.PointLight(STATUS_COLORS.idle, 2, 7, 1.5);
       pl.position.copy(pos);
       scene.add(pl);
       pointLights[name] = pl;
     });
 
-    // 5. Grid/Holographic Guides
-    const gridHelper = new THREE.GridHelper(16, 16, 0x333333, 0x181818);
-    gridHelper.position.y = -3;
-    scene.add(gridHelper);
+    // 5. Polar grid helper for a tactical holographic sonar grid
+    const polarGrid = new THREE.PolarGridHelper(7.5, 16, 8, 64, 0x1f1f2e, 0x101018);
+    polarGrid.position.y = -2.5;
+    scene.add(polarGrid);
 
-    // 6. Data Particle Clouds (Drifting background stars)
-    const particleCount = 200;
+    // 6. Deep Cosmos Particle Networks
     const particleGeometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount * 3; i += 3) {
-      positions[i] = (Math.random() - 0.5) * 15;
-      positions[i + 1] = (Math.random() - 0.5) * 15;
-      positions[i + 2] = (Math.random() - 0.5) * 15;
-    }
-    particleGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const particleMaterial = new THREE.PointsMaterial({
-      color: 0x6366f1,
-      size: 0.08,
-      transparent: true,
-      opacity: 0.6
-    });
-    const particles = new THREE.Points(particleGeometry, particleMaterial);
-    scene.add(particles);
+    const particlesCount = 400;
+    const particlePositions = new Float32Array(particlesCount * 3);
+    const particleColors = new Float32Array(particlesCount * 3);
 
-    // 7. Node meshes
-    const nodeMeshes: Record<string, {
-      sphere: THREE.Mesh;
-      ring: THREE.Mesh;
+    const palette = [0x6366f1, 0xd946ef, 0x06b6d4];
+    for (let i = 0; i < particlesCount * 3; i += 3) {
+      // Random sphere distribution
+      const u = Math.random();
+      const v = Math.random();
+      const theta = u * 2.0 * Math.PI;
+      const phi = Math.acos(2.0 * v - 1.0);
+      const r = 4.0 + Math.random() * 8.0;
+
+      particlePositions[i] = r * Math.sin(phi) * Math.cos(theta);
+      particlePositions[i + 1] = r * Math.sin(phi) * Math.sin(theta);
+      particlePositions[i + 2] = r * Math.cos(phi);
+
+      const color = new THREE.Color(palette[Math.floor(Math.random() * palette.length)]);
+      particleColors[i] = color.r;
+      particleColors[i + 1] = color.g;
+      particleColors[i + 2] = color.b;
+    }
+    particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
+    particleGeometry.setAttribute("color", new THREE.BufferAttribute(particleColors, 3));
+
+    const particleMaterial = new THREE.PointsMaterial({
+      size: 0.07,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.5,
+      blending: THREE.AdditiveBlending
+    });
+    const starfield = new THREE.Points(particleGeometry, particleMaterial);
+    scene.add(starfield);
+
+    // 7. Futuristic Gyroscopic Drones (Agility Nodes)
+    const nodeGroups: Record<string, {
       group: THREE.Group;
+      core: THREE.Mesh;
+      shell: THREE.Mesh;
+      ringX: THREE.Mesh;
+      ringY: THREE.Mesh;
+      pingRing: THREE.Mesh;
       labelSprite: THREE.Sprite | null;
       activeLabelText: string;
-      activeLabelColor: number;
+      bobOffset: number;
     }> = {};
 
-    // Helper to render text labels inside the 3D view using HTML canvas sprites
-    const createTextSprite = (name: string, status: string, tool: string, colorHex: string) => {
-      const labelCanvas = document.createElement("canvas");
-      labelCanvas.width = 256;
-      labelCanvas.height = 96;
-      const ctx = labelCanvas.getContext("2d");
+    const createHUDLabel = (name: string, status: string, tool: string, colorHex: string) => {
+      const c = document.createElement("canvas");
+      c.width = 300;
+      c.height = 110;
+      const ctx = c.getContext("2d");
       if (ctx) {
-        ctx.clearRect(0, 0, 256, 96);
-        // Rounded border card
-        ctx.fillStyle = "rgba(25, 25, 25, 0.85)";
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-        ctx.lineWidth = 2;
+        ctx.clearRect(0, 0, 300, 110);
+        // Glassmorphic translucent panel
+        ctx.fillStyle = "rgba(10, 10, 14, 0.9)";
+        ctx.strokeStyle = colorHex;
+        ctx.lineWidth = 2.5;
+
+        // Custom cyber shape border drawing
         ctx.beginPath();
-        ctx.roundRect(4, 4, 248, 88, 8);
+        ctx.moveTo(6, 6);
+        ctx.lineTo(260, 6);
+        ctx.lineTo(294, 40);
+        ctx.lineTo(294, 104);
+        ctx.lineTo(40, 104);
+        ctx.lineTo(6, 70);
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        // Label name
+        // Technical scanner graphics (crosshairs in corner)
+        ctx.strokeStyle = "rgba(255,255,255,0.15)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(12, 12, 10, 10);
+        ctx.beginPath();
+        ctx.moveTo(17, 8); ctx.lineTo(17, 26);
+        ctx.moveTo(8, 17); ctx.lineTo(26, 17);
+        ctx.stroke();
+
+        // Header Title
         ctx.font = "bold 20px monospace";
         ctx.fillStyle = "#ffffff";
-        ctx.textAlign = "center";
-        ctx.fillText(name.toUpperCase(), 128, 32);
+        ctx.textAlign = "left";
+        ctx.fillText(name.toUpperCase(), 40, 34);
 
-        // Status text
-        ctx.font = "14px monospace";
+        // Status Indicators
+        ctx.font = "bold 13px monospace";
         ctx.fillStyle = colorHex;
-        ctx.fillText(status.toUpperCase(), 128, 54);
+        ctx.fillText(`STATUS // ${status.toUpperCase()}`, 40, 58);
 
-        // Tool text
-        if (tool) {
-          ctx.font = "italic 12px monospace";
-          ctx.fillStyle = "#a5f3fc"; // Cyan-200
-          ctx.fillText(`calling: ${tool}`, 128, 76);
-        }
+        // Current Action/Tool
+        ctx.font = "12px monospace";
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.fillText(tool ? `EXE: [${tool}]` : "SYS: IDLE_MONITOR", 40, 80);
       }
-      const texture = new THREE.CanvasTexture(labelCanvas);
-      const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
-      const sprite = new THREE.Sprite(spriteMaterial);
-      sprite.position.set(0, 1.3, 0);
-      sprite.scale.set(2.0, 0.75, 1);
+
+      const texture = new THREE.CanvasTexture(c);
+      const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.set(0, 1.6, 0);
+      sprite.scale.set(2.4, 0.88, 1);
       return sprite;
     };
 
@@ -295,48 +329,83 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
       const group = new THREE.Group();
       group.position.copy(pos);
 
-      // Inner wireframe sphere
-      const sphereGeom = new THREE.SphereGeometry(0.35, 12, 12);
-      const sphereMat = new THREE.MeshPhongMaterial({
+      // Core: Emissive Solid Icosahedron
+      const coreGeom = new THREE.IcosahedronGeometry(0.24, 0);
+      const coreMat = new THREE.MeshPhongMaterial({
+        color: STATUS_COLORS.idle,
+        emissive: STATUS_COLORS.idle,
+        emissiveIntensity: 1.0,
+        shininess: 80,
+      });
+      const core = new THREE.Mesh(coreGeom, coreMat);
+      group.add(core);
+
+      // Outer Shell: Octahedron Wireframe Cage
+      const shellGeom = new THREE.OctahedronGeometry(0.48, 1);
+      const shellMat = new THREE.MeshPhongMaterial({
         color: STATUS_COLORS.idle,
         wireframe: true,
         transparent: true,
-        opacity: 0.8,
-        emissive: STATUS_COLORS.idle,
-        emissiveIntensity: 0.5,
+        opacity: 0.35,
       });
-      const sphere = new THREE.Mesh(sphereGeom, sphereMat);
-      group.add(sphere);
+      const shell = new THREE.Mesh(shellGeom, shellMat);
+      group.add(shell);
 
-      // Outer orbital ring
-      const ringGeom = new THREE.RingGeometry(0.55, 0.58, 30);
-      const ringMat = new THREE.MeshBasicMaterial({
+      // Orbital Gyro Ring X
+      const rxGeom = new THREE.RingGeometry(0.62, 0.65, 36);
+      const ringMatX = new THREE.MeshBasicMaterial({
         color: STATUS_COLORS.idle,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.4
       });
-      const ring = new THREE.Mesh(ringGeom, ringMat);
-      ring.rotation.x = Math.random() * Math.PI;
-      ring.rotation.y = Math.random() * Math.PI;
-      group.add(ring);
+      const ringX = new THREE.Mesh(rxGeom, ringMatX);
+      group.add(ringX);
 
-      // Initial label
-      const sprite = createTextSprite(name, "idle", "", "#4f46e5");
+      // Orbital Gyro Ring Y
+      const ryGeom = new THREE.RingGeometry(0.70, 0.73, 36);
+      const ringMatY = new THREE.MeshBasicMaterial({
+        color: STATUS_COLORS.idle,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.3
+      });
+      const ringY = new THREE.Mesh(ryGeom, ringMatY);
+      ringY.rotation.x = Math.PI / 2;
+      group.add(ringY);
+
+      // Radar pulse ring (Sonar waves)
+      const pulseGeom = new THREE.RingGeometry(0.1, 0.75, 32);
+      const pulseMat = new THREE.MeshBasicMaterial({
+        color: STATUS_COLORS.idle,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.0,
+      });
+      const pingRing = new THREE.Mesh(pulseGeom, pulseMat);
+      pingRing.rotation.x = Math.PI / 2;
+      group.add(pingRing);
+
+      // Label Overlay Sprite
+      const sprite = createHUDLabel(name, "idle", "", "#4f46e5");
       group.add(sprite);
 
       scene.add(group);
-      nodeMeshes[name] = {
-        sphere,
-        ring,
+
+      nodeGroups[name] = {
         group,
+        core,
+        shell,
+        ringX,
+        ringY,
+        pingRing,
         labelSprite: sprite,
         activeLabelText: "idle-",
-        activeLabelColor: STATUS_COLORS.idle
+        bobOffset: Math.random() * Math.PI * 2
       };
     });
 
-    // 8. Visual links between agents (Glowing network channels)
+    // 8. Communication grid connections (Neon Channels)
     const connections = [
       { from: "ceo", to: "builder" },
       { from: "ceo", to: "researcher" },
@@ -351,66 +420,93 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
       const end = AGENT_POSITIONS[conn.to];
       if (!start || !end) return;
 
-      const lineGeom = new THREE.BufferGeometry().setFromPoints([start, end]);
-      const lineMat = new THREE.LineBasicMaterial({
-        color: 0x333333,
+      const geom = new THREE.BufferGeometry().setFromPoints([start, end]);
+      const mat = new THREE.LineBasicMaterial({
+        color: 0x222233,
         transparent: true,
         opacity: 0.4
       });
-      const line = new THREE.Line(lineGeom, lineMat);
+      const line = new THREE.Line(geom, mat);
       scene.add(line);
       lines.push(line);
     });
 
-    // 9. Data packets flowing along the connections (Visualizing active swarm)
-    interface Packet {
+    // 9. Continuous Neural Streams (Glow trail particles along channels)
+    interface TrailParticle {
       mesh: THREE.Mesh;
-      from: string;
-      to: string;
-      progress: number;
+      from: THREE.Vector3;
+      to: THREE.Vector3;
       speed: number;
+      progress: number;
     }
-    const activePackets: Packet[] = [];
-    const packetGeom = new THREE.SphereGeometry(0.06, 8, 8);
-    const packetMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
+    const trails: TrailParticle[] = [];
+    const trailGeom = new THREE.SphereGeometry(0.04, 6, 6);
+    const trailMat = new THREE.MeshBasicMaterial({ color: 0x9333ea, transparent: true, opacity: 0.8 });
 
-    const spawnPacket = (from: string, to: string) => {
-      const pMesh = new THREE.Mesh(packetGeom, packetMat);
-      scene.add(pMesh);
-      activePackets.push({
-        mesh: pMesh,
-        from,
-        to,
-        progress: 0,
-        speed: 0.015 + Math.random() * 0.01
+    const spawnTrailParticles = () => {
+      connections.forEach(conn => {
+        // Only spawn if any node is active or randomly for ambient vibes
+        const states = agentStatesRef.current;
+        const fromActive = states[conn.from]?.status !== "idle";
+        const toActive = states[conn.to]?.status !== "idle";
+        const probability = (fromActive || toActive) ? 0.35 : 0.08;
+
+        if (Math.random() < probability) {
+          const start = AGENT_POSITIONS[conn.from];
+          const end = AGENT_POSITIONS[conn.to];
+          if (!start || !end) return;
+
+          const mesh = new THREE.Mesh(trailGeom, trailMat.clone());
+          scene.add(mesh);
+          trails.push({
+            mesh,
+            from: start,
+            to: end,
+            speed: 0.007 + Math.random() * 0.01,
+            progress: 0
+          });
+        }
       });
     };
 
-    // Camera Orbit Mouse Controls
+    // 10. Interactive Raycasting Mouse Hover target ring
+    const hoverRingGeom = new THREE.RingGeometry(0.85, 0.9, 4, 1, 0, Math.PI * 2);
+    const hoverRingMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0 });
+    const hoverTargetRing = new THREE.Mesh(hoverRingGeom, hoverRingMat);
+    hoverTargetRing.rotation.x = Math.PI / 2;
+    scene.add(hoverTargetRing);
+
+    let raycaster = new THREE.Raycaster();
+    let mouse = new THREE.Vector2();
+    let hoveredAgent: string | null = null;
+
+    // Mouse controls parameters
     let isDragging = false;
     let previousMousePosition = { x: 0, y: 0 };
-    let cameraAngleX = 0;
+    let cameraAngleX = 0.3;
     let cameraAngleY = 0.2;
-    const cameraRadius = 8;
+    const cameraRadius = 9.0;
 
     const handleMouseDown = () => { isDragging = true; };
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaMove = {
-        x: e.offsetX - previousMousePosition.x,
-        y: e.offsetY - previousMousePosition.y
-      };
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
       if (isDragging) {
-        cameraAngleX -= deltaMove.x * 0.005;
-        cameraAngleY = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraAngleY - deltaMove.y * 0.005));
+        const deltaMove = {
+          x: e.offsetX - previousMousePosition.x,
+          y: e.offsetY - previousMousePosition.y
+        };
+        cameraAngleX -= deltaMove.x * 0.004;
+        cameraAngleY = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, cameraAngleY - deltaMove.y * 0.004));
       }
       previousMousePosition = { x: e.offsetX, y: e.offsetY };
     };
     const handleMouseUp = () => { isDragging = false; };
     const handleMouseWheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Zoom limits
-      camera.position.z = Math.max(4, Math.min(15, camera.position.z + e.deltaY * 0.008));
+      camera.position.z = Math.max(5, Math.min(16, camera.position.z + e.deltaY * 0.006));
     };
 
     canvas.addEventListener("mousedown", handleMouseDown);
@@ -418,112 +514,156 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     window.addEventListener("mouseup", handleMouseUp);
     canvas.addEventListener("wheel", handleMouseWheel);
 
-    // Track resize
     const handleResize = () => {
       const w = parent.clientWidth;
-      const h = Math.max(350, parent.clientHeight || 450);
+      const h = Math.max(380, parent.clientHeight || 500);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
     window.addEventListener("resize", handleResize);
 
-    // 10. Frame render loop
+    // 11. Animation Frame Loop
     let animFrameId: number;
     let clock = new THREE.Clock();
 
     const animate = () => {
       animFrameId = requestAnimationFrame(animate);
-      const elapsed = clock.getElapsedTime();
+      const time = clock.getElapsedTime();
       const states = agentStatesRef.current;
 
-      // Rotate nodes and pulse active ones
-      Object.entries(nodeMeshes).forEach(([name, meshGroup]) => {
-        const state = states[name] || { status: "idle", currentTool: "", task: "" };
-        const color = STATUS_COLORS[state.status] ?? STATUS_COLORS.idle;
+      // Spawn highway data particles
+      if (Math.random() < 0.2) spawnTrailParticles();
 
-        // Spin orbital rings
-        meshGroup.ring.rotation.z += 0.01;
-        meshGroup.ring.rotation.y += 0.005;
+      // Check intersections
+      raycaster.setFromCamera(mouse, camera);
+      let closestAgent: string | null = null;
+      let closestDist = Infinity;
 
-        // Pulsating motion if running/calling tool
-        let scale = 1.0;
-        if (state.status === "running") {
-          scale = 1.0 + Math.sin(elapsed * 6) * 0.15;
-          meshGroup.ring.rotation.z += 0.03;
-        } else if (state.status === "calling_tool") {
-          scale = 1.0 + Math.sin(elapsed * 12) * 0.22;
-          meshGroup.ring.rotation.z += 0.06;
-          // Spawn packets randomly between active nodes
-          if (Math.random() < 0.03 && activePackets.length < 5) {
-            const targets = Object.keys(AGENT_POSITIONS).filter(k => k !== name && k !== "default");
-            const dest = targets[Math.floor(Math.random() * targets.length)];
-            spawnPacket(name, dest);
+      Object.entries(nodeGroups).forEach(([name, node]) => {
+        const ray = new THREE.Ray(camera.position, node.group.position.clone().sub(camera.position).normalize());
+        const distance = camera.position.distanceTo(node.group.position);
+        
+        // Sphere intersection threshold test
+        const sphereBounds = new THREE.Sphere(node.group.position, 0.85);
+        if (raycaster.ray.intersectsSphere(sphereBounds)) {
+          if (distance < closestDist) {
+            closestDist = distance;
+            closestAgent = name;
           }
-        }
-
-        meshGroup.sphere.scale.set(scale, scale, scale);
-
-        // Update colors dynamically
-        (meshGroup.sphere.material as THREE.MeshPhongMaterial).color.setHex(color);
-        (meshGroup.sphere.material as THREE.MeshPhongMaterial).emissive.setHex(color);
-        (meshGroup.ring.material as THREE.MeshBasicMaterial).color.setHex(color);
-        pointLights[name].color.setHex(color);
-
-        // Recreate sprites only when status/tool changes
-        const labelText = `${state.status}-${state.currentTool}`;
-        if (meshGroup.activeLabelText !== labelText) {
-          meshGroup.activeLabelText = labelText;
-          meshGroup.group.remove(meshGroup.labelSprite!);
-
-          // Determine status color string
-          let statusColorStr = "#4f46e5";
-          if (state.status === "running") statusColorStr = "#a855f7";
-          else if (state.status === "calling_tool") statusColorStr = "#06b6d4";
-          else if (state.status === "done") statusColorStr = "#10b981";
-          else if (state.status === "error") statusColorStr = "#ef4444";
-
-          const newSprite = createTextSprite(name, state.status, state.currentTool, statusColorStr);
-          meshGroup.labelSprite = newSprite;
-          meshGroup.group.add(newSprite);
         }
       });
 
-      // Animate packet movements
-      for (let i = activePackets.length - 1; i >= 0; i--) {
-        const p = activePackets[i];
-        p.progress += p.speed;
+      hoveredAgent = closestAgent;
 
-        const start = AGENT_POSITIONS[p.from];
-        const end = AGENT_POSITIONS[p.to];
-        if (start && end) {
-          p.mesh.position.lerpVectors(start, end, p.progress);
+      // Animate connections and packets
+      for (let i = trails.length - 1; i >= 0; i--) {
+        const t = trails[i];
+        t.progress += t.speed;
+
+        t.mesh.position.lerpVectors(t.from, t.to, t.progress);
+        
+        // Fade out slightly near the end
+        if (t.progress > 0.8) {
+          (t.mesh.material as THREE.MeshBasicMaterial).opacity = (1.0 - t.progress) * 5;
         }
 
-        if (p.progress >= 1.0) {
-          scene.remove(p.mesh);
-          activePackets.splice(i, 1);
+        if (t.progress >= 1.0) {
+          scene.remove(t.mesh);
+          t.mesh.geometry.dispose();
+          (t.mesh.material as THREE.Material).dispose();
+          trails.splice(i, 1);
         }
       }
 
-      // Slowly rotate camera or update from mouse coordinates
+      // Render loops on active node meshes
+      Object.entries(nodeGroups).forEach(([name, node]) => {
+        const state = states[name] || { status: "idle", currentTool: "", task: "" };
+        const color = STATUS_COLORS[state.status] ?? STATUS_COLORS.idle;
+
+        // A. Gentle Drone Hover Oscillation (sine wave based)
+        const bob = Math.sin(time * 2.2 + node.bobOffset) * 0.12;
+        node.group.position.y = AGENT_POSITIONS[name].y + bob;
+
+        // B. Spin wireframe octahedron & gyro rings
+        node.shell.rotation.y += 0.006;
+        node.shell.rotation.x += 0.003;
+        
+        node.ringX.rotation.z += 0.015;
+        node.ringY.rotation.z -= 0.01;
+
+        // C. Sonar radar wave animation
+        if (state.status === "running" || state.status === "calling_tool") {
+          node.pingRing.scale.addScalar(0.018);
+          (node.pingRing.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.4 - (node.pingRing.scale.x * 0.22));
+
+          if (node.pingRing.scale.x > 2.2) {
+            node.pingRing.scale.set(0.1, 0.1, 0.1);
+          }
+        } else {
+          // Fade out wave if idle
+          (node.pingRing.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (node.pingRing.material as THREE.MeshBasicMaterial).opacity - 0.02);
+        }
+
+        // D. Highlight sizes on hover
+        let targetScale = hoveredAgent === name ? 1.25 : 1.0;
+        node.core.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+
+        // Update colors dynamically
+        (node.core.material as THREE.MeshPhongMaterial).color.setHex(color);
+        (node.core.material as THREE.MeshPhongMaterial).emissive.setHex(color);
+        (node.shell.material as THREE.MeshPhongMaterial).color.setHex(color);
+        (node.ringX.material as THREE.MeshBasicMaterial).color.setHex(color);
+        (node.ringY.material as THREE.MeshBasicMaterial).color.setHex(color);
+        (node.pingRing.material as THREE.MeshBasicMaterial).color.setHex(color);
+        pointLights[name].color.setHex(color);
+
+        // Recreate sprites texture on status change
+        const labelText = `${state.status}-${state.currentTool}`;
+        if (node.activeLabelText !== labelText) {
+          node.activeLabelText = labelText;
+          node.group.remove(node.labelSprite!);
+          node.labelSprite!.material.map?.dispose();
+          node.labelSprite!.material.dispose();
+
+          let colorStr = "#4f46e5";
+          if (state.status === "running") colorStr = "#d946ef";
+          else if (state.status === "calling_tool") colorStr = "#06b6d4";
+          else if (state.status === "done") colorStr = "#10b981";
+          else if (state.status === "error") colorStr = "#f43f5e";
+
+          const newSprite = createHUDLabel(name, state.status, state.currentTool, colorStr);
+          node.labelSprite = newSprite;
+          node.group.add(newSprite);
+        }
+      });
+
+      // Raycast HUD Hover effect ring tracking
+      if (hoveredAgent && nodeGroups[hoveredAgent]) {
+        hoverTargetRing.position.copy(nodeGroups[hoveredAgent].group.position);
+        hoverTargetRing.rotation.z += 0.02;
+        (hoverTargetRing.material as THREE.MeshBasicMaterial).opacity = 0.5 + Math.sin(time * 8) * 0.2;
+      } else {
+        (hoverTargetRing.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (hoverTargetRing.material as THREE.MeshBasicMaterial).opacity - 0.05);
+      }
+
+      // Camera orientation mapping
       if (!isDragging) {
-        cameraAngleX += 0.0015;
+        cameraAngleX += 0.001; // Auto rotation
       }
       camera.position.x = Math.sin(cameraAngleX) * Math.cos(cameraAngleY) * cameraRadius;
       camera.position.z = Math.cos(cameraAngleX) * Math.cos(cameraAngleY) * cameraRadius;
       camera.position.y = Math.sin(cameraAngleY) * cameraRadius;
-      camera.lookAt(0, 0, 0);
+      camera.lookAt(0, 0.4, 0);
 
       // Rotate background particles
-      particles.rotation.y = elapsed * 0.02;
+      starfield.rotation.y = time * 0.015;
 
       renderer.render(scene, camera);
     };
 
     animate();
 
-    // Clean up
     return () => {
       cancelAnimationFrame(animFrameId);
       window.removeEventListener("resize", handleResize);
@@ -531,7 +671,29 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
       canvas.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       canvas.removeEventListener("wheel", handleMouseWheel);
-      activePackets.forEach(p => scene.remove(p.mesh));
+      
+      // Memory cleanup
+      polarGrid.dispose();
+      particleGeometry.dispose();
+      particleMaterial.dispose();
+      hoverRingGeom.dispose();
+      hoverRingMat.dispose();
+
+      Object.values(nodeGroups).forEach(node => {
+        node.core.geometry.dispose();
+        (node.core.material as THREE.Material).dispose();
+        node.shell.geometry.dispose();
+        (node.shell.material as THREE.Material).dispose();
+        node.ringX.geometry.dispose();
+        (node.ringX.material as THREE.Material).dispose();
+        node.ringY.geometry.dispose();
+        (node.ringY.material as THREE.Material).dispose();
+        node.pingRing.geometry.dispose();
+        (node.pingRing.material as THREE.Material).dispose();
+        node.labelSprite!.material.map?.dispose();
+        node.labelSprite!.material.dispose();
+      });
+
       renderer.dispose();
     };
   }, [activeTab]);
@@ -547,7 +709,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
         <div className="stat-card">
           <div className="stat-label">Running States</div>
           <div style={{ fontSize: 13, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-            <div className="status-dot" style={{ background: running ? "#a855f7" : ws ? "#10b981" : "#ef4444" }} />
+            <div className="status-dot" style={{ background: running ? "#d946ef" : ws ? "#10b981" : "#ef4444" }} />
             {running ? "Swarm Engaged" : ws ? "Ready" : "Disconnected"}
           </div>
         </div>
@@ -571,7 +733,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
           onClick={() => setActiveTab("swarm")}
           style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
         >
-          {running && <span className="pulse-dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "#a855f7" }} />}
+          {running && <span className="pulse-dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "#d946ef" }} />}
           Running Swarm View (3D)
         </button>
       </div>
@@ -630,8 +792,8 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                     className={`agent-card ${selectedAgent === a.name ? "active" : ""}`}
                     onClick={() => setSelectedAgent(a.name)}
                     style={{
-                      border: selectedAgent === a.name ? "1px solid #a855f7" : "1px solid rgba(255,255,255,0.08)",
-                      background: selectedAgent === a.name ? "rgba(168, 85, 247, 0.08)" : "#191919",
+                      border: selectedAgent === a.name ? "1px solid #d946ef" : "1px solid rgba(255,255,255,0.08)",
+                      background: selectedAgent === a.name ? "rgba(217, 70, 239, 0.08)" : "#191919",
                       padding: 12,
                       borderRadius: 8,
                       cursor: "pointer"
@@ -640,7 +802,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                     <div style={{ fontWeight: 600, fontSize: 13, color: "#ffffff" }}>{a.name}</div>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{a.description}</div>
                     <div style={{ fontSize: 11, color: "var(--body)", marginTop: 4 }}>
-                      <span style={{ color: "#a855f7" }}>Tools</span>: {a.tools.join(", ") || "none"}
+                      <span style={{ color: "#d946ef" }}>Tools</span>: {a.tools.join(", ") || "none"}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--body)", marginTop: 2 }}>
                       <span style={{ color: "#06b6d4" }}>Model</span>: {a.model}
@@ -660,10 +822,10 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
               padding: 0,
               overflow: "hidden",
               position: "relative",
-              background: "#0a0a0a",
+              background: "#070708",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: "12px",
-              height: 480
+              height: 500
             }}
           >
             {/* Visualizer Canvas */}
@@ -679,15 +841,20 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 fontSize: 10,
                 color: "rgba(255,255,255,0.4)",
                 pointerEvents: "none",
-                background: "rgba(10,10,10,0.75)",
-                padding: "8px 12px",
-                borderRadius: "6px",
-                border: "1px solid rgba(255,255,255,0.05)"
+                background: "rgba(10,10,14,0.85)",
+                padding: "10px 14px",
+                borderRadius: "8px",
+                border: "1px solid rgba(255,255,255,0.08)",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
               }}
             >
-              <div style={{ fontWeight: "bold", color: "#a855f7", marginBottom: 4 }}>SWARM_VISUALIZER // ACTIVE</div>
-              <div>DRAG MOUSE : Orbit Camera</div>
-              <div>MOUSE SCROLL : Zoom In/Out</div>
+              <div style={{ fontWeight: "bold", color: "#d946ef", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#d946ef" }} />
+                NEURAL_SWARM_GRID // ENGAGED
+              </div>
+              <div>DRAG MOUSE : Orbit Viewport</div>
+              <div>SCROLL : Zoom Viewport</div>
+              <div>HOVER NODE : Focus Agent Info</div>
             </div>
 
             {/* Neural Net State Legends */}
@@ -699,13 +866,13 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 fontFamily: "monospace",
                 fontSize: 10,
                 pointerEvents: "none",
-                background: "rgba(10,10,10,0.75)",
+                background: "rgba(10,10,14,0.85)",
                 padding: "8px 12px",
-                borderRadius: "6px",
-                border: "1px solid rgba(255,255,255,0.05)",
+                borderRadius: "8px",
+                border: "1px solid rgba(255,255,255,0.08)",
                 display: "flex",
                 flexDirection: "column",
-                gap: 4
+                gap: 5
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -713,40 +880,40 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 <span style={{ color: "rgba(255,255,255,0.6)" }}>IDLE</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#a855f7" }} />
-                <span style={{ color: "rgba(255,255,255,0.6)" }}>RUNNING</span>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#d946ef" }} />
+                <span style={{ color: "rgba(255,255,255,0.6)" }}>ENGAGED</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#06b6d4" }} />
-                <span style={{ color: "rgba(255,255,255,0.6)" }}>CALLING_TOOL</span>
+                <span style={{ color: "rgba(255,255,255,0.6)" }}>EXEC_TOOL</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }} />
-                <span style={{ color: "rgba(255,255,255,0.6)" }}>DONE</span>
+                <span style={{ color: "rgba(255,255,255,0.6)" }}>SUCCESS</span>
               </div>
             </div>
           </div>
 
           {/* Real-time Swarm logs next to visualizer */}
-          <div className="card" style={{ display: "flex", flexDirection: "column", height: 480 }}>
-            <div className="card-header" style={{ flexShrink: 0 }}>Real-Time Swarm Output</div>
+          <div className="card" style={{ display: "flex", flexDirection: "column", height: 500 }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>Holographic Output Stream</div>
             <div
               style={{
                 fontFamily: "monospace",
                 fontSize: 11,
-                lineHeight: 1.5,
+                lineHeight: 1.6,
                 overflowY: "auto",
                 flexGrow: 1,
                 color: "#c5c5c5",
-                background: "#0d0d0d",
-                padding: 10,
-                borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.05)"
+                background: "#0a0a0c",
+                padding: 12,
+                borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.06)"
               }}
             >
               {logs.length === 0 ? (
-                <div style={{ color: "rgba(255,255,255,0.35)", textAlign: "center", marginTop: 40 }}>
-                  [ Ready to execute tasks ]
+                <div style={{ color: "rgba(255,255,255,0.25)", textAlign: "center", marginTop: 60 }}>
+                  [ Swarm network idle. Enter task to launch. ]
                 </div>
               ) : (
                 logs.map((log, i) => (
@@ -756,13 +923,13 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                       marginBottom: 8,
                       wordBreak: "break-all",
                       color:
-                        log.type === "start" ? "#a855f7" :
+                        log.type === "start" ? "#d946ef" :
                         log.type === "tool" ? "#06b6d4" :
                         log.type === "done" ? "#10b981" :
-                        log.type === "error" ? "#ef4444" : "#ffffff"
+                        log.type === "error" ? "#f43f5e" : "#ffffff"
                     }}
                   >
-                    <span style={{ color: "rgba(255,255,255,0.25)", marginRight: 6 }}>[{log.timestamp}]</span>
+                    <span style={{ color: "rgba(255,255,255,0.2)", marginRight: 6 }}>[{log.timestamp}]</span>
                     {log.text}
                   </div>
                 ))
