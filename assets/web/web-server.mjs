@@ -759,8 +759,28 @@ class WebSession {
     if (this._abort) { this._abort.abort(); this._abort = null; }
   }
 
-  async handleMessage(userMessage, cwd, onEvent) {
-    this.messages.push({ role: "user", content: [{ type: "text", text: userMessage }], timestamp: Date.now() });
+  async handleMessage(userMessage, cwd, onEvent, attachments = []) {
+    const content = [{ type: "text", text: userMessage }];
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments) {
+        if (att.type && att.type.startsWith("image/")) {
+          content.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: att.type,
+              data: att.data
+            }
+          });
+        } else {
+          content.push({
+            type: "text",
+            text: `\n\n[File Attachment: ${att.name}]\n\`\`\`\n${att.text || ""}\n\`\`\``
+          });
+        }
+      }
+    }
+    this.messages.push({ role: "user", content, timestamp: Date.now() });
 
     let toolCallIndex = 0;
     const MAX_TURNS = 10;
@@ -842,7 +862,7 @@ class WebSession {
         let isError = false;
         try { resultText = await executeTool(tc.name, args, cwd); }
         catch (e) { resultText = `Error: ${e.message}`; isError = true; }
-        onEvent({ type: "tool_result", id, name: tc.name, result: resultText.slice(0, 1000), isError });
+        onEvent({ type: "tool_result", id, name: tc.name, result: resultText.slice(0, 100000), isError });
         this.messages.push({
           role: "toolResult",
           toolCallId: id,
@@ -1138,7 +1158,7 @@ async function main() {
         try {
           await session.handleMessage(data.message, data.cwd || process.cwd(), (event) => {
             try { socket.send(JSON.stringify(event)); } catch {}
-          });
+          }, data.attachments);
         } catch (e) {
           try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {}
         }

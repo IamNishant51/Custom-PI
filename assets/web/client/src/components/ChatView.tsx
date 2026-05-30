@@ -9,15 +9,37 @@ const TUI_BANNER = `  ██████╗ ██╗   ██╗ ████�
  ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
   ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝`;
 
+function getToolDesc(name: string, argsStr: string): string {
+  try {
+    const parsed = JSON.parse(argsStr);
+    if (name === "view_file" || name === "write_to_file" || name === "replace_file_content" || name === "multi_replace_file_content") {
+      const pathStr = parsed.AbsolutePath || parsed.TargetFile || "";
+      return pathStr.split("/").pop() || pathStr;
+    }
+    if (name === "list_dir") {
+      const pathStr = parsed.DirectoryPath || "";
+      return pathStr.split("/").pop() || pathStr;
+    }
+    if (name === "grep_search") {
+      return `"${parsed.Query}"`;
+    }
+    if (name === "run_command") {
+      return parsed.CommandLine || "";
+    }
+  } catch {}
+  return "";
+}
+
 export default function ChatView() {
   const { items, loading, input, setInput, sendMessage, sendInterrupt, connected } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [attachments, setAttachments] = useState<any[]>([]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
   const handleCopyClick = (e: React.MouseEvent) => {
@@ -50,6 +72,45 @@ export default function ChatView() {
   const handleActionChipClick = (text: string) => {
     setInput(text);
     inputRef.current?.focus();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      if (file.type.startsWith("image/")) {
+        reader.onloadend = () => {
+          const base64Data = (reader.result as string).split(",")[1];
+          setAttachments(prev => [...prev, {
+            name: file.name,
+            type: file.type,
+            data: base64Data,
+            previewUrl: reader.result as string
+          }]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        reader.onloadend = () => {
+          setAttachments(prev => [...prev, {
+            name: file.name,
+            type: file.type,
+            text: reader.result as string
+          }]);
+        };
+        reader.readAsText(file);
+      }
+    });
+    e.target.value = "";
+  };
+
+  const removeAttachment = (idx: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSend = () => {
+    sendMessage(input, attachments);
+    setAttachments([]);
   };
 
   return (
@@ -92,24 +153,58 @@ export default function ChatView() {
       </div>
 
       <div className="chat-input-area">
-        {loading && (
+        <input
+          type="file"
+          id="chat-file-upload"
+          multiple
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
+        <label htmlFor="chat-file-upload" className="chat-upload-btn" title="Upload image or file">
+          📎
+        </label>
+
+        <div className="chat-input-wrapper">
+          {attachments.length > 0 && (
+            <div className="chat-previews">
+              {attachments.map((att, idx) => (
+                <div key={idx} className="preview-chip">
+                  {att.previewUrl ? (
+                    <img src={att.previewUrl} className="preview-thumb" />
+                  ) : (
+                    <span className="preview-icon">📄</span>
+                  )}
+                  <span className="preview-name">{att.name}</span>
+                  <button type="button" className="preview-remove" onClick={() => removeAttachment(idx)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={inputRef}
+            className="chat-input"
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={connected ? "Ask me anything..." : "Connecting..."}
+            disabled={loading || !connected}
+          />
+        </div>
+
+        {loading ? (
           <button className="chat-stop-btn" onClick={sendInterrupt}>
-            ■ Stop
+            ■
+          </button>
+        ) : (
+          <button
+            className="chat-send-btn"
+            onClick={handleSend}
+            disabled={loading || (!input.trim() && attachments.length === 0) || !connected}
+          >
+            &gt;
           </button>
         )}
-        <textarea
-          ref={inputRef}
-          className="chat-input"
-          rows={1}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={connected ? "Ask me anything..." : "Connecting..."}
-          disabled={loading || !connected}
-        />
-        <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim() || !connected}>
-          &gt;
-        </button>
       </div>
     </div>
   );
@@ -120,7 +215,7 @@ export default function ChatView() {
 function ChatItemRenderer({ item }: { item: ChatItem }) {
   switch (item.type) {
     case "user":
-      return <UserMessage content={item.content} />;
+      return <UserMessage content={item.content} attachments={(item as any).attachments} />;
     case "thinking":
       return <ThinkingBlock content={item.content} isStreaming={item.isStreaming} />;
     case "tool_call":
@@ -133,7 +228,7 @@ function ChatItemRenderer({ item }: { item: ChatItem }) {
         />
       );
     case "assistant":
-      return <AssistantMessage content={item.content} isStreaming={item.isStreaming} />;
+      return <AssistantMessage content={item.content} />;
     case "error":
       return <ErrorMessage content={item.content} />;
     default:
@@ -143,10 +238,23 @@ function ChatItemRenderer({ item }: { item: ChatItem }) {
 
 // ── User Message ───────────────────────────────────────
 
-function UserMessage({ content }: { content: string }) {
+function UserMessage({ content, attachments }: { content: string; attachments?: any[] }) {
   return (
     <div className="msg msg-user stagger-item">
       <div className="msg-label">You</div>
+      {attachments && attachments.length > 0 && (
+        <div className="msg-user-attachments">
+          {attachments.map((att, i) => (
+            <div key={i} className="msg-user-attachment-chip">
+              {att.previewUrl ? (
+                <img src={att.previewUrl} className="msg-user-attachment-img" />
+              ) : (
+                <span className="msg-user-attachment-file">📄 {att.name}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="msg-content">{content}</div>
     </div>
   );
@@ -185,7 +293,6 @@ function ThinkingBlock({ content, isStreaming }: {
           ) : (
             <span className="thinking-placeholder">Thinking...</span>
           )}
-          {isStreaming && <span className="streaming-cursor" />}
         </div>
       </div>
     </div>
@@ -202,14 +309,17 @@ function ToolCallItem({ name, args, status, result }: {
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  const statusIcon = status === "running" ? "●" : status === "completed" ? "✓" : "✗";
+  const statusText = status === "running" ? "[ ]" : status === "completed" ? "[x]" : "[!]";
   const statusClass = status === "running" ? "running" : status === "completed" ? "completed" : "error";
+  const desc = getToolDesc(name, args);
 
   return (
     <div className={`msg msg-tool stagger-item ${statusClass}`}>
       <button className="tool-header" onClick={() => setExpanded(v => !v)}>
-        <span className="tool-status-icon">{statusIcon}</span>
-        <span className="tool-name-label">{name}</span>
+        <span className="tool-status-icon">{statusText}</span>
+        <span className="tool-name-label">
+          {name} {desc && <span className="tool-desc-sub">{desc}</span>}
+        </span>
         <span className={`tool-chevron ${expanded ? "rotated" : ""}`}>▸</span>
       </button>
       <div
@@ -217,7 +327,6 @@ function ToolCallItem({ name, args, status, result }: {
         style={{
           display: "grid",
           gridTemplateRows: expanded ? "1fr" : "0fr",
-          transition: "grid-template-rows 0.2s ease",
         }}
       >
         <div className="tool-inner">
@@ -229,7 +338,7 @@ function ToolCallItem({ name, args, status, result }: {
           )}
           {result && (
             <div className="tool-section">
-              <div className="tool-section-label">Result</div>
+              <div className="tool-section-label">Output</div>
               <pre className="tool-code tool-result-text">{result}</pre>
             </div>
           )}
@@ -241,12 +350,11 @@ function ToolCallItem({ name, args, status, result }: {
 
 // ── Assistant Message ──────────────────────────────────
 
-function AssistantMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+function AssistantMessage({ content }: { content: string }) {
   return (
     <div className="msg msg-assistant stagger-item">
       <div className="msg-label">Assistant</div>
       <Markdown content={content} />
-      {isStreaming && <span className="streaming-cursor" />}
     </div>
   );
 }

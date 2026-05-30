@@ -16,7 +16,7 @@ interface ChatContextValue {
   loading: boolean;
   input: string;
   setInput: (v: string) => void;
-  sendMessage: () => void;
+  sendMessage: (overrideText?: string, attachments?: any[]) => void;
   sendInterrupt: () => void;
   ws: WebSocket | null;
   connected: boolean;
@@ -71,12 +71,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [ws]);
 
-  const sendMessage = useCallback(() => {
-    const text = input.trim();
+  const sendMessage = useCallback((overrideText?: string, attachments?: any[]) => {
+    const text = typeof overrideText === "string" ? overrideText.trim() : input.trim();
     if (!text || !ws || loading) return;
-    setItems(prev => [...prev, { id: nextId(), type: "user", content: text }]);
+    setItems(prev => [...prev, {
+      id: nextId(),
+      type: "user",
+      content: text,
+      attachments: attachments || []
+    } as any]);
     setInput("");
-    ws.send(JSON.stringify({ type: "chat", message: text }));
+    ws.send(JSON.stringify({
+      type: "chat",
+      message: text,
+      attachments: attachments ? attachments.map(a => ({
+        name: a.name,
+        type: a.type,
+        data: a.data,
+        text: a.text
+      })) : []
+    }));
   }, [input, ws, loading]);
 
   useEffect(() => {
