@@ -2,18 +2,77 @@ import type { MemoryEntry, SearchResult, MemoryStats, MemoryType } from "./memor
 import { embed, cosineSimilarity } from "./memory-embedding";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
 const MEMORY_DIR = path.join(os.homedir(), ".pi/agent/memory");
 const SEMANTIC_FILE = path.join(MEMORY_DIR, "semantic.json");
+const ANN_CLUSTERS_FILE = path.join(MEMORY_DIR, "ann-clusters.json");
 const EPISODES_DIR = path.join(MEMORY_DIR, "episodes");
+
+const ANN_CLUSTERS = 16;
+const ANN_CLUSTER_SEARCH_COUNT = 3;
 
 let cache: MemoryEntry[] | null = null;
 let cacheTs = 0;
 const CACHE_TTL = 30_000;
 
 let writeQueue = Promise.resolve();
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let debounceResolve: (() => void) | null = null;
+let pendingEntries: MemoryEntry[] | null = null;
+const DEBOUNCE_MS = 500;
+
+interface ClusterIndex {
+  centroids: number[][];
+  assignments: Record<string, number>;
+}
+
+function loadClusters(): ClusterIndex {
+  if (fs.existsSync(ANN_CLUSTERS_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(ANN_CLUSTERS_FILE, "utf8"));
+    } catch {}
+  }
+  return { centroids: [], assignments: {} };
+}
+
+function saveClusters(idx: ClusterIndex): void {
+  ensureDirs();
+  safeWriteFile(ANN_CLUSTERS_FILE, JSON.stringify(idx));
+}
+
+async function saveClustersAsync(idx: ClusterIndex): Promise<void> {
+  ensureDirs();
+  await safeWriteFileAsync(ANN_CLUSTERS_FILE, JSON.stringify(idx));
+}
+
+function nearestCentroid(embedding: number[], centroids: number[][]): number {
+  if (centroids.length === 0) return -1;
+  let bestIdx = 0;
+  let bestSim = -1;
+  for (let i = 0; i < centroids.length; i++) {
+    const sim = cosineSimilarity(embedding, centroids[i]);
+    if (sim > bestSim) { bestSim = sim; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+function assignToCluster(embedding: number[], idx: ClusterIndex): number {
+  if (idx.centroids.length < ANN_CLUSTERS) {
+    const cid = idx.centroids.length;
+    idx.centroids.push([...embedding]);
+    return cid;
+  }
+  return nearestCentroid(embedding, idx.centroids);
+}
+
+function updateCentroid(embedding: number[], centroid: number[], rate: number): void {
+  for (let i = 0; i < embedding.length; i++) {
+    centroid[i] = centroid[i] * (1 - rate) + embedding[i] * rate;
+  }
+}
 
 function ensureDirs(): void {
   if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
@@ -71,22 +130,75 @@ function load(): MemoryEntry[] {
   }
 }
 
-function save(entries: MemoryEntry[]): void {
+function safeWriteFile(filePath: string, data: string): void {
+  const tmpPath = filePath + ".tmp." + Date.now();
+  fs.writeFileSync(tmpPath, data, "utf8");
+  fs.renameSync(tmpPath, filePath);
+}
+
+async function safeWriteFileAsync(filePath: string, data: string): Promise<void> {
+  const tmpPath = filePath + ".tmp." + Date.now();
+  await fsp.writeFile(tmpPath, data, "utf8");
+  await fsp.rename(tmpPath, filePath);
+}
+
+async function loadAsync(): Promise<MemoryEntry[]> {
   ensureDirs();
-  fs.writeFileSync(SEMANTIC_FILE, JSON.stringify(entries, null, 2), "utf8");
+  const now = Date.now();
+  if (cache && now - cacheTs < CACHE_TTL) return cache;
+  try {
+    const raw = await fsp.readFile(SEMANTIC_FILE, "utf8");
+    const rawEntries: any[] = JSON.parse(raw);
+    const entries = rawEntries.map(migrateEntry);
+    const valid = entries.filter(e => !e.ttl || new Date(e.ttl).getTime() > now);
+    if (valid.length !== entries.length) {
+      await safeWriteFileAsync(SEMANTIC_FILE, JSON.stringify(valid, null, 2));
+    }
+    cache = valid;
+    cacheTs = now;
+    return valid;
+  } catch {
+    cache = [];
+    cacheTs = now;
+    return cache;
+  }
+}
+
+async function saveAsync(entries: MemoryEntry[]): Promise<void> {
+  ensureDirs();
   cache = entries;
   cacheTs = Date.now();
+  await safeWriteFileAsync(SEMANTIC_FILE, JSON.stringify(entries, null, 2));
+}
+
+function save(entries: MemoryEntry[]): void {
+  ensureDirs();
+  cache = entries;
+  cacheTs = Date.now();
+  pendingEntries = entries;
+  if (debounceTimer) return;
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    if (pendingEntries) {
+      safeWriteFile(SEMANTIC_FILE, JSON.stringify(pendingEntries, null, 2));
+      pendingEntries = null;
+    }
+    if (debounceResolve) {
+      debounceResolve();
+      debounceResolve = null;
+    }
+  }, DEBOUNCE_MS);
 }
 
 async function withWriteLock<T>(fn: () => T | Promise<T>): Promise<T> {
   const prev = writeQueue;
-  let nextResolve: (value?: unknown) => void;
-  writeQueue = new Promise(resolve => { nextResolve = resolve; });
+  let nextResolve: (value: unknown) => void;
+  writeQueue = new Promise(resolve => { nextResolve = resolve as (value: unknown) => void; }) as Promise<void>;
   await prev;
   try {
     return await fn();
   } finally {
-    nextResolve!();
+    nextResolve!(undefined);
   }
 }
 
@@ -106,6 +218,73 @@ function computeAdaptiveTTL(importance: number, accessCount: number): number {
   const importanceFactor = importance / 5;
   return Math.round(baseDays * accessFactor * importanceFactor);
 }
+
+async function reclusterCentroids(entries: MemoryEntry[]): Promise<void> {
+  const active = entries.filter(e => !e.deprecated && e.embedding?.length > 0);
+  if (active.length === 0) return;
+  const K = Math.min(ANN_CLUSTERS, active.length);
+  const dim = active[0].embedding.length;
+
+  // 1. Sample K initial centroids via k-means++ initialization
+  const centroids: number[][] = [];
+  const firstIdx = Math.floor(Math.random() * active.length);
+  centroids.push([...active[firstIdx].embedding]);
+
+  for (let c = 1; c < K; c++) {
+    let totalDist = 0;
+    const dists = active.map(e => {
+      const minDist = Math.min(...centroids.map(cent => {
+        const sim = cosineSimilarity(e.embedding, cent);
+        return 1 - sim;
+      }));
+      totalDist += minDist * minDist;
+      return minDist * minDist;
+    });
+    const threshold = Math.random() * totalDist;
+    let cum = 0;
+    for (let i = 0; i < active.length; i++) {
+      cum += dists[i];
+      if (cum >= threshold) {
+        centroids.push([...active[i].embedding]);
+        break;
+      }
+    }
+  }
+
+  // 2. Iterate assignment + recompute (max 10 passes)
+  const assignments: Record<string, number> = {};
+  for (let iter = 0; iter < 10; iter++) {
+    let changed = false;
+
+    for (const entry of active) {
+      const newCid = nearestCentroid(entry.embedding, centroids);
+      const oldCid = assignments[entry.id];
+      if (newCid !== oldCid) {
+        changed = true;
+        assignments[entry.id] = newCid;
+      }
+    }
+
+    if (!changed && iter > 0) break;
+
+    // Recompute centroids as mean of assigned vectors
+    for (let k = 0; k < K; k++) {
+      const members = active.filter(e => assignments[e.id] === k);
+      if (members.length === 0) continue;
+      const sum = new Array(dim).fill(0);
+      for (const m of members) {
+        for (let d = 0; d < dim; d++) sum[d] += m.embedding[d];
+      }
+      for (let d = 0; d < dim; d++) sum[d] /= members.length;
+      centroids[k] = sum;
+    }
+  }
+
+  await saveClustersAsync({ centroids, assignments });
+}
+
+let lastConsolidationTime = 0;
+const CONSOLIDATION_COOLDOWN_MS = 120_000;
 
 function computeRecencyMultiplier(lastAccessed: string): number {
   const elapsed = Date.now() - new Date(lastAccessed).getTime();
@@ -205,7 +384,7 @@ export async function store(
   const entryId = genId(content + type);
 
   return withWriteLock(async () => {
-    const entries = load();
+    const entries = await loadAsync();
 
     const exact = entries.find(e => e.content === content && e.type === type);
     if (exact) {
@@ -215,7 +394,7 @@ export async function store(
       if (tags.length) exact.tags = [...new Set([...exact.tags, ...tags])];
       if (exact.deprecated) exact.deprecated = false;
       recalibrateNow(exact);
-      save(entries);
+      await saveAsync(entries);
       return exact.id;
     }
 
@@ -227,7 +406,7 @@ export async function store(
         if (tags.length) existing.tags = [...new Set([...existing.tags, ...tags])];
         if (existing.deprecated) existing.deprecated = false;
         recalibrateNow(existing);
-        save(entries);
+        await saveAsync(entries);
         return existing.id;
       }
     }
@@ -253,7 +432,12 @@ export async function store(
 
     recalibrateNow(entry);
     entries.push(entry);
-    save(entries);
+    await saveAsync(entries);
+    const cidx = loadClusters();
+    const cid = assignToCluster(embedding, cidx);
+    cidx.assignments[entryId] = cid;
+    updateCentroid(embedding, cidx.centroids[cid], 0.05);
+    saveClusters(cidx);
     return entry.id;
   });
 }
@@ -269,12 +453,26 @@ export async function search(
   const entries = load();
   if (!entries.length) return [];
 
+  const cidx = loadClusters();
+  const candidateIds = new Set<string>();
+  if (cidx.centroids.length > 0) {
+    const dists = cidx.centroids.map((c, i) => ({ idx: i, sim: cosineSimilarity(qv, c) }));
+    dists.sort((a, b) => b.sim - a.sim);
+    const topC = dists.slice(0, ANN_CLUSTER_SEARCH_COUNT);
+    for (const tc of topC) {
+      for (const [eid, cid] of Object.entries(cidx.assignments)) {
+        if (cid === tc.idx) candidateIds.add(eid);
+      }
+    }
+  }
+
   const scored: SearchResult[] = [];
 
   for (const entry of entries) {
     if (entry.deprecated) continue;
     if (project && entry.project !== project && entry.project !== "global") continue;
     if (typeFilter && entry.type !== typeFilter) continue;
+    if (cidx.centroids.length > 0 && !candidateIds.has(entry.id)) continue;
     const semanticScore = cosineSimilarity(qv, entry.embedding);
     const finalScore = multiSignalScore(semanticScore, query, entry);
     scored.push({ entry, score: finalScore });
@@ -287,8 +485,8 @@ export async function search(
   const top = aboveThreshold.slice(0, k);
   const secondTier = scored.filter(s => s.score >= MIN_SCORE * 0.7).slice(k, k + 5);
 
-  withWriteLock(() => {
-    const fresh = load();
+  withWriteLock(async () => {
+    const fresh = await loadAsync();
     const now = new Date().toISOString();
     for (const { entry } of top) {
       const freshEntry = fresh.find(e => e.id === entry.id);
@@ -304,16 +502,20 @@ export async function search(
       const freshEntry = fresh.find(e => e.id === entry.id);
       if (freshEntry) freshEntry.retrievalCount++;
     }
-    save(fresh);
+    await saveAsync(fresh);
   });
 
   return top;
 }
 
 export async function consolidate(): Promise<{ merged: number; pruned: number; refreshed: number }> {
-  return withWriteLock(() => {
-    const entries = load();
-    const now = Date.now();
+  const now = Date.now();
+  if (now - lastConsolidationTime < CONSOLIDATION_COOLDOWN_MS) {
+    return { merged: 0, pruned: 0, refreshed: 0 };
+  }
+  lastConsolidationTime = now;
+  return withWriteLock(async () => {
+    const entries = await loadAsync();
     let merged = 0;
     let pruned = 0;
     let refreshed = 0;
@@ -335,7 +537,6 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
             new Date(keeper.lastAccessed).getTime(),
             new Date(dropper.lastAccessed).getTime(),
           )).toISOString();
-          // Merge skill metadata if both are skills
           if (keeper.type === "skill" && dropper.skillMeta && keeper.skillMeta) {
             keeper.skillMeta.successCount = Math.max(keeper.skillMeta.successCount, dropper.skillMeta.successCount) + 1;
             keeper.skillMeta.keySteps = [...new Set([...keeper.skillMeta.keySteps, ...dropper.skillMeta.keySteps])];
@@ -366,7 +567,8 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
       }
     }
 
-    if (merged > 0 || pruned > 0 || refreshed > 0) save(entries);
+    await reclusterCentroids(entries);
+    if (merged > 0 || pruned > 0 || refreshed > 0) await saveAsync(entries);
     return { merged, pruned, refreshed };
   });
 }
@@ -415,12 +617,12 @@ export function stats(): MemoryStats {
 }
 
 export async function remove(id: string): Promise<boolean> {
-  return withWriteLock(() => {
-    const entries = load();
+  return withWriteLock(async () => {
+    const entries = await loadAsync();
     const idx = entries.findIndex(e => e.id === id);
     if (idx === -1) return false;
     entries.splice(idx, 1);
-    save(entries);
+    await saveAsync(entries);
     return true;
   });
 }
@@ -450,14 +652,14 @@ export function getTopByPriority(k = 5, project?: string): MemoryEntry[] {
 }
 
 export async function markContradicted(oldContent: string, newEntryId: string): Promise<void> {
-  return withWriteLock(() => {
-    const entries = load();
+  return withWriteLock(async () => {
+    const entries = await loadAsync();
     const match = entries.find(e => e.content === oldContent);
     if (match) {
       match.deprecated = true;
       match.correctedById = newEntryId;
       match.ttl = new Date(Date.now() + 7 * 86_400_000).toISOString();
-      save(entries);
+      await saveAsync(entries);
     }
   });
 }
@@ -488,4 +690,18 @@ export async function searchExisting(query: string): Promise<MemoryEntry | null>
     if (bestScore > 0.98) break;
   }
   return bestScore > 0.85 ? best : null;
+}
+
+export async function flush(): Promise<void> {
+  if (debounceTimer && pendingEntries) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+    safeWriteFile(SEMANTIC_FILE, JSON.stringify(pendingEntries, null, 2));
+    pendingEntries = null;
+  }
+  if (debounceResolve) {
+    debounceResolve();
+    debounceResolve = null;
+  }
+  await writeQueue;
 }

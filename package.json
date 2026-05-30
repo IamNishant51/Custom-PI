@@ -7,7 +7,9 @@
     "custom-pi": "bin/cli.js"
   },
   "scripts": {
-    "update-and-publish": "node scripts/update-and-publish.js"
+    "update-and-publish": "node scripts/update-and-publish.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.77.0"
@@ -43,5 +45,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "preferGlobal": true
+  "preferGlobal": true,
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
 }

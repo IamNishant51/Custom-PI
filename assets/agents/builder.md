@@ -27,6 +27,7 @@ tools:
   - ls
   - bash
   - web_fetch
+  - request_tool
 thinking: high
 ---
 

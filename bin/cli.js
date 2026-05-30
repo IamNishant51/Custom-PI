@@ -74,6 +74,7 @@ const filesToCopy = [
   { src: 'agents/builder.md', dest: 'agents/builder.md' },
   { src: 'agents/researcher.md', dest: 'agents/researcher.md' },
   { src: 'agents/reviewer.md', dest: 'agents/reviewer.md' },
+  { src: 'agents/ceo.md', dest: 'agents/ceo.md' },
   // operator.md removed — not needed
   { src: 'extensions/subagents/package.json', dest: 'extensions/subagents/package.json' },
   { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' },
