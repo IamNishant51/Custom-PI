@@ -1,6 +1,6 @@
 {
   "name": "custom-pi",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "description": "Customized Pi Coding Agent with parallel subagents, premium TUI dashboard styling, and session memory tracking",
   "main": "bin/cli.js",
   "bin": {
@@ -38,7 +38,7 @@
   "author": "Nishant Unavane <iamnishantunavane@gmail.com> (https://nishant-unavane.vercel.app)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/IamNishant51/custom-pi.git"
+    "url": "git+https://github.com/IamNishant51/Custom-PI.git"
   },
   "bugs": {
     "url": "https://github.com/IamNishant51/custom-pi/issues"
