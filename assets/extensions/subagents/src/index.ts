@@ -1726,7 +1726,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         const updateFn = update as ((u: any) => void) | undefined;
         runtime.onProgress = (msg: string) => {
           context.ui.setWorkingMessage(msg);
-          updateFn?.({ progress: msg });
+          updateFn?.({ content: [{ type: "text" as const, text: msg }] });
         };
         const result = await runtime.execute(params.task);
 
