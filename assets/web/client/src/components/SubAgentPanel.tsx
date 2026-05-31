@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "./Toast";
 import Markdown from "./Markdown";
+import ToolCallCard from "./ToolCallCard";
+import QuestionModal from "./QuestionModal";
 import { useChat } from "../context/ChatContext";
 
 interface Agent {
@@ -15,7 +17,7 @@ interface Agent {
 }
 
 interface SwarmMessage {
-  type: "swarm_start" | "ceo_thought" | "ceo_plan" | "agent_status" | "agent_log" | "agent_done" | "tool_request" | "tool_provisioned" | "ceo_summary" | "swarm_error" | "interrupted" | "swarm_recovery" | "swarm_paused" | "swarm_resumed";
+  type: "swarm_start" | "ceo_thought" | "ceo_plan" | "agent_status" | "agent_log" | "agent_done" | "tool_request" | "tool_provisioned" | "ceo_summary" | "swarm_error" | "interrupted" | "swarm_recovery" | "swarm_paused" | "swarm_resumed" | "agent_chat" | "gmail_auth_required";
   goal?: string;
   message?: string;
   agents?: Array<{ id: string; role: string; tools: string[]; task: string; status?: string; currentTask?: string; logs?: string[] }>;
@@ -30,6 +32,7 @@ interface SwarmMessage {
   paused?: boolean;
   agentResults?: Record<string, string>;
   ceoLogs?: string[];
+  fromAgent?: boolean;
 }
 
 interface SavedTeam {
@@ -81,6 +84,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [isCurrentTeamSaved, setIsCurrentTeamSaved] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Record<string, Array<{ role: "user" | "agent"; content: string }>>>({});
 
   // Resizable panes
   const [leftColW, setLeftColW] = useState(() => {
@@ -187,7 +191,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             setPaused(false);
             setCeoLogs(prev => [...prev, "Swarm resumed."]);
             break;
-          case "swarm_recovery": {
+            case "swarm_recovery": {
             const rc = data;
             setActiveGoal(rc.goal || activeGoal);
             setCeoLogs(rc.ceoLogs || []);
@@ -208,6 +212,21 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             else if (rc.status === "running" && (!rc.agents || rc.agents.length === 0)) { setSwarmStatus("planning"); }
             else if (rc.status === "running" || rc.status === "planning") { setSwarmStatus("running"); }
             else if (rc.status === "error") { setSwarmStatus("error"); }
+            break;
+          }
+          case "agent_chat": {
+            const chatData = data as SwarmMessage & { agentId: string; message?: string; fromAgent?: boolean };
+            const { agentId, message, fromAgent } = chatData;
+            if (!agentId) break;
+            setChatMessages(prev => ({
+              ...prev,
+              [agentId]: [...(prev[agentId] || []), { role: fromAgent ? "agent" : "user", content: message || "" }]
+            }));
+            break;
+          }
+          case "gmail_auth_required": {
+            const { verificationUrl, userCode } = data as any;
+            toast(`Gmail auth required: Visit ${verificationUrl} and enter code: ${userCode}`, "info");
             break;
           }
         }
@@ -331,6 +350,53 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
+  const sendChat = (agentId: string, message: string) => {
+    if (!ws || !message.trim()) return;
+    ws.send(JSON.stringify({ type: "agent_chat", agentId, message }));
+  };
+
+  const renderCeoLine = (log: string, i: number) => {
+    const lower = log.toLowerCase();
+    if (lower.startsWith("team plan") || lower.includes("assembling") || lower.includes("deployed")) {
+      return (
+        <div key={i} className="ceo-plan-omp">
+          <div className="ceo-plan-header">⚙ Plan</div>
+          <div className="ceo-plan-body">{log}</div>
+        </div>
+      );
+    }
+    if (lower.includes("complete") || lower.startsWith("swarm") || lower.includes("campaign") || lower.includes("final")) {
+      return (
+        <div key={i} className="ceo-thought-omp summary">
+          <div className="ceo-thought-header">✓ Summary</div>
+          <div className="ceo-thought-body">{log}</div>
+        </div>
+      );
+    }
+    if (lower.startsWith("initialized") || lower.startsWith("launching")) {
+      return (
+        <div key={i} className="ceo-thought-omp" style={{ opacity: 0.7 }}>
+          <div className="ceo-thought-header">⟳ Init</div>
+          <div className="ceo-thought-body">{log}</div>
+        </div>
+      );
+    }
+    if (lower.includes("error")) {
+      return (
+        <div key={i} className="ceo-thought-omp" style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(45,27,27,0.4)" }}>
+          <div className="ceo-thought-header" style={{ color: "var(--accent-coral)" }}>⚠ Error</div>
+          <div className="ceo-thought-body">{log}</div>
+        </div>
+      );
+    }
+    return (
+      <div key={i} className="ceo-thought-omp">
+        <div className="ceo-thought-header">💭 CEO Thought</div>
+        <div className="ceo-thought-body">{log}</div>
+      </div>
+    );
+  };
+
   return (
     <div className="subagent-panel">
 
@@ -388,7 +454,11 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
           <div className="subagent-bar">
             <div className="subagent-bar-left">
               <span className="subagent-bar-status">
-                <span className={`subagent-bar-dot ${swarmStatus}`} />
+                {(swarmStatus === "planning" || swarmStatus === "running") ? (
+                  <span className="spinner-geo" />
+                ) : (
+                  <span className={`subagent-bar-dot ${swarmStatus}`} />
+                )}
                 {swarmStatus.toUpperCase()}
               </span>
               {swarmStatus !== "planning" && agents.length > 0 && (
@@ -453,7 +523,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 {agents.map(a => (
                   <div
                     key={a.id}
-                    className={`subagent-agent-card ${selectedAgentId === a.id ? "selected" : ""} ${a.status}`}
+                    className={`agent-card-omp ${selectedAgentId === a.id ? "selected" : ""} ${a.status}`}
                     onClick={() => setSelectedAgentId(a.id)}
                   >
                     <div className="subagent-agent-card-header">
@@ -466,12 +536,21 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                       </div>
                       <AgentStatusBadge status={a.status} />
                     </div>
+                    {a.status === "running" && <span className="omp-badge running">◐ WORKING</span>}
+                    {a.status === "done" && <span className="omp-badge done">✓ DONE</span>}
+                    {a.status === "error" && <span className="omp-badge error">✗ FAILED</span>}
                     {a.currentTask && <div className="subagent-agent-card-task">{a.currentTask}</div>}
                     {a.currentTool && <div className="subagent-agent-card-tool">tool: {a.currentTool}</div>}
                     <div className="subagent-agent-card-tools">
                       {a.tools.slice(0, 4).map((t, j) => <span key={j} className="subagent-tool-tag">{t}</span>)}
                       {a.tools.length > 4 && <span className="subagent-tool-tag">+{a.tools.length - 4}</span>}
                     </div>
+                    {a.status === "running" && (
+                      <div className="agent-card-progress-bar">
+                        <div className="agent-card-progress-fill" style={{ width: `${Math.min(100, a.logs.filter(l => l.includes("Calling tool")).length * 25)}%` }} />
+                      </div>
+                    )}
+                    {a.status === "running" && <div className="agent-card-connection-line" />}
                   </div>
                 ))}
               </div>
@@ -495,14 +574,80 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                     )}
                   </div>
                   <div className="subagent-log-body">
-                    {selectedAgent.logs.map((log, i) => (
-                      <div key={i} className="subagent-log-line"><span className="subagent-log-prompt">$</span><span>{log}</span></div>
-                    ))}
+                    {selectedAgent.logs.map((log, i) => {
+                      const trimmed = log.trim();
+                      if (trimmed.startsWith("Calling tool:")) {
+                        const toolName = trimmed.replace("Calling tool:", "").trim();
+                        return <ToolCallCard key={i} name={toolName} status="running" />;
+                      }
+                      if (trimmed.startsWith("Tool response:")) {
+                        return <ToolCallCard key={i} name="Result" status="done" result={trimmed.replace("Tool response:", "").trim()} />;
+                      }
+                      const lower = trimmed.toLowerCase();
+                      let icon = "$";
+                      let cls = "";
+                      if (lower.startsWith("error") || lower.startsWith("❌") || lower.startsWith("✗")) { icon = "✗"; cls = "log-line-omp error"; }
+                      else if (lower.startsWith("✓") || lower.startsWith("✅") || lower.startsWith("complete")) { icon = "✓"; cls = "log-line-omp done"; }
+                      else if (lower.startsWith("→") || lower.startsWith("assign")) { icon = "→"; cls = "log-line-omp assign"; }
+                      else if (lower.startsWith("thinking") || lower.startsWith("◐") || lower.startsWith("analyzing")) { icon = "◐"; cls = "log-line-omp thinking"; }
+                      else if (lower.includes("tool") || lower.includes("calling")) { icon = "⚙"; cls = "log-line-omp tool"; }
+                      return (
+                        <div key={i} className={`subagent-log-line ${cls}`}>
+                          <span className="subagent-log-prompt">{icon}</span>
+                          <span>{log}</span>
+                        </div>
+                      );
+                    })}
                     {(selectedAgent.status === "running" || selectedAgent.status === "calling_tool") && (
                       <div className="subagent-log-line subagent-log-active"><span className="subagent-log-prompt">$</span><span className="subagent-log-cursor">processing...</span></div>
                     )}
                     <div ref={agentLogEndRef} />
                   </div>
+
+                  {/* Chat messages */}
+                  {chatMessages[selectedAgent.id]?.length > 0 && (
+                    <div className="subagent-chat-messages">
+                      {chatMessages[selectedAgent.id].map((msg, i) => (
+                        <div key={i} className={`subagent-chat-msg ${msg.role}`}>
+                          <span className="subagent-chat-role">{msg.role === "user" ? "You" : selectedAgent.id}</span>
+                          <span className="subagent-chat-text">{msg.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Chat input */}
+                  <div className="subagent-chat-input-row">
+                    <input
+                      className="subagent-chat-input"
+                      type="text"
+                      placeholder="Message agent..."
+                      onKeyDown={e => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          const input = e.currentTarget;
+                          sendChat(selectedAgent.id, input.value);
+                          setChatMessages(prev => ({
+                            ...prev,
+                            [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { role: "user" as const, content: input.value }]
+                          }));
+                          input.value = "";
+                        }
+                      }}
+                    />
+                    <button className="subagent-chat-send" onClick={() => {
+                      const input = document.querySelector(".subagent-chat-input") as HTMLInputElement;
+                      if (input && input.value.trim()) {
+                        sendChat(selectedAgent.id, input.value);
+                        setChatMessages(prev => ({
+                          ...prev,
+                          [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { role: "user" as const, content: input.value }]
+                        }));
+                        input.value = "";
+                      }
+                    }}>Send</button>
+                  </div>
+
                   {selectedAgent.result && (
                     <div className="subagent-log-result">
                       <div className="subagent-log-result-title">Result</div>
@@ -529,11 +674,12 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
               <span className="subagent-ceo-console-count">{ceoLogs.length} lines</span>
             </div>
             <div className="subagent-ceo-console-body">
-              {ceoLogs.map((log, i) => (
-                <div key={i} className="subagent-ceo-line"><span className="subagent-ceo-prompt">#</span><span>{log}</span></div>
-              ))}
+              {ceoLogs.map((log, i) => renderCeoLine(log, i))}
               {swarmStatus === "planning" && (
-                <div className="subagent-ceo-line"><span className="subagent-ceo-prompt subagent-blink">#</span><span className="subagent-ceo-dim">Analyzing goal...</span></div>
+                <div className="ceo-thought-omp" style={{ opacity: 0.7 }}>
+                  <div className="ceo-thought-header">⟳ Planning</div>
+                  <div className="ceo-thought-body" style={{ color: "var(--text-dim)" }}>Analyzing goal...</div>
+                </div>
               )}
               <div ref={ceoEndRef} />
             </div>
@@ -541,17 +687,15 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
           {/* Final Summary */}
           {finalSummary && (
-            <div className="subagent-summary">
-              <div className="subagent-summary-header">
-                <span>Final Summary</span>
-                <button className="subagent-copy-btn" onClick={() => { navigator.clipboard.writeText(finalSummary || ""); toast("Copied!", "success"); }}>Copy</button>
-              </div>
-              <div className="subagent-summary-body">
-                <Markdown content={finalSummary} />
-              </div>
-              <button className="subagent-summary-new" onClick={() => setSwarmStatus("idle")}>New Swarm</button>
+            <div className="ceo-thought-omp summary" style={{ marginTop: 8 }}>
+              <div className="ceo-thought-header">✓ Final Summary</div>
+              <div className="ceo-thought-body"><Markdown content={finalSummary} /></div>
+              <button className="btn btn-small btn-primary" style={{ marginTop: 8 }} onClick={() => setSwarmStatus("idle")}>New Swarm</button>
             </div>
           )}
+
+          {/* Question Modal */}
+          <QuestionModal ws={ws} />
         </div>
       ) : null}
 

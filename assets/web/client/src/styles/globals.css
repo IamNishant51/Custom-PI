@@ -48,6 +48,24 @@
   --radius-full: 9999px;
 
   --sidebar-width: 240px;
+
+  /* ── omp-inspired status colors ── */
+  --card-pending: #1a1a2e;
+  --card-running: #1a1a2e;
+  --card-success: #0d2818;
+  --card-error: #2d1b1b;
+  --card-border-pending: #3a3a5c;
+  --card-border-running: #7c3aed;
+  --card-border-success: #22c55e;
+  --card-border-error: #ef4444;
+  --accent-teal: #5ab0b0;
+  --accent-amber: #d19a66;
+  --accent-lavender: #b0a0cc;
+  --accent-sage: #7ab87a;
+  --accent-coral: #c97a7a;
+  --accent-cream: #d4c5a0;
+  --text-muted: #808080;
+  --text-dim: #666666;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1515,6 +1533,535 @@ select {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+/* ── omp-style spinner (geometric dots) ── */
+@keyframes spin-dot {
+  0% { content: "◐"; }
+  25% { content: "◓"; }
+  50% { content: "◑"; }
+  75% { content: "◒"; }
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--card-border-running); box-shadow: 0 0 4px rgba(124, 58, 237, 0.2); }
+  50% { border-color: rgba(124, 58, 237, 0.6); box-shadow: 0 0 12px rgba(124, 58, 237, 0.4); }
+}
+
+@keyframes pulse-dot-run {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+@keyframes dash-move {
+  to { stroke-dashoffset: -16; }
+}
+
+@keyframes slide-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes progress-fill {
+  from { width: 0%; }
+}
+
+/* ── Geometric spinner element ── */
+.spinner-geo {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+  animation: spin-geo 0.8s steps(4) infinite;
+  color: var(--accent-teal);
+}
+.spinner-geo::before { content: "◐"; }
+@keyframes spin-geo {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ── Agent card status styles (omp-inspired) ── */
+.agent-card-omp {
+  border-left: 3px solid var(--card-border-pending);
+  background: var(--card-pending);
+  transition: all 0.3s ease;
+  animation: slide-card-in 0.25s ease both;
+}
+.agent-card-omp.running {
+  border-left-color: var(--card-border-running);
+  background: var(--card-running);
+  animation: slide-card-in 0.25s ease both, pulse-border 2s infinite;
+}
+.agent-card-omp.done, .agent-card-omp.completed {
+  border-left-color: var(--card-border-success);
+  background: var(--card-success);
+}
+.agent-card-omp.error {
+  border-left-color: var(--card-border-error);
+  background: var(--card-error);
+}
+
+.agent-card-omp .agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.agent-card-omp .agent-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--accent-teal);
+  animation: pulse-dot-run 1.2s ease-in-out infinite;
+}
+.agent-card-omp .agent-spinner.idle { color: var(--text-dim); animation: none; }
+.agent-card-omp .agent-spinner.done { color: var(--accent-sage); animation: none; }
+.agent-card-omp .agent-spinner.error { color: var(--accent-coral); animation: none; }
+
+.agent-card-omp .agent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  flex: 1;
+}
+.agent-card-omp .agent-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.agent-card-omp .agent-role-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 12px 4px;
+  line-height: 1.4;
+}
+.agent-card-omp .agent-task-text {
+  font-size: 12px;
+  color: var(--accent-cream);
+  padding: 0 12px 4px;
+  line-height: 1.3;
+  font-style: italic;
+}
+.agent-card-omp .agent-tool-text {
+  font-size: 11px;
+  color: var(--accent-lavender);
+  padding: 0 12px 6px;
+  font-family: var(--font-mono);
+}
+
+.agent-card-omp .agent-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 4px 12px;
+}
+
+.agent-card-omp .agent-progress {
+  padding: 4px 12px 8px;
+}
+.agent-card-omp .progress-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.agent-card-omp .progress-fill-omp {
+  height: 100%;
+  background: var(--accent-sage);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  animation: progress-fill 0.6s ease;
+}
+.agent-card-omp .progress-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 3px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ── omp-style connection line ── */
+.ceo-connection {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.ceo-connection .conn-line {
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--text-muted) 0,
+    var(--text-muted) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+}
+.ceo-connection .conn-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-sage);
+  animation: pulse-dot-run 1.5s ease-in-out infinite;
+}
+.ceo-connection .conn-label {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+/* ── Tool call card (omp-inspired) ── */
+.tool-card-omp {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  margin: 4px 0;
+  animation: slide-card-in 0.2s ease both;
+}
+.tool-card-omp.pending { background: var(--card-pending); border-left: 3px solid var(--text-dim); }
+.tool-card-omp.running { background: var(--card-running); border-left: 3px solid var(--accent-teal); }
+.tool-card-omp.done, .tool-card-omp.completed { background: var(--card-success); border-left: 3px solid var(--card-border-success); }
+.tool-card-omp.error { background: var(--card-error); border-left: 3px solid var(--card-border-error); }
+
+.tool-card-header-omp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.tool-card-header-omp:hover { background: rgba(255, 255, 255, 0.03); }
+
+.tool-card-icon-omp {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.tool-card-name-omp {
+  font-weight: 600;
+  color: var(--accent-lavender);
+}
+.tool-card-path-omp {
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.tool-card-chevron-omp {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+.tool-card-chevron-omp.open { transform: rotate(90deg); }
+
+.tool-card-body-omp {
+  padding: 0 10px 8px;
+  font-size: 12px;
+  color: var(--body);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.tool-card-body-omp pre {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  overflow-x: auto;
+  margin: 4px 0;
+  color: var(--body);
+}
+.tool-card-body-omp .tool-result-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+/* ── CEO thought card (omp-inspired unicode box) ── */
+.ceo-thought-omp {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(20, 20, 35, 0.6);
+  margin: 6px 0;
+  overflow: hidden;
+  animation: slide-card-in 0.3s ease both;
+}
+.ceo-thought-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-teal);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ceo-thought-body {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--body);
+}
+.ceo-thought-body .markdown-content p { margin: 4px 0; }
+
+.ceo-thought-omp.summary {
+  border-color: rgba(122, 184, 122, 0.2);
+  background: rgba(13, 40, 24, 0.4);
+}
+.ceo-thought-omp.summary .ceo-thought-header {
+  color: var(--accent-sage);
+  border-bottom-color: rgba(122, 184, 122, 0.15);
+}
+
+/* ── Plan card ── */
+.ceo-plan-omp {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(10, 10, 20, 0.5);
+  margin: 6px 0;
+  overflow: hidden;
+  animation: slide-card-in 0.3s ease both;
+}
+.ceo-plan-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-amber);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ceo-plan-body {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--body);
+  font-family: var(--font-mono);
+}
+
+/* ── omp-style status badge ── */
+.omp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.omp-badge.running { background: rgba(124, 58, 237, 0.15); color: #a855f7; }
+.omp-badge.done { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.omp-badge.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.omp-badge.idle { background: rgba(255, 255, 255, 0.04); color: var(--text-muted); }
+.omp-badge.paused { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+
+/* ── omp-style log line ── */
+.log-line-omp {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: var(--font-mono);
+  color: var(--body);
+  animation: slide-card-in 0.15s ease both;
+}
+.log-line-omp .log-icon {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.log-line-omp .log-icon.info { color: var(--accent-lavender); }
+.log-line-omp .log-icon.tool { color: var(--accent-teal); }
+.log-line-omp .log-icon.done { color: var(--accent-sage); }
+.log-line-omp .log-icon.error { color: var(--accent-coral); }
+.log-line-omp .log-icon.thought { color: var(--accent-amber); }
+
+/* ── Question Modal ── */
+.question-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.question-modal {
+  background: #1a1a2e;
+  border: 1px solid rgba(90,176,176,0.3);
+  border-radius: 8px;
+  max-width: 520px;
+  width: 90%;
+  padding: 20px;
+  animation: slide-card-in 0.2s ease-out;
+}
+.question-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--accent-teal);
+  font-size: 13px;
+  font-weight: 600;
+}
+.question-modal-question {
+  color: #e0e0e0;
+  font-size: 14px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.question-modal-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.question-modal-option {
+  background: rgba(90,176,176,0.1);
+  border: 1px solid rgba(90,176,176,0.3);
+  color: #e0e0e0;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.question-modal-option:hover {
+  background: rgba(90,176,176,0.2);
+  border-color: var(--accent-teal);
+}
+.question-modal-input {
+  width: 100%;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #e0e0e0;
+  padding: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  box-sizing: border-box;
+}
+.question-modal-input:focus {
+  border-color: var(--accent-teal);
+}
+.question-modal-send {
+  margin-top: 8px;
+  background: var(--accent-teal);
+  color: #000;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  float: right;
+}
+.question-modal-send:hover {
+  opacity: 0.85;
+}
+.question-modal-sent {
+  color: var(--accent-sage);
+  font-size: 12px;
+  text-align: right;
+  margin-top: 8px;
+}
+
+/* ── Agent Chat ── */
+.subagent-chat-messages {
+  border-top: 1px solid var(--hairline);
+  padding: 8px 12px;
+  max-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subagent-chat-msg {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.subagent-chat-msg.user {
+  color: var(--accent-teal);
+}
+.subagent-chat-msg.agent {
+  color: var(--accent-amber);
+}
+.subagent-chat-role {
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 28px;
+}
+.subagent-chat-text {
+  color: var(--text-muted);
+  word-break: break-word;
+}
+.subagent-chat-input-row {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--hairline);
+}
+.subagent-chat-input {
+  flex: 1;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 10px;
+  font-size: 12px;
+  outline: none;
+}
+.subagent-chat-input:focus {
+  border-color: var(--accent-teal);
+}
+.subagent-chat-send {
+  background: var(--accent-teal);
+  color: #000;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.subagent-chat-send:hover {
+  opacity: 0.85;
 }
 
 .stagger-item {

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Calculator</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f4f4f9; }
+        .calculator { border: 2px solid #333; padding: 20px; border-radius: 10px; box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.2); background-color: #fff; }
+        #display { font-size: 2em; text-align: right; margin-bottom: 15px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; min-height: 40px; background-color: #e9e9e9;}
+        .buttons { display: grid; grid-template-columns: repeat(4, 60px); gap: 10px; }
+        button { padding: 20px; font-size: 1.2em; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.1s; }
+        button:hover { opacity: 0.9; }
+        .number, .decimal { background-color: #f0f0f0; }
+        .operator { background-color: #ff9500; color: white; }
+        .equals { background-color: #34c759; color: white; grid-column: span 2; }
+        .clear { background-color: #ff3b30; color: white; }
+    </style>
+</head>
+<body>
+
+<div class="calculator">
+    <input type="text" id="display" disabled value="0">
+    <div class="buttons">
+        <!-- Row 1 -->
+        <button class="clear" onclick="clearDisplay()">AC</button>
+        <button class="operator" onclick="appendValue('/')">/</button>
+        <button class="operator" onclick="appendValue('*')">*</button>
+        <button class="operator" onclick="appendValue('-')">-</button>
+
+        <!-- Row 2 -->
+        <button class="number" onclick="appendValue('7')">7</button>
+        <button class="number" onclick="appendValue('8')">8</button>
+        <button class="number" onclick="appendValue('9')">9</button>
+        <button class="operator plus" onclick="appendValue('+')">+</button>
+
+        <!-- Row 3 -->
+        <button class="number" onclick="appendValue('4')">4</button>
+        <button class="number" onclick="appendValue('5')">5</button>
+        <button class="number" onclick="appendValue('6')">6</button>
+        <!-- Operator slot filled by row 2's '+' spanning -->
+
+        <!-- Row 4 -->
+        <button class="number" onclick="appendValue('1')">1</button>
+        <button class="number" onclick="appendValue('2')">2</button>
+        <button class="number" onclick="appendValue('3')">3</button>
+
+        <!-- Row 5 -->
+        <button class="number" onclick="appendValue('0')">0</button>
+        <button class="decimal" onclick="appendValue('.')">.</button>
+        <button class="equals" onclick="calculateResult()">=</button>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

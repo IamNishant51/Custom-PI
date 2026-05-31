@@ -379,7 +379,7 @@ function getWorkProductSummary(sessionId) {
   return `Work Products: ${products.length} total\n${lines.join("\n")}`;
 }
 
-// ── Memory (simplified file-based) ─────────────────────────────────────────
+// ── Memory System (TF-IDF Vector Semantic Search) ──────────────────────────
 
 const MEMORY_DIR = path.join(PI_DIR, "memory");
 const MEMORY_FILE = path.join(MEMORY_DIR, "semantic.json");
@@ -397,30 +397,102 @@ function writeMemory(entries) {
   fs.writeFileSync(MEMORY_FILE, JSON.stringify(entries, null, 2));
 }
 
+// Simple TF-IDF vector space model for semantic search
+function tokenize(text) {
+  const stopWords = new Set(["the","and","for","are","but","not","you","all","can","had","her","was","one","our","out","has","have","been","some","them","than","that","this","with","what","when","where","which","will","their","would","about","into","could","other","after","then","just","also","more","these","very","your","over","such","only","its","than","like","said","each","they","been","first","down","should","because","while","still","between","might","under","again","never","another","those","both","through","before","without","where","after","though","along","until","against","from","who","how","much","many","here","there","doing","done","having","being","made","make","take","come","going","know","think","want","need","way","use","tell","ask","say","work","seem","feel","try","leave","call","keep","let","begin","show","hear","play","run","move","live","give","find","set","put","write","read","create","build","change","help","start","end","open","close","turn","bring","hold","carry","look","see","watch","follow","understand","remember","mean"]);
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length > 2 && !stopWords.has(t));
+}
+
+function computeVector(text) {
+  const tokens = tokenize(text);
+  const vec = {};
+  for (const t of tokens) {
+    vec[t] = (vec[t] || 0) + 1;
+  }
+  let magnitude = 0;
+  for (const t in vec) magnitude += vec[t] * vec[t];
+  magnitude = Math.sqrt(magnitude);
+  if (magnitude > 0) {
+    for (const t in vec) vec[t] /= magnitude;
+  }
+  return vec;
+}
+
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  for (const t in a) if (b[t]) dot += a[t] * b[t];
+  return dot;
+}
+
+// Compute pre-computed vectors lazily
+let _vectorCache = null;
+function getVectors() {
+  if (!_vectorCache) {
+    _vectorCache = {};
+    // Check for saved vectors
+    try {
+      const vf = MEMORY_FILE.replace(".json", ".vec.json");
+      if (fs.existsSync(vf)) _vectorCache = JSON.parse(fs.readFileSync(vf, "utf8"));
+    } catch {}
+  }
+  return _vectorCache;
+}
+
+function saveVector(id, vec) {
+  const vf = MEMORY_FILE.replace(".json", ".vec.json");
+  const v = getVectors();
+  v[id] = vec;
+  fs.writeFileSync(vf, JSON.stringify(v));
+}
+
 function memoryStore(content, type, importance, project, tags) {
   const entries = readMemory();
   const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  entries.push({ id, content, type, importance, project, tags: tags || [], createdAt: Date.now(), accessCount: 0 });
+  const entry = { id, content, type, importance, project, tags: tags || [], createdAt: Date.now(), updatedAt: Date.now(), accessCount: 0 };
+  entries.push(entry);
   writeMemory(entries);
+
+  // Pre-compute vector
+  const vec = computeVector(content + " " + (tags || []).join(" "));
+  saveVector(id, vec);
+
   return id;
 }
 
 function memorySearch(query, k = 5) {
   const entries = readMemory();
-  const tokens = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
-  if (tokens.length === 0) return [];
+  if (!entries.length) return [];
+
+  const queryVec = computeVector(query);
+  const vectors = getVectors();
 
   const scored = entries.map(entry => {
-    const lower = entry.content.toLowerCase();
-    let score = 0;
-    for (const token of tokens) {
-      if (lower.includes(token)) score += 1;
-      if (lower.startsWith(token)) score += 0.5;
+    const entryVec = vectors[entry.id];
+    let vecScore = 0;
+    if (entryVec && Object.keys(queryVec).length > 0) {
+      vecScore = cosineSimilarity(queryVec, entryVec);
     }
-    if (entry.type === "skill") score += 0.5;
-    score += (entry.importance || 1) * 0.1;
-    score += (entry.accessCount || 0) * 0.05;
-    return { entry, score: Math.min(score / tokens.length, 1) };
+
+    // Keyword overlap as additional signal
+    const queryTokens = tokenize(query);
+    const entryTokens = tokenize(entry.content + " " + (entry.tags || []).join(" "));
+    const overlap = queryTokens.filter(t => entryTokens.includes(t)).length;
+    const keywordScore = queryTokens.length > 0 ? overlap / queryTokens.length : 0;
+
+    // Recency boost (exponential decay, half-life ~7 days)
+    const ageHours = (Date.now() - entry.createdAt) / (1000 * 60 * 60);
+    const recencyBoost = Math.exp(-ageHours / (24 * 7));
+
+    // Importance factor
+    const importanceFactor = (entry.importance || 5) / 10;
+
+    // Combined score
+    const score = vecScore * 0.5 + keywordScore * 0.3 + recencyBoost * 0.1 + importanceFactor * 0.1;
+
+    return { entry, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -608,14 +680,187 @@ const TOOLS = [
     },
   },
   {
+    name: "ask_user",
+    description: "Pause and ask the user a question. Wait for their response before continuing. Use this when you need approval, clarification, or additional information from the user.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "The question to ask the user" },
+        options: { type: "array", items: { type: "string" }, description: "Optional list of predefined answer options" },
+      },
+      required: ["question"],
+    },
+  },
+  {
     name: "post_to_twitter",
-    description: "Post a tweet to Twitter/X. Requires Twitter API credentials stored in vault (TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET).",
+    description: "Post a tweet to Twitter/X. Requires Twitter API credentials stored in vault (TWITTER_CONSUMER_KEY, TWITTER_SECRET_KEY, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET).",
     parameters: {
       type: "object",
       properties: {
         text: { type: "string", description: "The tweet content to post (max 280 characters)" },
       },
       required: ["text"],
+    },
+  },
+  {
+    name: "web_search",
+    description: "Search the web for information. Uses multiple free providers as fallback chain.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query" },
+        count: { type: "number", description: "Number of results (default 5, max 10)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "web_fetch",
+    description: "Fetch and extract the main content from a URL. Returns readable text.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The URL to fetch" },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "browser",
+    description: "Headless browser automation. Supports navigate, click, type, screenshot, extract. Uses Playwright.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["navigate", "click", "type", "screenshot", "extract"], description: "The browser action to perform" },
+        url: { type: "string", description: "URL to navigate to (for navigate action)" },
+        selector: { type: "string", description: "CSS selector for click/type/extract actions" },
+        text: { type: "string", description: "Text to type (for type action)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "github",
+    description: "GitHub API integration. Supports creating issues, listing issues, reading files, searching code. Requires GITHUB_TOKEN in vault.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["create_issue", "list_issues", "read_file", "search_code", "get_pr", "list_prs"], description: "The GitHub action" },
+        repo: { type: "string", description: "Repository (owner/repo format)" },
+        title: { type: "string", description: "Issue/PR title (for create actions)" },
+        body: { type: "string", description: "Issue/PR body content" },
+        path: { type: "string", description: "File path (for read_file action)" },
+        query: { type: "string", description: "Search query (for search_code action)" },
+        number: { type: "number", description: "Issue/PR number" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "post_to_reddit",
+    description: "Post a message to a Reddit subreddit. Requires REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in vault.",
+    parameters: {
+      type: "object",
+      properties: {
+        subreddit: { type: "string", description: "Subreddit name (e.g., 'artificial')" },
+        title: { type: "string", description: "Post title" },
+        text: { type: "string", description: "Post body text" },
+      },
+      required: ["subreddit", "title", "text"],
+    },
+  },
+  {
+    name: "post_to_bluesky",
+    description: "Post a message to Bluesky. Requires BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD in vault.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Post content (max 300 chars)" },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "send_email",
+    description: "Send an email via Gmail. Requires GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET in vault. Uses OAuth 2.0 device flow.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient email address" },
+        subject: { type: "string", description: "Email subject" },
+        body: { type: "string", description: "Email body text" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
+  {
+    name: "post_to_discord",
+    description: "Post a message to a Discord channel via webhook. Requires DISCORD_WEBHOOK_URL in vault.",
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Message content" },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "post_to_telegram",
+    description: "Post a message to Telegram. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in vault.",
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Message text" },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "memory_edit",
+    description: "Edit or delete stored memories by ID.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["edit", "delete"], description: "Action to perform" },
+        id: { type: "string", description: "Memory entry ID" },
+        content: { type: "string", description: "Updated content (for edit action)" },
+        tags: { type: "array", items: { type: "string" }, description: "Updated tags" },
+      },
+      required: ["action", "id"],
+    },
+  },
+  {
+    name: "todo_write",
+    description: "Write or update a task list with phased action plans.",
+    parameters: {
+      type: "object",
+      properties: {
+        phase: { type: "string", description: "Phase name (e.g., 'Phase 1: Setup')" },
+        items: { type: "array", items: { type: "object", properties: { description: { type: "string" }, done: { type: "boolean" } } }, description: "List of tasks" },
+      },
+      required: ["phase", "items"],
+    },
+  },
+  {
+    name: "hashline_edit",
+    description: "Edit files using the hashline format — a compact, line-anchored patch language with content-hash validation. Format: ¶path#TAG\\nreplace N..M:\\n+new content\\ndelete N\\ninsert after N:\\n+content\\ninsert head:\\n+content\\ninsert tail:\\n+content",
+    parameters: {
+      type: "object",
+      properties: {
+        patch: { type: "string", description: "Hashline patch string. Format: ¶path#HASH\\nreplace N..N:\\n+new content\\n Or: ¶path#HASH\\ndelete N\\n Or: ¶path#HASH\\ninsert after N:\\n+content" },
+      },
+      required: ["patch"],
+    },
+  },
+  {
+    name: "internal_url",
+    description: "Access resources via internal URL protocols. Supported: memory:// (memory access), vault:// (credential lookup), local:// (workspace files). Example: memory://fact, vault://KEY_NAME, local://path/to/file",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Internal URL to resolve" },
+      },
+      required: ["url"],
     },
   },
 ];
@@ -953,6 +1198,23 @@ async function executeTool(name, args, cwd) {
       const val = vaultGet(args.key);
       return val !== null ? val : `Secret '${args.key}' not found.`;
     }
+    case "ask_user": {
+      const questionId = crypto.randomUUID();
+      const q = { question: args.question, options: args.options || null, resolve: null, reject: null };
+      pendingQuestions[questionId] = q;
+      bcast({ type: "user_question", id: questionId, question: args.question, options: args.options || null });
+      try {
+        const answer = await new Promise((resolve, reject) => {
+          q.resolve = resolve;
+          q.reject = reject;
+          setTimeout(() => reject(new Error("Timed out waiting for user response (5 min)")), 300000);
+        });
+        return `User answered: ${answer}`;
+      } finally {
+        delete pendingQuestions[questionId];
+        bcast({ type: "user_question_resolved", id: questionId });
+      }
+    }
     case "delegate_to_subagent": {
       const agents = loadAgents();
       const agent = agents[args.agentId];
@@ -1000,20 +1262,59 @@ async function executeTool(name, args, cwd) {
     case "post_to_twitter": {
       return await postToTwitter(args.text);
     }
+    case "web_search": {
+      return await webSearch(args.query, args.count || 5);
+    }
+    case "web_fetch": {
+      return await webFetchUrl(args.url);
+    }
+    case "browser": {
+      return await browserAction(args.action, args);
+    }
+    case "github": {
+      return await githubAction(args);
+    }
+    case "post_to_reddit": {
+      return await postToReddit(args.subreddit, args.title, args.text);
+    }
+    case "post_to_bluesky": {
+      return await postToBluesky(args.text);
+    }
+    case "send_email": {
+      return await sendEmail(args.to, args.subject, args.body);
+    }
+    case "post_to_discord": {
+      return await postToDiscord(args.message);
+    }
+    case "post_to_telegram": {
+      return await postToTelegram(args.message);
+    }
+    case "memory_edit": {
+      return memoryEdit(args.action, args.id, args.content, args.tags);
+    }
+    case "todo_write": {
+      return todoWrite(args.phase, args.items);
+    }
+    case "hashline_edit": {
+      return await hashlineEdit(args.patch, cwd);
+    }
+    case "internal_url": {
+      return await resolveInternalUrl(args.url, cwd);
+    }
     default:
       return `Error: Unknown tool '${name}'`;
   }
 }
 
 async function postToTwitter(text) {
-  const consumerKey = vaultGet("TWITTER_API_KEY");
-  const consumerSecret = vaultGet("TWITTER_API_SECRET");
+  const consumerKey = vaultGet("TWITTER_CONSUMER_KEY");
+  const consumerSecret = vaultGet("TWITTER_SECRET_KEY");
   const accessToken = vaultGet("TWITTER_ACCESS_TOKEN");
   const accessSecret = vaultGet("TWITTER_ACCESS_SECRET");
   if (!consumerKey || !consumerSecret || !accessToken || !accessSecret) {
     return `Twitter API credentials not configured. Store them in vault using the vault_set tool:
-  vault_set key="TWITTER_API_KEY" value="<your_consumer_key>"
-  vault_set key="TWITTER_API_SECRET" value="<your_consumer_secret>"
+  vault_set key="TWITTER_CONSUMER_KEY" value="<your_consumer_key>"
+  vault_set key="TWITTER_SECRET_KEY" value="<your_consumer_secret>"
   vault_set key="TWITTER_ACCESS_TOKEN" value="<your_access_token>"
   vault_set key="TWITTER_ACCESS_SECRET" value="<your_access_token_secret>"
 Get these from https://developer.twitter.com (free tier: 1500 tweets/month).`;
@@ -1071,6 +1372,770 @@ Get these from https://developer.twitter.com (free tier: 1500 tweets/month).`;
   });
 }
 
+// ── Web Search ──────────────────────────────────────────────────────────────
+
+async function webSearch(query, count = 5) {
+  const results = [];
+
+  // Try multiple free search providers as fallback chain
+  const providers = [];
+
+  // 1. DuckDuckGo (free, no API key needed)
+  providers.push(async () => {
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; pi-custom-pack/1.0)" },
+        signal: AbortSignal.timeout(10000),
+      });
+      const html = await res.text();
+      const links = [];
+      const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let m;
+      while ((m = linkRegex.exec(html)) !== null && links.length < count) {
+        const href = m[1].replace(/\/\/duckduckgo\.com\/l\/\?uddg=/, "").replace(/&rut=.*$/, "");
+        const title = m[2].replace(/<[^>]+>/g, "").trim();
+        if (href && title) links.push({ title, url: decodeURIComponent(href) });
+      }
+      if (links.length) return links;
+      throw new Error("No DDG results");
+    } catch { return null; }
+  });
+
+  // 2. HackerNews Algolia (free, reliable)
+  providers.push(async () => {
+    try {
+      const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&hitsPerPage=${count}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const data = await res.json();
+      return (data.hits || []).slice(0, count).map(h => ({
+        title: h.title || h.story_title || "",
+        url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
+        snippet: (h.story_text || h.comment_text || "").replace(/<[^>]+>/g, "").slice(0, 200),
+      })).filter(h => h.title);
+    } catch { return null; }
+  });
+
+  // 3. Wikipedia API (free, useful for factual queries)
+  providers.push(async () => {
+    try {
+      const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=${count}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const data = await res.json();
+      return (data.query?.search || []).map(r => ({
+        title: r.title,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, "_"))}`,
+        snippet: r.snippet.replace(/<[^>]+>/g, ""),
+      }));
+    } catch { return null; }
+  });
+
+  for (const provider of providers) {
+    const r = await provider();
+    if (r && r.length > 0) {
+      results.push(...r);
+      break; // Use first provider that returns results
+    }
+  }
+
+  if (!results.length) return "Web search returned no results. Try a different query.";
+
+  return results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet.slice(0, 200)}` : ""}`).join("\n\n");
+}
+
+// ── Web Fetch ───────────────────────────────────────────────────────────────
+
+async function webFetchUrl(url) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; pi-custom-pack/1.0)",
+        "Accept": "text/html,text/plain,application/json,*/*",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    const contentType = res.headers.get("content-type") || "";
+    const text = await res.text();
+
+    if (contentType.includes("application/json")) {
+      try {
+        const parsed = JSON.parse(text);
+        return JSON.stringify(parsed, null, 2).slice(0, 10000);
+      } catch {
+        return text.slice(0, 10000);
+      }
+    }
+
+    // Strip HTML tags for readability
+    const stripped = text
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z]+;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return stripped.slice(0, 10000);
+  } catch (e) {
+    return `Error fetching URL: ${e.message}`;
+  }
+}
+
+// ── Browser Automation (Playwright) ─────────────────────────────────────────
+
+async function browserAction(action, args) {
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+
+    try {
+      switch (action) {
+        case "navigate": {
+          if (!args.url) return "URL required for navigate action";
+          await page.goto(args.url, { waitUntil: "networkidle", timeout: 30000 });
+          const title = await page.title();
+          const text = await page.evaluate(() => document.body.innerText.slice(0, 5000));
+          return `Navigated to ${args.url}\nTitle: ${title}\n\nContent:\n${text}`;
+        }
+        case "click": {
+          if (!args.selector) return "Selector required for click action";
+          await page.click(args.selector, { timeout: 10000 });
+          return `Clicked: ${args.selector}`;
+        }
+        case "type": {
+          if (!args.selector || !args.text) return "Selector and text required for type action";
+          await page.fill(args.selector, args.text);
+          return `Typed into: ${args.selector}`;
+        }
+        case "screenshot": {
+          const buf = await page.screenshot({ type: "png", fullPage: true });
+          return `Screenshot taken (${buf.length} bytes). Data URL: data:image/png;base64,${buf.toString("base64")}`;
+        }
+        case "extract": {
+          if (args.selector) {
+            const el = await page.$(args.selector);
+            if (!el) return `Element not found: ${args.selector}`;
+            return await el.innerText();
+          }
+          return await page.evaluate(() => document.body.innerText.slice(0, 10000));
+        }
+        default:
+          return `Unknown browser action: ${action}`;
+      }
+    } finally {
+      await browser.close();
+    }
+  } catch (e) {
+    if (e.message?.includes("Cannot find module") || e.message?.includes("playwright")) {
+      return "Playwright is not installed. Run: npx playwright install chromium";
+    }
+    return `Browser error: ${e.message}`;
+  }
+}
+
+// ── GitHub Integration ──────────────────────────────────────────────────────
+
+function githubToken() {
+  const token = vaultGet("GITHUB_TOKEN");
+  if (!token) throw new Error("GITHUB_TOKEN not in vault. Set it with: vault_set key=\"GITHUB_TOKEN\" value=\"ghp_...\"");
+  return token;
+}
+
+async function githubApi(endpoint, method = "GET", body = null) {
+  const token = githubToken();
+  const res = await fetch(`https://api.github.com${endpoint}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "pi-custom-pack/1.0",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30000),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || JSON.stringify(data));
+  return data;
+}
+
+async function githubAction(args) {
+  try {
+    switch (args.action) {
+      case "create_issue": {
+        if (!args.repo || !args.title) return "repo and title required";
+        const result = await githubApi(`/repos/${args.repo}/issues`, "POST", { title: args.title, body: args.body || "" });
+        return `Issue created: ${result.html_url}`;
+      }
+      case "list_issues": {
+        if (!args.repo) return "repo required";
+        const result = await githubApi(`/repos/${args.repo}/issues?state=open&per_page=20`);
+        if (!result.length) return "No open issues.";
+        return result.map(i => `- #${i.number}: ${i.title} (${i.html_url})`).join("\n");
+      }
+      case "read_file": {
+        if (!args.repo || !args.path) return "repo and path required";
+        const branch = args.branch || "main";
+        const result = await githubApi(`/repos/${args.repo}/contents/${args.path}?ref=${branch}`);
+        const content = Buffer.from(result.content, "base64").toString("utf8");
+        return `\`${args.path}\` (${args.repo}, ${branch}):\n\n${content}`;
+      }
+      case "search_code": {
+        if (!args.query) return "query required";
+        const result = await githubApi(`/search/code?q=${encodeURIComponent(args.query)}&per_page=10`);
+        if (!result.items?.length) return "No code results.";
+        return result.items.map(i => `- ${i.repository.full_name}: ${i.path} (${i.html_url})`).join("\n");
+      }
+      case "list_prs": {
+        if (!args.repo) return "repo required";
+        const result = await githubApi(`/repos/${args.repo}/pulls?state=open&per_page=20`);
+        if (!result.length) return "No open PRs.";
+        return result.map(pr => `- #${pr.number}: ${pr.title} (${pr.html_url})`).join("\n");
+      }
+      case "get_pr": {
+        if (!args.repo || !args.number) return "repo and number required";
+        const pr = await githubApi(`/repos/${args.repo}/pulls/${args.number}`);
+        const diffRes = await fetch(pr.diff_url, {
+          headers: { Authorization: `Bearer ${githubToken()}` },
+          signal: AbortSignal.timeout(30000),
+        });
+        const diff = await diffRes.text();
+        return `PR #${args.number}: ${pr.title}\nState: ${pr.state}\nAuthor: ${pr.user?.login}\n\nDescription:\n${pr.body || "No description"}\n\nFiles changed: ${pr.changed_files}\n\nDiff:\n${diff.slice(0, 5000)}`;
+      }
+      default:
+        return `Unknown GitHub action: ${args.action}`;
+    }
+  } catch (e) {
+    return `GitHub error: ${e.message}`;
+  }
+}
+
+// ── Reddit Posting ──────────────────────────────────────────────────────────
+
+async function postToReddit(subreddit, title, text) {
+  const clientId = vaultGet("REDDIT_CLIENT_ID");
+  const clientSecret = vaultGet("REDDIT_CLIENT_SECRET");
+  const username = vaultGet("REDDIT_USERNAME");
+  const password = vaultGet("REDDIT_PASSWORD");
+  if (!clientId || !clientSecret || !username || !password) {
+    return `Reddit credentials not configured. Store REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in vault.`;
+  }
+
+  try {
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    const tokenRes = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "pi-custom-pack/1.0 (by /u/" + username + ")",
+      },
+      body: `grant_type=password&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+      signal: AbortSignal.timeout(15000),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return `Reddit auth failed: ${JSON.stringify(tokenData)}`;
+
+    const postRes = await fetch(`https://oauth.reddit.com/r/${subreddit}/submit`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "pi-custom-pack/1.0 (by /u/" + username + ")",
+      },
+      body: `kind=self&sr=${encodeURIComponent(subreddit)}&title=${encodeURIComponent(title.slice(0, 300))}&text=${encodeURIComponent(text.slice(0, 40000))}`,
+      signal: AbortSignal.timeout(15000),
+    });
+    const postData = await postRes.json();
+    if (postRes.ok) return `Posted to r/${subreddit}!`;
+    return `Reddit error: ${JSON.stringify(postData)}`;
+  } catch (e) {
+    return `Reddit error: ${e.message}`;
+  }
+}
+
+// ── Bluesky Posting ─────────────────────────────────────────────────────────
+
+async function postToBluesky(text) {
+  const identifier = vaultGet("BLUESKY_IDENTIFIER");
+  const password = vaultGet("BLUESKY_APP_PASSWORD");
+  if (!identifier || !password) {
+    return "Bluesky credentials not configured. Store BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD in vault.";
+  }
+
+  try {
+    const sessionRes = await fetch("https://bsky.social/xrpc/com.atproto.server.createSession", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier, password }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const session = await sessionRes.json();
+    if (!session.accessJwt) return `Bluesky auth failed: ${JSON.stringify(session)}`;
+
+    const now = new Date().toISOString();
+    const postRes = await fetch("https://bsky.social/xrpc/com.atproto.repo.createRecord", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.accessJwt}`,
+      },
+      body: JSON.stringify({
+        repo: session.did,
+        collection: "app.bsky.feed.post",
+        record: {
+          $type: "app.bsky.feed.post",
+          text: text.slice(0, 300),
+          createdAt: now,
+        },
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const postData = await postRes.json();
+    if (postData.uri) return `Posted to Bluesky! URI: ${postData.uri}`;
+    return `Bluesky error: ${JSON.stringify(postData)}`;
+  } catch (e) {
+    return `Bluesky error: ${e.message}`;
+  }
+}
+
+// ── Email (Gmail) ────────────────────────────────────────────────────────────
+
+let gmailTokens = { accessToken: null, refreshToken: null };
+
+async function gmailAuth() {
+  const clientId = vaultGet("GMAIL_CLIENT_ID");
+  const clientSecret = vaultGet("GMAIL_CLIENT_SECRET");
+  if (!clientId || !clientSecret) {
+    throw new Error("Gmail not configured. Store GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in vault.");
+  }
+
+  // Try device flow
+  const deviceRes = await fetch("https://oauth2.googleapis.com/device/code", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `client_id=${clientId}&scope=https://www.googleapis.com/auth/gmail.send`,
+    signal: AbortSignal.timeout(15000),
+  });
+  const device = await deviceRes.json();
+  if (!device.device_code) throw new Error(`Gmail device auth failed: ${JSON.stringify(device)}`);
+
+  broadcast({ type: "gmail_auth_required", verificationUrl: device.verification_url, userCode: device.user_code });
+
+  // Poll for token
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `client_id=${clientId}&client_secret=${clientSecret}&device_code=${device.device_code}&grant_type=urn:ietf:params:oauth:grant-type:device_code`,
+      signal: AbortSignal.timeout(10000),
+    });
+    const token = await tokenRes.json();
+    if (token.access_token) {
+      gmailTokens = { accessToken: token.access_token, refreshToken: token.refresh_token };
+      return token.access_token;
+    }
+  }
+  throw new Error("Gmail auth timeout (5 min). Please complete the browser flow.");
+}
+
+async function sendEmail(to, subject, body) {
+  try {
+    if (!gmailTokens.accessToken) await gmailAuth();
+
+    const email = [
+      `From: me`,
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      `Content-Type: text/plain; charset=UTF-8`,
+      ``,
+      body,
+    ].join("\r\n");
+    const encoded = Buffer.from(email).toString("base64url");
+
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${gmailTokens.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ raw: encoded }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (res.status === 401) {
+      // Token expired, re-auth
+      gmailTokens = { accessToken: null, refreshToken: null };
+      return await sendEmail(to, subject, body);
+    }
+
+    const data = await res.json();
+    if (data.id) return `Email sent to ${to}! Message ID: ${data.id}`;
+    return `Gmail error: ${JSON.stringify(data)}`;
+  } catch (e) {
+    return `Email error: ${e.message}. Configure Gmail with: vault_set key="GMAIL_CLIENT_ID" value="..." and vault_set key="GMAIL_CLIENT_SECRET" value="..."`;
+  }
+}
+
+// ── Discord Posting ─────────────────────────────────────────────────────────
+
+async function postToDiscord(message) {
+  const url = vaultGet("DISCORD_WEBHOOK_URL");
+  if (!url) return "Discord webhook not configured. Store DISCORD_WEBHOOK_URL in vault.";
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: message.slice(0, 2000) }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) return "Posted to Discord!";
+    return `Discord error: ${res.status} ${await res.text()}`;
+  } catch (e) {
+    return `Discord error: ${e.message}`;
+  }
+}
+
+// ── Telegram Posting ────────────────────────────────────────────────────────
+
+async function postToTelegram(message) {
+  const token = vaultGet("TELEGRAM_BOT_TOKEN");
+  const chatId = vaultGet("TELEGRAM_CHAT_ID");
+  if (!token || !chatId) return "Telegram not configured. Store TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in vault.";
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message.slice(0, 4096) }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await res.json();
+    if (data.ok) return "Posted to Telegram!";
+    return `Telegram error: ${JSON.stringify(data)}`;
+  } catch (e) {
+    return `Telegram error: ${e.message}`;
+  }
+}
+
+// ── Memory Edit ──────────────────────────────────────────────────────────────
+
+function memoryEdit(action, id, content, tags) {
+  const entries = readMemory();
+  const idx = entries.findIndex(e => e.id === id);
+  if (idx === -1) return `Memory entry '${id}' not found.`;
+
+  if (action === "delete") {
+    entries.splice(idx, 1);
+    writeMemory(entries);
+    return `Memory entry '${id}' deleted.`;
+  }
+
+  if (action === "edit") {
+    if (content) entries[idx].content = content;
+    if (tags) entries[idx].tags = tags;
+    entries[idx].updatedAt = Date.now();
+    writeMemory(entries);
+    return `Memory entry '${id}' updated.`;
+  }
+
+  return `Unknown action: ${action}`;
+}
+
+// ── Todo Write ───────────────────────────────────────────────────────────────
+
+function todoWrite(phase, items) {
+  const todoPath = path.join(PI_DIR, "todos.json");
+  let todos = {};
+  try { todos = JSON.parse(fs.readFileSync(todoPath, "utf8")); } catch {}
+
+  todos[phase] = { items, updatedAt: Date.now() };
+  fs.writeFileSync(todoPath, JSON.stringify(todos, null, 2));
+
+  const summary = items.map((it, i) => `${it.done ? "✓" : "○"} ${it.description}`).join("\n");
+  return `Todo phase '${phase}' saved.\n\n${summary}`;
+}
+
+// ── Hashline Edit (Content-Hash Validated Patch) ───────────────────────────
+
+const hashlineSnapshots = {}; // path -> { hash, content }
+
+function computeFileHash(content) {
+  const normalized = content.replace(/[ \t]+\r?\n/g, "\n");
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i++) {
+    hash = ((hash << 5) - hash + normalized.charCodeAt(i)) | 0;
+  }
+  return (hash & 0xFFFF).toString(16).padStart(4, "0").toUpperCase();
+}
+
+function parseHashlinePatch(patch) {
+  // Format: ¶path#TAG\ncommand args\n+content\n+content\n...
+  // Commands: replace N..M:, delete N..M, insert before N:, insert after N:, insert head:, insert tail:
+  // Blocks: replace block N:, delete block N
+
+  const sections = [];
+  const lines = patch.split("\n");
+
+  let currentSection = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+
+    // Section header: ¶path#TAG
+    if (line.startsWith("¶")) {
+      if (currentSection) sections.push(currentSection);
+      const match = line.match(/^¶(.+?)#([0-9A-Fa-f]{4})$/);
+      if (!match) continue;
+      currentSection = { path: match[1], hash: match[2].toUpperCase(), ops: [] };
+      continue;
+    }
+
+    if (!currentSection) continue;
+
+    // Op line: command args
+    const opMatch = line.match(/^(replace|delete|insert)(?:\s+block)?\s+(.+)$/);
+    if (opMatch) {
+      const verb = opMatch[1];
+      const rest = opMatch[2].trim();
+
+      if (verb === "insert") {
+        const posMatch = rest.match(/^(before|after|head|tail)\s*(\d+)?\s*:?\s*$/);
+        if (posMatch) {
+          currentSection.ops.push({
+            type: "insert",
+            position: posMatch[1],
+            anchor: posMatch[2] ? parseInt(posMatch[2]) : null,
+            lines: [],
+          });
+        }
+        continue;
+      }
+
+      if (verb === "delete") {
+        const rangeMatch = rest.match(/^(\d+)(?:\.\.\s*(\d+))?\s*$/);
+        if (rangeMatch) {
+          currentSection.ops.push({
+            type: "delete",
+            start: parseInt(rangeMatch[1]),
+            end: rangeMatch[2] ? parseInt(rangeMatch[2]) : parseInt(rangeMatch[1]),
+          });
+        }
+        continue;
+      }
+
+      if (verb === "replace") {
+        const rangeMatch = rest.match(/^(\d+)(?:\.\.\s*(\d+))?:?\s*$/);
+        if (rangeMatch) {
+          currentSection.ops.push({
+            type: "replace",
+            start: parseInt(rangeMatch[1]),
+            end: rangeMatch[2] ? parseInt(rangeMatch[2]) : parseInt(rangeMatch[1]),
+            lines: [],
+          });
+        }
+        continue;
+      }
+    }
+
+    // Content line: +text
+    if (line.startsWith("+") && currentSection.ops.length > 0) {
+      const lastOp = currentSection.ops[currentSection.ops.length - 1];
+      if (lastOp.lines !== undefined) {
+        lastOp.lines.push(line.slice(1));
+      }
+    }
+  }
+
+  if (currentSection) sections.push(currentSection);
+  return sections;
+}
+
+async function hashlineEdit(patch, cwd) {
+  try {
+    const sections = parseHashlinePatch(patch);
+    if (!sections.length) return "Invalid hashline patch. Format: ¶path#TAG\\nreplace N..N:\\n+content";
+
+    const results = [];
+
+    for (const section of sections) {
+      const fp = safeResolve(cwd, expandPath(section.path));
+      if (!fs.existsSync(fp)) {
+        results.push(`File not found: ${section.path}`);
+        continue;
+      }
+
+      const content = fs.readFileSync(fp, "utf8");
+      const liveHash = computeFileHash(content);
+      let contentLines = content.split("\n");
+
+      // Validate hash
+      if (liveHash !== section.hash) {
+        // Try recovery: check if file exists in snapshot
+        const snap = hashlineSnapshots[fp];
+        if (snap && snap.hash === section.hash) {
+          // 3-way merge: apply ops to snapshot, then diff
+          const snapshotLines = snap.content.split("\n");
+          const edited = applyOps(snapshotLines, section.ops);
+          if (edited === null) {
+            results.push(`Hash mismatch for ${section.path}: expected ${section.hash}, got ${liveHash}. File changed externally.`);
+            continue;
+          }
+          contentLines = edited;
+        } else {
+          // Head/tail-only ops can tolerate drift
+          const onlyHeadTail = section.ops.every(o => o.type === "insert" && (o.position === "head" || o.position === "tail"));
+          if (!onlyHeadTail) {
+            results.push(`Hash mismatch for ${section.path}: expected ${section.hash}, got ${liveHash}${snap ? ". Attempted 3-way merge failed." : ". Record hash not found."}`);
+            continue;
+          }
+        }
+      }
+
+      const edited = applyOps(contentLines, section.ops);
+      if (edited === null) {
+        results.push(`Failed to apply edits to ${section.path}`);
+        continue;
+      }
+
+      const newContent = edited.join("\n");
+      fs.writeFileSync(fp, newContent, "utf8");
+
+      // Update snapshot
+      hashlineSnapshots[fp] = { hash: computeFileHash(newContent), content: newContent };
+
+      const opSummary = section.ops.map(o => {
+        if (o.type === "replace") return `replace ${o.start}..${o.end} (${o.lines.length} lines)`;
+        if (o.type === "delete") return `delete ${o.start}..${o.end}`;
+        if (o.type === "insert") return `insert ${o.position}${o.anchor ? " " + o.anchor : ""}`;
+        return o.type;
+      }).join(", ");
+
+      results.push(`Edited ${section.path}: ${opSummary}`);
+    }
+
+    return results.join("\n");
+  } catch (e) {
+    return `Hashline edit error: ${e.message}`;
+  }
+}
+
+function applyOps(lines, ops) {
+  let result = [...lines];
+
+  // Sort ops in reverse order to maintain line numbering
+  const sorted = [...ops].sort((a, b) => {
+    const aLine = a.type === "insert" && a.position === "tail" ? lines.length :
+      a.type === "insert" && a.position === "head" ? 0 :
+      a.type === "insert" && a.anchor ? a.anchor :
+      a.start || 0;
+    const bLine = b.type === "insert" && b.position === "tail" ? lines.length :
+      b.type === "insert" && b.position === "head" ? 0 :
+      b.type === "insert" && b.anchor ? b.anchor :
+      b.start || 0;
+    return bLine - aLine; // Reverse order
+  });
+
+  for (const op of sorted) {
+    if (op.type === "replace") {
+      if (op.start < 1 || op.end > result.length) return null;
+      result.splice(op.start - 1, op.end - op.start + 1, ...op.lines);
+    } else if (op.type === "delete") {
+      if (op.start < 1 || op.end > result.length) return null;
+      result.splice(op.start - 1, op.end - op.start + 1);
+    } else if (op.type === "insert") {
+      let idx;
+      if (op.position === "head") idx = 0;
+      else if (op.position === "tail") idx = result.length;
+      else if (op.position === "before" && op.anchor) idx = Math.min(op.anchor - 1, result.length);
+      else if (op.position === "after" && op.anchor) idx = Math.min(op.anchor, result.length);
+      else idx = result.length;
+      result.splice(idx, 0, ...op.lines);
+    }
+  }
+
+  return result;
+}
+
+// ── Internal URL System ────────────────────────────────────────────────────
+
+async function resolveInternalUrl(url, cwd) {
+  try {
+    const parsed = new URL(url);
+
+    switch (parsed.protocol) {
+      case "memory:": {
+        // memory://query -> memory search
+        const query = parsed.hostname || parsed.pathname.replace(/^\//, "");
+        if (!query) {
+          const entries = readMemory();
+          return entries.map(e => `[${e.type}] ${e.id}: ${e.content.slice(0, 100)}`).join("\n") || "No memories stored.";
+        }
+        const results = memorySearch(query, 10);
+        if (!results.length) return `No memories found for: ${query}`;
+        return results.map((r, i) => `${i + 1}. [${r.entry.type}] ${r.entry.content} (${(r.score * 100).toFixed(0)}%)`).join("\n");
+      }
+
+      case "vault:": {
+        // vault://KEY
+        const key = (parsed.hostname || parsed.pathname.replace(/^\/+/, "")).toUpperCase();
+        const val = vaultGet(key);
+        if (val !== null) return `vault://${key} = ${val}`;
+        return `Key '${key}' not found in vault.`;
+      }
+
+      case "local:": {
+        // local://path or local:///absolute/path or local://./relative/path
+        let filePath = parsed.hostname ? parsed.hostname + parsed.pathname : parsed.pathname;
+        filePath = filePath.replace(/^\/+/, "");
+        if (!filePath) {
+          // List session local dir
+          const localDir = path.join(PI_DIR, "local");
+          if (!fs.existsSync(localDir)) return "No local files.";
+          return fs.readdirSync(localDir).join("\n");
+        }
+        const resolved = safeResolve(cwd, expandPath(filePath));
+        if (!fs.existsSync(resolved)) return `File not found: ${filePath}`;
+        if (fs.statSync(resolved).isDirectory()) {
+          return fs.readdirSync(resolved).map(e => {
+            const stat = fs.statSync(path.join(resolved, e));
+            return `${stat.isDirectory() ? "[D]" : "[F]"} ${e}`;
+          }).join("\n");
+        }
+        return fs.readFileSync(resolved, "utf8");
+      }
+
+      default:
+        return `Unknown internal URL protocol: ${parsed.protocol}. Supported: memory://, vault://, local://`;
+    }
+  } catch (e) {
+    return `Internal URL error: ${e.message}. Use format: memory://query or vault://KEY or local://path`;
+  }
+}
+
+// ── Pending Questions (ask_user) ────────────────────────────────────────────
+const pendingQuestions = {};
+
+// ── Agent Chat Buffers (real-time user → agent messaging) ──────────────────
+const agentChatBuffers = {};
+
+function getAgentChatBuffer(agentId) {
+  if (!agentChatBuffers[agentId]) agentChatBuffers[agentId] = [];
+  return agentChatBuffers[agentId];
+}
+
+function flushAgentChatBuffer(agentId) {
+  const buf = agentChatBuffers[agentId] || [];
+  agentChatBuffers[agentId] = [];
+  return buf;
+}
+
 // ── Session Runtime ────────────────────────────────────────────────────────
 
 const OBSIDIAN_VAULT = "/home/nishant/Documents/Obsidian Vault";
@@ -1113,8 +2178,8 @@ function loadSystemPrompt() {
 
   // 6. Available tools note
   parts.push(`## AVAILABLE TOOLS
-You have access to these tools: list_dir, view_file, read, write, edit, bash, glob, grep, memory_store, memory_search, vault_set, vault_get, delegate_to_subagent, search_obsidian, write_obsidian_note.
-NOT available: web_search, web_fetch, create_subagent, grep_search (use grep), memory_write/memory_read/memory_consolidate (use memory_store/memory_search), search_current_session, update_agent_memory (use memory_store).`);
+You have access to these tools: list_dir, view_file, read, write, edit, bash, glob, grep, memory_store, memory_search, vault_set, vault_get, delegate_to_subagent, search_obsidian, write_obsidian_note, web_search, web_fetch, browser, github, post_to_reddit, post_to_bluesky, send_email, post_to_discord, post_to_telegram, memory_edit, todo_write.
+NOT available: create_subagent, grep_search (use grep), memory_write/memory_read/memory_consolidate (use memory_store/memory_search), search_current_session, update_agent_memory (use memory_store).`);
 
   // 7. Skills
   const SKILLS_DIR = path.join(PI_DIR, "skills");
@@ -1460,6 +2525,18 @@ process.exit(0);
     let turn = 0;
     while (turn < MAX_TURNS) {
       try {
+        // Inject pending user chat messages into agent context
+        const pendingChats = flushAgentChatBuffer(agent.id);
+        if (pendingChats.length > 0) {
+          const chatSummary = pendingChats.map(c => `[User message]: ${c.content}`).join("\n");
+          messages.push({
+            role: "user",
+            content: [{ type: "text", text: `--- User messages during execution ---\n${chatSummary}\n--- Please incorporate this feedback ---` }],
+            timestamp: Date.now(),
+          });
+          bcast({ type: "agent_log", agentId: agent.id, message: `📩 ${pendingChats.length} user message(s) injected into context.` });
+        }
+
         const stream = streamSimple(model, {
           systemPrompt: agentPrompt,
           messages,
@@ -2061,6 +3138,21 @@ async function main() {
         try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
       }
 
+      if (data.type === "user_answer") {
+        const q = pendingQuestions[data.questionId];
+        if (q && q.resolve) {
+          q.resolve(data.answer);
+        }
+      }
+
+      if (data.type === "agent_chat") {
+        const { agentId, message } = data;
+        if (agentId && message) {
+          getAgentChatBuffer(agentId).push({ role: "user", content: message, timestamp: Date.now() });
+          bcast({ type: "agent_chat", agentId, message, fromAgent: false });
+        }
+      }
+
       if (data.type === "memory_search") {
         try { socket.send(JSON.stringify({ type: "memory_results", results: memorySearch(data.query, data.k ?? 5) })); }
         catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
@@ -2107,7 +3199,10 @@ async function main() {
 
   try {
     await app.listen({ port: PORT, host: HOST });
-    console.log(`\n  ✦ Custom-PI Web UI running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}\n`);
+    const model = resolveModel();
+    console.log(`\n  ✦ Custom-PI Web UI running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
+    console.log(`  ✦ Active model: ${model.provider}/${model.id}`);
+    console.log(`  ✦ API endpoint: ${model.baseUrl || "default"}\n`);
   } catch (e) {
     console.error(`Failed to start server: ${e.message}`);
     process.exit(1);
