@@ -35,10 +35,11 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [ceoLogs, setCeoLogs] = useState<string[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const [finalSummary, setFinalSummary] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState<{ agentId: string; toolName: string; status: "requested" | "created" } | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-
+  
   interface SavedTeam {
     name: string;
     goal: string;
@@ -54,6 +55,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([]);
   const [teamNameInput, setTeamNameInput] = useState("");
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [isCurrentTeamSaved, setIsCurrentTeamSaved] = useState(false);
   
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +101,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             setFinalSummary(null);
             setProvisioning(null);
             setSelectedAgentId(null);
+            setIsCurrentTeamSaved(false);
             break;
 
           case "ceo_thought":
@@ -248,6 +251,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     setFinalSummary(null);
     setProvisioning(null);
     setSelectedAgentId(null);
+    setIsCurrentTeamSaved(true);
     toast(`Running saved team: ${team.name}`, "success");
   }, [ws, toast]);
 
@@ -276,6 +280,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
         toast(`Team "${teamNameInput}" saved successfully!`, "success");
         setTeamNameInput("");
         setShowSaveModal(false);
+        setIsCurrentTeamSaved(true);
         fetchSavedTeams();
       } else {
         const err = await res.json() as any;
@@ -329,6 +334,24 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const getCoordinates = (index: number, total: number) => {
+    const cx = 250;
+    const cy = 35;
+    const r = 130;
+    if (total === 1) return { x: cx, y: cy + r };
+    
+    const startAngle = Math.PI * (150 / 180); // 150 deg (left)
+    const endAngle = Math.PI * (30 / 180);   // 30 deg (right)
+    const angleRange = startAngle - endAngle;
+    const angleStep = angleRange / (total - 1);
+    const angle = startAngle - index * angleStep;
+    
+    return {
+      x: cx + r * Math.cos(angle),
+      y: cy + r * Math.sin(angle)
+    };
   };
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
@@ -421,13 +444,25 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
               </div>
               <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
                 {agents.length > 0 && (
-                  <button 
-                    className="btn btn-secondary text-xs" 
-                    onClick={() => setShowSaveModal(true)}
-                    style={{ padding: "6px 12px", height: "auto", display: "flex", alignItems: "center", gap: 4 }}
-                  >
-                    💾 Save Team
-                  </button>
+                  isCurrentTeamSaved ? (
+                    <div className="saved-team-badge">
+                      <span className="saved-badge-check">✓</span> Registered Team
+                    </div>
+                  ) : (
+                    <button 
+                      className="btn btn-primary text-xs btn-glow-save" 
+                      onClick={() => setShowSaveModal(true)}
+                      style={{ 
+                        padding: "6px 12px", 
+                        height: "auto", 
+                        display: "flex", 
+                        alignItems: "center", 
+                        gap: 6
+                      }}
+                    >
+                      <span>💾</span> Save Swarm Composition
+                    </button>
+                  )
                 )}
                 <div style={{ textAlign: "right" }}>
                   <span className="text-muted text-xs font-mono">ELAPSED TIME</span>
@@ -454,6 +489,172 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
               </div>
             )}
           </div>
+
+          {/* Swarm Topology Node Map Card */}
+          {agents.length > 0 && (
+            <div className="card swarm-topology-card" style={{ padding: "16px 24px", marginBottom: 16 }}>
+              <div className="panel-title" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Swarm Command Center Node Map</span>
+                <span className="text-xs font-mono text-muted">Hover nodes for details • Click to inspect</span>
+              </div>
+              
+              <div style={{ display: "flex", justifyContent: "center", background: "rgba(0, 0, 0, 0.2)", borderRadius: "var(--radius-md)", border: "1px solid var(--hairline)", overflow: "hidden" }}>
+                <svg width="100%" height="220" viewBox="0 0 500 220" style={{ maxWidth: 600 }}>
+                  <defs>
+                    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(168, 85, 247, 0.02)" strokeWidth="1" />
+                    </pattern>
+                  </defs>
+                  
+                  {/* Grid background */}
+                  <rect width="100%" height="100%" fill="url(#grid)" />
+                  
+                  {/* Concentric rings centered at CEO (250, 35) */}
+                  <circle cx="250" cy="35" r="70" fill="none" stroke="rgba(168, 85, 247, 0.05)" strokeWidth="1" strokeDasharray="2,8" />
+                  <circle cx="250" cy="35" r="130" fill="none" stroke="rgba(168, 85, 247, 0.1)" strokeWidth="1.5" strokeDasharray="4,4" />
+                  <circle cx="250" cy="35" r="190" fill="none" stroke="rgba(168, 85, 247, 0.04)" strokeWidth="1" strokeDasharray="3,12" />
+
+                  {/* CEO to Agent connection lines */}
+                  {agents.map((agent, i) => {
+                    const coords = getCoordinates(i, agents.length);
+                    const isActive = agent.status === "running" || agent.status === "calling_tool";
+                    const isFlowing = agent.status === "running" || agent.status === "calling_tool";
+                    
+                    let strokeColor = "rgba(255, 255, 255, 0.15)";
+                    let strokeDash = undefined;
+                    
+                    if (agent.status === "running") {
+                      strokeColor = "#7c3aed";
+                      strokeDash = "5,5";
+                    } else if (agent.status === "calling_tool") {
+                      strokeColor = "#06b6d4";
+                      strokeDash = "4,4";
+                    } else if (agent.status === "paused") {
+                      strokeColor = "#fb923c";
+                      strokeDash = "2,2";
+                    } else if (agent.status === "done") {
+                      strokeColor = "#10b981";
+                    } else if (agent.status === "error") {
+                      strokeColor = "#ef4444";
+                      strokeDash = "6,4";
+                    }
+
+                    return (
+                      <line
+                        key={i}
+                        x1={250}
+                        y1={35}
+                        x2={coords.x}
+                        y2={coords.y}
+                        stroke={strokeColor}
+                        strokeWidth={isActive ? 3 : 1.5}
+                        strokeDasharray={strokeDash}
+                        className={isFlowing ? "flowing-line" : ""}
+                        style={{ transition: "stroke 0.3s ease, stroke-width 0.3s ease" }}
+                      />
+                    );
+                  })}
+
+                  {/* CEO Node */}
+                  <g>
+                    <circle cx={250} cy={35} r={28} className="ceo-glow-ring" />
+                    <circle cx={250} cy={35} r={20} fill="#0e0f14" stroke="#7c3aed" strokeWidth="2" />
+                    <text x={250} y={39} textAnchor="middle" fill="#fff" fontSize="10" fontWeight="bold" fontFamily="var(--font-mono)">CEO</text>
+                  </g>
+
+                  {/* Subagent Nodes */}
+                  {agents.map((agent, i) => {
+                    const coords = getCoordinates(i, agents.length);
+                    const isSelected = selectedAgentId === agent.id;
+                    
+                    let strokeColor = "var(--hairline)";
+                    if (agent.status === "running") strokeColor = "#7c3aed";
+                    else if (agent.status === "calling_tool") strokeColor = "#06b6d4";
+                    else if (agent.status === "paused") strokeColor = "#fb923c";
+                    else if (agent.status === "done") strokeColor = "#10b981";
+                    else if (agent.status === "error") strokeColor = "#ef4444";
+
+                    return (
+                      <g key={i}>
+                        <circle cx={coords.x} cy={coords.y} r={24} className={`node-glow-ring ${agent.status}`} />
+                        <circle
+                          cx={coords.x}
+                          cy={coords.y}
+                          r={18}
+                          fill={isSelected ? "rgba(124, 58, 237, 0.15)" : "#0e0f14"}
+                          stroke={strokeColor}
+                          strokeWidth={isSelected ? 3 : 2}
+                          onClick={() => setSelectedAgentId(agent.id)}
+                          onMouseEnter={() => setHoveredAgentId(agent.id)}
+                          onMouseLeave={() => setHoveredAgentId(null)}
+                          style={{ cursor: "pointer", transition: "all 0.2s ease" }}
+                        />
+                        <text
+                          x={coords.x}
+                          y={coords.y + 3}
+                          textAnchor="middle"
+                          fill="#fff"
+                          fontSize="9"
+                          fontWeight="bold"
+                          fontFamily="var(--font-mono)"
+                          onClick={() => setSelectedAgentId(agent.id)}
+                          onMouseEnter={() => setHoveredAgentId(agent.id)}
+                          onMouseLeave={() => setHoveredAgentId(null)}
+                          style={{ cursor: "pointer", pointerEvents: "none" }}
+                        >
+                          {agent.id.slice(0, 3).toUpperCase()}
+                        </text>
+                        <text
+                          x={coords.x}
+                          y={coords.y + 36}
+                          textAnchor="middle"
+                          fill={isSelected ? "#fff" : "var(--mute)"}
+                          fontSize="11"
+                          fontWeight={isSelected ? "600" : "400"}
+                          fontFamily="var(--font-sans)"
+                          style={{ pointerEvents: "none" }}
+                        >
+                          {agent.id.toUpperCase()}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* HUD Detail Tooltip */}
+                  {hoveredAgentId && (
+                    (() => {
+                      const agent = agents.find(a => a.id === hoveredAgentId);
+                      if (!agent) return null;
+                      const coords = getCoordinates(agents.indexOf(agent), agents.length);
+                      // Position tooltip above the node
+                      const tx = coords.x;
+                      const ty = coords.y - 35;
+                      return (
+                        <g style={{ pointerEvents: "none" }}>
+                          <rect
+                            x={tx - 75}
+                            y={ty - 45}
+                            width={150}
+                            height={45}
+                            className="hud-tooltip-rect"
+                          />
+                          <text x={tx} y={ty - 30} textAnchor="middle" className="hud-tooltip-title">
+                            {agent.id.toUpperCase()}
+                          </text>
+                          <text x={tx} y={ty - 18} textAnchor="middle" className="hud-tooltip-status">
+                            STATUS: {agent.status.toUpperCase()}
+                          </text>
+                          <text x={tx} y={ty - 8} textAnchor="middle" className="hud-tooltip-tool">
+                            {agent.currentTool ? `TOOL: ${agent.currentTool}` : (agent.tools.length > 0 ? `TOOLS: ${agent.tools.slice(0, 2).join(", ")}` : "NO TOOLS")}
+                          </text>
+                        </g>
+                      );
+                    })()
+                  )}
+                </svg>
+              </div>
+            </div>
+          )}
 
           <div className="swarm-panels">
             {/* ── Left Side: Agent List/Cards ── */}

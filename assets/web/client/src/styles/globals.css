@@ -2277,3 +2277,221 @@ select {
   border-color: rgba(16, 185, 129, 0.3);
   box-shadow: 0 8px 30px rgba(16, 185, 129, 0.08);
 }
+
+/* ── GOD-LEVEL SWARM COMMAND CENTER CYBERPUNK STYLING ── */
+
+.flowing-line {
+  stroke-dasharray: 8, 4;
+  animation: swarmFlow 1.5s linear infinite;
+}
+
+@keyframes swarmFlow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.node-glow-ring {
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0;
+  transform-origin: center;
+  transition: all 0.3s ease;
+}
+
+.node-glow-ring.running {
+  stroke: #7c3aed;
+  opacity: 0.6;
+  animation: nodePulsePurple 2s infinite ease-out;
+}
+
+.node-glow-ring.calling_tool {
+  stroke: #06b6d4;
+  opacity: 0.6;
+  animation: nodePulseCyan 2s infinite ease-out;
+}
+
+.node-glow-ring.paused {
+  stroke: #fb923c;
+  opacity: 0.6;
+  animation: nodePulseOrange 2s infinite ease-out;
+}
+
+.ceo-glow-ring {
+  fill: none;
+  stroke: #a855f7;
+  stroke-width: 2;
+  opacity: 0.2;
+  animation: ceoPulse 3s infinite ease-in-out;
+}
+
+@keyframes nodePulsePurple {
+  0% { transform: scale(1); stroke-width: 1.5; opacity: 0.8; }
+  100% { transform: scale(1.6); stroke-width: 0.5; opacity: 0; }
+}
+
+@keyframes nodePulseCyan {
+  0% { transform: scale(1); stroke-width: 1.5; opacity: 0.8; }
+  100% { transform: scale(1.6); stroke-width: 0.5; opacity: 0; }
+}
+
+@keyframes nodePulseOrange {
+  0% { transform: scale(1); stroke-width: 1; opacity: 0.7; }
+  50% { transform: scale(1.2); stroke-width: 2; opacity: 0.3; }
+  100% { transform: scale(1); stroke-width: 1; opacity: 0.7; }
+}
+
+@keyframes ceoPulse {
+  0% { transform: scale(1); stroke-width: 2; opacity: 0.3; }
+  50% { transform: scale(1.3); stroke-width: 1; opacity: 0.1; }
+  100% { transform: scale(1); stroke-width: 2; opacity: 0.3; }
+}
+
+/* Saved Team Pill Badge styling */
+.saved-team-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  padding: 6px 14px;
+  border-radius: var(--radius-full, 9999px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.1);
+  animation: savedBadgeGlow 2.5s infinite ease-in-out;
+  user-select: none;
+}
+
+@keyframes savedBadgeGlow {
+  0% { box-shadow: 0 0 6px rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.25); border-color: rgba(16, 185, 129, 0.6); }
+  100% { box-shadow: 0 0 6px rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); }
+}
+
+.saved-badge-check {
+  font-size: 13px;
+  font-weight: 800;
+  display: inline-block;
+  animation: savedCheckMark 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes savedCheckMark {
+  0% { transform: scale(0) rotate(-45deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* Neon Save Button */
+.btn-glow-save {
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%) !important;
+  border: 1px solid rgba(168, 85, 247, 0.5) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.btn-glow-save:hover {
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.55), 0 0 0 2px rgba(168, 85, 247, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-glow-save:active {
+  transform: translateY(0);
+}
+
+/* HUD styles for Swarm panels */
+.swarm-topology-card {
+  border: 1px solid rgba(168, 85, 247, 0.15) !important;
+  background: rgba(8, 8, 12, 0.8) !important;
+  backdrop-filter: blur(16px);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(168, 85, 247, 0.03) !important;
+}
+
+.swarm-topology-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.5), transparent);
+}
+
+/* High tech scanline overlay */
+.swarm-topology-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+/* HUD Tooltip box */
+.hud-tooltip-rect {
+  fill: rgba(10, 10, 15, 0.95);
+  stroke: rgba(168, 85, 247, 0.6);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.8));
+  rx: 6px;
+}
+
+.hud-tooltip-title {
+  fill: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.hud-tooltip-status {
+  fill: #a855f7;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.hud-tooltip-tool {
+  fill: #06b6d4;
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+/* Beautiful Custom Scrollbar for terminal logs */
+.log-console::-webkit-scrollbar,
+.ceo-terminal::-webkit-scrollbar,
+.saved-teams-container::-webkit-scrollbar {
+  width: 5px;
+}
+
+.log-console::-webkit-scrollbar-track,
+.ceo-terminal::-webkit-scrollbar-track,
+.saved-teams-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.log-console::-webkit-scrollbar-thumb,
+.ceo-terminal::-webkit-scrollbar-thumb,
+.saved-teams-container::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.2);
+  border-radius: 99px;
+}
+
+.log-console::-webkit-scrollbar-thumb:hover,
+.ceo-terminal::-webkit-scrollbar-thumb:hover,
+.saved-teams-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.4);
+}

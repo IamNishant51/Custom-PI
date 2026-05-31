@@ -16,10 +16,10 @@ renderer.code = function (tokenOrCode: any, langOrInfostring?: string) {
   let text = "";
   let lang = "";
   if (typeof tokenOrCode === "object" && tokenOrCode !== null) {
-    text = tokenOrCode.text;
+    text = tokenOrCode.text || "";
     lang = tokenOrCode.lang || "";
   } else {
-    text = tokenOrCode;
+    text = tokenOrCode || "";
     lang = langOrInfostring || "";
   }
 
@@ -81,12 +81,20 @@ marked.setOptions({
   breaks: true,
 });
 
-export default function Markdown({ content, className }: { content: string; className?: string }) {
+export default function Markdown({ content, className }: { content?: string; className?: string }) {
   const html = useMemo(() => {
+    if (!content) return "";
     try {
-      return marked.parse(content);
-    } catch {
-      return content;
+      const strContent = typeof content === "string" ? content : String(content);
+      const parsed = marked.parse(strContent);
+      if (typeof parsed === "string") {
+        return parsed;
+      }
+      console.warn("marked.parse returned a non-string result:", parsed);
+      return strContent;
+    } catch (err) {
+      console.error("Markdown parsing failed, rendering raw content instead:", err);
+      return content || "";
     }
   }, [content]);
 
