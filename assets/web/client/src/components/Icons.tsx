@@ -123,7 +123,7 @@ export function AsciiBanner() {
       overflow: "hidden",
     }}>
       {BANNER.map((line, i) => (
-        <div key={i} style={{ color: BANNER_COLORS[i] }}>{line}</div>
+        <span key={i} style={{ display: "block", color: BANNER_COLORS[i] }}>{line}</span>
       ))}
     </pre>
   );
