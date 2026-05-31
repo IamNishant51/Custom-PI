@@ -39,6 +39,18 @@ const filesToSync = [
   { src: 'extensions/subagents/src/work-products.ts', dest: 'extensions/subagents/src/work-products.ts' },
   { src: 'extensions/subagents/src/storage-driver.ts', dest: 'extensions/subagents/src/storage-driver.ts' },
   { src: 'extensions/subagents/src/verification-engine.ts', dest: 'extensions/subagents/src/verification-engine.ts' },
+  { src: 'extensions/subagents/src/tui-colors.ts', dest: 'extensions/subagents/src/tui-colors.ts' },
+  { src: 'extensions/subagents/src/animations.ts', dest: 'extensions/subagents/src/animations.ts' },
+  { src: 'extensions/subagents/src/tui/index.ts', dest: 'extensions/subagents/src/tui/index.ts' },
+  { src: 'extensions/subagents/src/tui/types.ts', dest: 'extensions/subagents/src/tui/types.ts' },
+  { src: 'extensions/subagents/src/tui/screen.ts', dest: 'extensions/subagents/src/tui/screen.ts' },
+  { src: 'extensions/subagents/src/tui/style-pool.ts', dest: 'extensions/subagents/src/tui/style-pool.ts' },
+  { src: 'extensions/subagents/src/tui/ansi-writer.ts', dest: 'extensions/subagents/src/tui/ansi-writer.ts' },
+  { src: 'extensions/subagents/src/tui/screen-renderer.ts', dest: 'extensions/subagents/src/tui/screen-renderer.ts' },
+  { src: 'extensions/subagents/src/tui/tui-manager.ts', dest: 'extensions/subagents/src/tui/tui-manager.ts' },
+  { src: 'extensions/subagents/src/tui/input/vim-input.ts', dest: 'extensions/subagents/src/tui/input/vim-input.ts' },
+  { src: 'extensions/subagents/src/tui/utils/measure-text.ts', dest: 'extensions/subagents/src/tui/utils/measure-text.ts' },
+  { src: 'extensions/subagents/src/tui/components/animation.ts', dest: 'extensions/subagents/src/tui/components/animation.ts' },
   { src: 'web/web-server.mjs', dest: 'web/web-server.mjs' }
 ];
 
