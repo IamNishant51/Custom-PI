@@ -34,7 +34,11 @@ export default function MemoryPanel() {
         body: JSON.stringify({ query, k: 10 }),
       });
       const d = await res.json();
-      setResults(d.results || []);
+      const mapped = (d.results || []).map((r: any) => ({
+        ...r.entry,
+        score: r.score
+      }));
+      setResults(mapped);
     } catch { toast("Search failed", "error"); }
     setSearching(false);
   };
