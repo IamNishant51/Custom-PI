@@ -14,6 +14,8 @@ import { store as storeMemory, search as searchMemory, remove as deleteMemory, s
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex } from "./animations";
+import { TuiManager } from "./tui/tui-manager";
+import { SPINNERS } from "./tui/types";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
 import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate as fileConsolidate, getMemoryStats } from "./memory-file-store";
@@ -1241,6 +1243,7 @@ class SubAgentRuntime {
   private storage: StorageDriver;
 
   public onProgress: ((msg: string) => void) | null = null;
+  public tuiManager: TuiManager | null = null;
 
   constructor(
     private ctx: ExtensionContext,
@@ -1269,6 +1272,13 @@ class SubAgentRuntime {
     this.systemPrompt = (config.systemPrompt || "") + guardrails;
     activeTrackers.set(trackerId, this.tracker);
     startGlobalAnimation();
+  }
+
+  initTui(useAltScreen = true): TuiManager {
+    if (!this.tuiManager) {
+      this.tuiManager = new TuiManager({ useAltScreen });
+    }
+    return this.tuiManager;
   }
 
   private safeResolve(p?: string): string {
