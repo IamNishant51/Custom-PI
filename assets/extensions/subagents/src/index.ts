@@ -28,6 +28,9 @@ import { trackCost, getSessionCosts, getCostSummary, getBudgetConfig, setBudgetC
 import { recordWorkProduct, getWorkProducts, getWorkProductSummary, clearWorkProducts } from "./work-products";
 import { LocalStorageDriver, type StorageDriver } from "./storage-driver";
 import { runVerification } from "./verification-engine";
+import { discoverAgents, spawnAgentSession, closeSession, listSessions, getAgentLabel, saveCustomAgent, removeCustomAgent } from "./agent-manager";
+import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMcpServer, getEnabledMcpServers, buildMcpContextForPrompt } from "./mcp-catalog";
+import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext, type Team, type TeamAgent } from "./team-manager";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 
@@ -2836,6 +2839,184 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
       } catch (e: any) {
         return { content: [{ type: "text", text: `Session search failed: ${e.message}` }], isError: true };
       }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  MULTI-AGENT HUB TOOLS — Agent Discovery, MCP Catalog, Team Mode
+  // ─────────────────────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "list_agents",
+    label: "List Available Agents",
+    description: "Discover and list all available AI agents installed on this system (Claude Code, Codex, OpenCode, Hermes, etc.). Shows which are available and their capabilities.",
+    parameters: Type.Object({}),
+    async execute() {
+      const agents = discoverAgents();
+      const available = agents.filter(a => a.available);
+      const unavailable = agents.filter(a => !a.available);
+      let text = `## Available Agents (${available.length}/${agents.length})\n\n`;
+      if (available.length) {
+        for (const a of available) {
+          text += `- **${a.name}** (${a.backend || "unknown"}) — ${a.modes.join(", ")}\n`;
+        }
+      } else {
+        text += "No agents detected. Install one: claude, codex, opencode, hermes, etc.\n";
+      }
+      if (unavailable.length) {
+        text += `\n### Not Installed (${unavailable.length})\n`;
+        for (const a of unavailable) {
+          text += `- ${a.name} — install with \`npm install -g ${a.id}\` or platform package manager\n`;
+        }
+      }
+      return { content: [{ type: "text", text }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "agent_info",
+    label: "Agent Info",
+    description: "Get detailed information about a specific AI agent installed on this system.",
+    parameters: Type.Object({
+      agentId: Type.String({ description: "The agent ID to look up (e.g. 'claude-code', 'codex', 'opencode')" }),
+    }),
+    async execute(id, params) {
+      const agents = discoverAgents();
+      const agent = agents.find(a => a.id === params.agentId);
+      if (!agent) {
+        const found = agents.find(a => a.name.toLowerCase() === params.agentId.toLowerCase());
+        if (!found) return { content: [{ type: "text", text: `Agent '${params.agentId}' not found. Use list_agents to see available agents.` }], isError: true };
+        return { content: [{ type: "text", text: `**${found.name}**\n- ID: \`${found.id}\`\n- Backend: ${found.backend}\n- Available: ${found.available}\n- Team Support: ${found.supportsTeam}\n- Modes: ${found.modes.join(", ")}\n- Agent Type: ${found.agentType}\n- Source: ${found.agentSource}` }] };
+      }
+      return { content: [{ type: "text", text: `**${agent.name}**\n- ID: \`${agent.id}\`\n- Backend: ${agent.backend}\n- Available: ${agent.available}\n- Team Support: ${agent.supportsTeam}\n- Modes: ${agent.modes.join(", ")}\n- Agent Type: ${agent.agentType}\n- Source: ${agent.agentSource}` }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "mcp_list",
+    label: "List MCP Servers",
+    description: "List all configured MCP (Model Context Protocol) servers and their status.",
+    parameters: Type.Object({}),
+    async execute() {
+      const servers = loadMcpServers();
+      const enabled = servers.filter(s => s.enabled);
+      const disabled = servers.filter(s => !s.enabled);
+      let text = `## MCP Servers (${enabled.length}/${servers.length} enabled)\n\n`;
+      if (enabled.length) {
+        text += "### Enabled\n";
+        for (const s of enabled) {
+          text += `- **${s.name}** (\`${s.id}\`) — ${s.transport}${s.command ? `: \`${s.command}\`` : ""}\n`;
+        }
+        text += "\n";
+      }
+      if (disabled.length) {
+        text += "### Disabled\n";
+        for (const s of disabled) {
+          text += `- ${s.name} (\`${s.id}\`) — ${s.transport}\n`;
+        }
+      }
+      return { content: [{ type: "text", text }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "mcp_toggle",
+    label: "Toggle MCP Server",
+    description: "Enable or disable a configured MCP server.",
+    parameters: Type.Object({
+      serverId: Type.String({ description: "The server ID to toggle (e.g. 'builtin-fs', 'builtin-sequential-thinking')" }),
+      enabled: Type.Boolean({ description: "true to enable, false to disable" }),
+    }),
+    async execute(id, params) {
+      const servers = loadMcpServers();
+      const server = servers.find(s => s.id === params.serverId);
+      if (!server) {
+        return { content: [{ type: "text", text: `MCP server '${params.serverId}' not found.` }], isError: true };
+      }
+      toggleMcpServer(params.serverId, params.enabled);
+      return { content: [{ type: "text", text: `MCP server **${server.name}** ${params.enabled ? "enabled" : "disabled"}.` }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "team_create",
+    label: "Create Team",
+    description: "Create a new team of AI agents working together on a shared workspace.",
+    parameters: Type.Object({
+      name: Type.String({ description: "A name for the team (e.g. 'Frontend Sprint')" }),
+      workspace: Type.String({ description: "Absolute path to the shared workspace directory" }),
+      leaderAgentId: Type.String({ description: "The agent ID to use as team leader (e.g. 'claude-code', 'codex')" }),
+    }),
+    async execute(id, params) {
+      const team = createTeam(params.name, params.workspace, params.leaderAgentId);
+      return { content: [{ type: "text", text: `Team **${team.name}** created.\n- ID: \`${team.id}\`\n- Leader: ${team.agents.find(a => a.role === "leader")?.agentName}\n- Workspace: ${team.workspace}\n\nUse \`team_add_agent\` to add more agents.` }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "team_list",
+    label: "List Teams",
+    description: "List all created teams and their current status.",
+    parameters: Type.Object({}),
+    async execute() {
+      const teams = getTeams();
+      if (!teams.length) return { content: [{ type: "text", text: "No teams created yet. Use `team_create` to create one." }] };
+      let text = "## Teams\n\n";
+      for (const t of teams) {
+        const leader = t.agents.find(a => a.role === "leader");
+        const teammates = t.agents.filter(a => a.role === "teammate");
+        text += `### ${t.name}\n`;
+        text += `- ID: \`${t.id}\`\n`;
+        text += `- Leader: ${leader?.agentName || "none"}\n`;
+        text += `- Teammates: ${teammates.length}\n`;
+        text += `- Workspace: ${t.workspace}\n`;
+        text += `- Agents: ${t.agents.map(a => `${a.agentName} (${a.status})`).join(", ")}\n\n`;
+      }
+      return { content: [{ type: "text", text }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "team_add_agent",
+    label: "Add Agent to Team",
+    description: "Add an AI agent to an existing team.",
+    parameters: Type.Object({
+      teamId: Type.String({ description: "The team ID to add the agent to" }),
+      agentId: Type.String({ description: "The agent ID to add (e.g. 'codex', 'opencode')" }),
+    }),
+    async execute(id, params) {
+      const result = addAgentToTeam(params.teamId, params.agentId);
+      if (!result) return { content: [{ type: "text", text: `Failed to add agent to team. Check team ID and agent availability.` }], isError: true };
+      return { content: [{ type: "text", text: `Agent **${result.agentName}** added to team as ${result.role} (slot: \`${result.slotId}\`).` }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "team_remove_agent",
+    label: "Remove Agent from Team",
+    description: "Remove an agent from a team.",
+    parameters: Type.Object({
+      teamId: Type.String({ description: "The team ID" }),
+      slotId: Type.String({ description: "The slot ID of the agent to remove (use team_list to find slot IDs)" }),
+    }),
+    async execute(id, params) {
+      const ok = removeAgentFromTeam(params.teamId, params.slotId);
+      if (!ok) return { content: [{ type: "text", text: `Failed to remove agent. Cannot remove the leader or agent not found.` }], isError: true };
+      return { content: [{ type: "text", text: `Agent removed from team.` }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "team_context",
+    label: "Team Context",
+    description: "Get the current context summary for a team, including workspace, members, and MCP tools.",
+    parameters: Type.Object({
+      teamId: Type.String({ description: "The team ID" }),
+    }),
+    async execute(id, params) {
+      const context = getTeamContext(params.teamId);
+      if (!context) return { content: [{ type: "text", text: `Team '${params.teamId}' not found.` }], isError: true };
+      return { content: [{ type: "text", text: context }] };
     },
   });
 

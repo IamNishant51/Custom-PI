@@ -1631,6 +1631,111 @@ async function main() {
   // Sub-agents
   app.get("/api/agents", async () => ({ agents: listAgents() }));
 
+  // Enhanced agent discovery — checks PATH for CLI agents
+  app.get("/api/agents/discover", async () => {
+    const knownAgents = [
+      { id: "claude-code", name: "Claude Code", backend: "claude", command: "claude", modes: ["default", "plan", "yolo"], supportsTeam: true },
+      { id: "codex", name: "Codex", backend: "codex", command: "codex", modes: ["default", "read_only", "yolo"], supportsTeam: true },
+      { id: "opencode", name: "OpenCode", backend: "opencode", command: "opencode", modes: ["default", "plan"], supportsTeam: false },
+      { id: "hermes", name: "Hermes Agent", backend: "hermes", command: "hermes", modes: ["default", "yolo"], supportsTeam: false },
+      { id: "qwen-code", name: "Qwen Code", backend: "qwen", command: "qwen", modes: ["default", "yolo"], supportsTeam: true },
+      { id: "gemini-cli", name: "Gemini CLI", backend: "gemini", command: "gemini", modes: ["default", "yolo"], supportsTeam: true },
+      { id: "cursor", name: "Cursor Agent", backend: "cursor", command: "cursor", args: ["--agent"], modes: ["default", "plan"], supportsTeam: true },
+      { id: "snow-cli", name: "Snow CLI", backend: "snow", command: "snow", args: ["run"], modes: ["default", "yolo"], supportsTeam: true },
+      { id: "goose", name: "Goose AI", backend: "goose", command: "goose", modes: ["default"], supportsTeam: false },
+      { id: "openclaw", name: "OpenClaw", backend: "openclaw", command: "openclaw", modes: ["default"], supportsTeam: false },
+      { id: "kimi-cli", name: "Kimi CLI", backend: "kimi", command: "kimi", modes: ["default"], supportsTeam: false },
+      { id: "copilot", name: "GitHub Copilot", backend: "copilot", command: "gh", args: ["copilot"], modes: ["default"], supportsTeam: false },
+      { id: "codebuddy", name: "CodeBuddy", backend: "codebuddy", command: "codebuddy", modes: ["default"], supportsTeam: false },
+      { id: "qoder", name: "Qoder CLI", backend: "qoder", command: "qoder", modes: ["default"], supportsTeam: false },
+      { id: "nanobot", name: "Nanobot", backend: "nanobot", command: "nanobot", modes: ["default"], supportsTeam: false },
+      { id: "mistral-vibe", name: "Mistral Vibe", backend: "mistral", command: "mistral", args: ["vibe"], modes: ["default"], supportsTeam: false },
+      { id: "augment", name: "Augment Code", backend: "augment", command: "augment", modes: ["default"], supportsTeam: false },
+      { id: "factory-droid", name: "Factory Droid", backend: "droid", command: "droid", modes: ["default"], supportsTeam: false },
+    ];
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const agents = knownAgents.map(a => {
+      let available = false;
+      try {
+        const r = require("child_process").spawnSync(whichCmd, [a.command], { stdio: "ignore" });
+        available = r.status === 0;
+      } catch {}
+      return { ...a, icon: "", available, agentType: "acp", agentSource: "builtin" };
+    });
+    return { agents };
+  });
+
+  // Team CRUD — persistent teams storage
+  app.get("/api/teams", async () => {
+    const teams = [];
+    try {
+      const teamsFile = path.join(os.homedir(), ".pi", "agent", "teams.json");
+      if (fs.existsSync(teamsFile)) teams.push(...JSON.parse(fs.readFileSync(teamsFile, "utf8")).teams || []);
+    } catch {}
+    return { teams };
+  });
+
+  app.post("/api/teams", async (req) => {
+    const { name, workspace, leaderAgentId } = req.body;
+    if (!name || !workspace || !leaderAgentId) throw new Error("name, workspace, leaderAgentId required");
+    const team = {
+      id: `team_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name, workspace, workspaceMode: "shared", leaderAgentId,
+      agents: [{ slotId: `slot_${Date.now()}`, agentId: leaderAgentId, agentName: leaderAgentId, role: "leader", status: "idle" }],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const teamsFile = path.join(os.homedir(), ".pi", "agent", "teams.json");
+    let store = { teams: [] };
+    try { if (fs.existsSync(teamsFile)) store = JSON.parse(fs.readFileSync(teamsFile, "utf8")); } catch {}
+    store.teams.push(team);
+    fs.mkdirSync(path.dirname(teamsFile), { recursive: true });
+    fs.writeFileSync(teamsFile, JSON.stringify(store, null, 2));
+    return { ok: true, team };
+  });
+
+  app.post("/api/teams/add-agent", async (req) => {
+    const { teamId, agentId } = req.body;
+    if (!teamId || !agentId) throw new Error("teamId and agentId required");
+    const teamsFile = path.join(os.homedir(), ".pi", "agent", "teams.json");
+    let store = { teams: [] };
+    try { if (fs.existsSync(teamsFile)) store = JSON.parse(fs.readFileSync(teamsFile, "utf8")); } catch {}
+    const team = store.teams.find(t => t.id === teamId);
+    if (!team) throw new Error("Team not found");
+    const slot = { slotId: `slot_${Date.now()}`, agentId, agentName: agentId, role: "teammate", status: "pending" };
+    team.agents.push(slot);
+    team.updatedAt = new Date().toISOString();
+    fs.writeFileSync(teamsFile, JSON.stringify(store, null, 2));
+    return { ok: true, slot };
+  });
+
+  app.post("/api/teams/remove-agent", async (req) => {
+    const { teamId, slotId } = req.body;
+    if (!teamId || !slotId) throw new Error("teamId and slotId required");
+    const teamsFile = path.join(os.homedir(), ".pi", "agent", "teams.json");
+    let store = { teams: [] };
+    try { if (fs.existsSync(teamsFile)) store = JSON.parse(fs.readFileSync(teamsFile, "utf8")); } catch {}
+    const team = store.teams.find(t => t.id === teamId);
+    if (!team) throw new Error("Team not found");
+    const idx = team.agents.findIndex(a => a.slotId === slotId);
+    if (idx < 0) throw new Error("Agent not found in team");
+    if (team.agents[idx].role === "leader") throw new Error("Cannot remove leader agent");
+    team.agents.splice(idx, 1);
+    team.updatedAt = new Date().toISOString();
+    fs.writeFileSync(teamsFile, JSON.stringify(store, null, 2));
+    return { ok: true };
+  });
+
+  app.post("/api/teams/delete", async (req) => {
+    const { teamId } = req.body;
+    if (!teamId) throw new Error("teamId required");
+    const teamsFile = path.join(os.homedir(), ".pi", "agent", "teams.json");
+    let store = { teams: [] };
+    try { if (fs.existsSync(teamsFile)) store = JSON.parse(fs.readFileSync(teamsFile, "utf8")); } catch {}
+    store.teams = store.teams.filter(t => t.id !== teamId);
+    fs.writeFileSync(teamsFile, JSON.stringify(store, null, 2));
+    return { ok: true };
+  });
+
   // Swarm Teams Storage
   app.get("/api/swarm/teams", async () => ({ teams: loadSwarmTeams() }));
   app.post("/api/swarm/teams", async (req) => {
