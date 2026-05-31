@@ -10,6 +10,19 @@ const SERVER_DEST = path.join(PI_DIR, 'web', 'web-server.mjs');
 const CLIENT_DIR = path.join(__dirname, '..', 'assets', 'web', 'client', 'dist');
 const CLIENT_DEST = path.join(PI_DIR, 'web', 'client', 'dist');
 
+// Auto-build web client if missing
+const CLIENT_SRC = path.join(__dirname, '..', 'assets', 'web', 'client');
+if (!fs.existsSync(path.join(CLIENT_SRC, 'dist', 'index.html'))) {
+  console.log('\x1b[33mWeb client not built. Running build...\x1b[0m');
+  const { execSync } = require('child_process');
+  try {
+    execSync('npm install && npm run build', { cwd: CLIENT_SRC, stdio: 'inherit' });
+  } catch {
+    console.error('\x1b[31mWeb client build failed\x1b[0m');
+    process.exit(1);
+  }
+}
+
 // Sync server to runtime dir
 if (!fs.existsSync(path.dirname(SERVER_DEST))) {
   fs.mkdirSync(path.dirname(SERVER_DEST), { recursive: true });

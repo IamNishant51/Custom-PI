@@ -7,7 +7,15 @@
     "custom-pi": "bin/cli.js",
     "custom-pi-web": "bin/web.js"
   },
+  "files": [
+    "bin/",
+    "assets/web/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "postinstall": "node scripts/postinstall.js",
     "update-and-publish": "node scripts/update-and-publish.js",
     "test": "vitest run",
     "test:watch": "vitest",
