@@ -1656,11 +1656,20 @@ async function main() {
     const whichCmd = process.platform === "win32" ? "where" : "which";
     const agents = knownAgents.map(a => {
       let available = false;
+      let agentPath = null;
+      let version = null;
       try {
-        const r = require("child_process").spawnSync(whichCmd, [a.command], { stdio: "ignore" });
+        const r = spawnSync(whichCmd, [a.command], { stdio: "pipe", timeout: 3000 });
         available = r.status === 0;
+        if (available) {
+          agentPath = r.stdout.toString("utf8").trim().split("\n")[0];
+          try {
+            const v = spawnSync(a.command, ["--version"], { stdio: "pipe", timeout: 3000 });
+            if (v.status === 0) version = v.stdout.toString("utf8").trim().split("\n")[0];
+          } catch {}
+        }
       } catch {}
-      return { ...a, icon: "", available, agentType: "acp", agentSource: "builtin" };
+      return { name: a.name, command: a.command, available, path: agentPath, version };
     });
     return { agents };
   });

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -54,7 +54,7 @@ const KNOWN_AGENTS: Array<{
 function checkCommandAvailable(cmd: string): boolean {
   try {
     const which = process.platform === "win32" ? "where" : "which";
-    const result = require("child_process").spawnSync(which, [cmd], { stdio: "ignore" });
+    const result = spawnSync(which, [cmd], { stdio: "ignore", timeout: 3000 });
     return result.status === 0;
   } catch {
     return false;
