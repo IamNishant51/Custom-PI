@@ -31,6 +31,12 @@ function ensureVaultDir(): void {
 }
 
 function getMasterKey(): Buffer {
+  // Allow override via env var (more secure than file on shared systems)
+  const envKey = process.env.CUSTOM_PI_VAULT_KEY || process.env.PI_VAULT_KEY;
+  if (envKey) {
+    const decoded = Buffer.from(envKey, "hex");
+    if (decoded.length === KEY_LENGTH) return decoded;
+  }
   ensureVaultDir();
   if (fs.existsSync(KEY_FILE)) {
     const keyRaw = fs.readFileSync(KEY_FILE, "utf8").trim();

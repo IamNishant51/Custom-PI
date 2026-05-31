@@ -1514,6 +1514,20 @@ async function main() {
   });
   app.options("/*", async (req, reply) => reply.code(204).send());
 
+  // Generic body validation helper
+  function validateBody(body, requiredFields) {
+    if (!body || typeof body !== 'object') return 'Request body is required';
+    for (const field of requiredFields) {
+      if (body[field] === undefined || body[field] === null) {
+        return `Missing required field: ${field}`;
+      }
+      if (typeof body[field] === 'string' && body[field].trim().length === 0) {
+        return `Field '${field}' cannot be empty`;
+      }
+    }
+    return null;
+  }
+
   await app.register(fastifyWebsocket);
   await app.register(compress, { global: true, threshold: 1024 });
 

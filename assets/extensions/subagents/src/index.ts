@@ -1115,6 +1115,25 @@ class SubAgentRuntime {
     "wget ", "curl ", "chmod 777 /", "sudo ", "su ",
   ];
 
+  private static readonly BLOCKED_BASH_REGEX = [
+    /\brm\s+-rf\s+[/~]\b/,
+    /\bmkfs\.\w+/,
+    /\bdd\s+if=/,
+    /\b>:\(\s*\|:\|:&\s*};:\s*\)/,
+    /\bchmod\s+777\s+\//,
+    /\bsudo\b/,
+    /\bsu\b/,
+    /\bmv\s+\/[^\s]+\s+\/[^\s]+\b/,
+  ];
+
+  private static readonly SECRET_PATTERNS = [
+    /(?:api[_-]?key|secret|password|passwd|token|auth)[\s]*[:=][\s]*['"][a-zA-Z0-9_\-]{16,}['"]/i,
+    /gh[pousr]_[a-zA-Z0-9]{36,}/,
+    /sk-[a-zA-Z0-9]{20,}/,
+    /xox[baprs]-[0-9a-zA-Z\-]{10,}/,
+    /AKIA[0-9A-Z]{16}/,
+  ];
+
   private static readonly MAX_TOOL_OUTPUT = 100_000;
   private static readonly MEMORY_WARN_MB = 1024;
   private static readonly MEMORY_HARD_LIMIT_MB = 1536;
@@ -1216,6 +1235,11 @@ class SubAgentRuntime {
           for (const blocked of SubAgentRuntime.BLOCKED_BASH_PREFIXES) {
             if (lowerCmd.startsWith(blocked)) {
               return `Error: Command blocked for security: ${blocked}*`;
+            }
+          }
+          for (const blockedRegex of SubAgentRuntime.BLOCKED_BASH_REGEX) {
+            if (blockedRegex.test(command)) {
+              return `Error: Command blocked by security regex: ${blockedRegex}`;
             }
           }
           const result = execSync(command, { cwd: this.ctx.cwd, encoding: "utf8", timeout: 45000 });
@@ -2111,6 +2135,12 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     }),
     async execute(id, params, _signal, _update, context) {
       try {
+        // DLP scan — warn if storing potential secrets
+        for (const pattern of SubAgentRuntime.SECRET_PATTERNS) {
+          if (pattern.test(params.content)) {
+            return { content: [{ type: "text", text: `Warning: The content appears to contain API keys, tokens, or secrets. Memory storage blocked to prevent credential leakage. Use the \`vault_set\` tool to store secrets securely.` }], isError: true };
+          }
+        }
         const importance = Math.min(10, Math.max(1, Math.floor(params.importance ?? 5)));
         const project = params.project || path.basename(context.cwd || process.cwd()) || "global";
         const tags = params.tags || [];

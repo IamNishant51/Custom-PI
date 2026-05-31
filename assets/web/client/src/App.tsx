@@ -12,6 +12,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import { ToasterProvider } from "./components/Toast";
 import { AsciiMenu } from "./components/Icons";
 import { ChatProvider, useChat } from "./context/ChatContext";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "work-products" | "agents" | "mcp" | "settings";
 
@@ -30,21 +31,17 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { ws, connected } = useChat();
 
-  const navigate = (view: View) => {
-    setActiveView(view);
-    setSidebarOpen(false);
-  };
-
   return (
-    <div className="layout">
-      <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
-      <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-        <Sidebar activeView={activeView} onNavigate={navigate} wsConnected={connected} />
-      </div>
-      <div className="main-area">
-        <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
-        <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""}`}>
-          <Suspense fallback={<div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>}>
+    <ErrorBoundary>
+      <div className="layout">
+        <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
+        <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+          <Sidebar activeView={activeView} onNavigate={(view: View) => { setActiveView(view); setSidebarOpen(false); }} wsConnected={connected} />
+        </div>
+        <div className="main-area">
+          <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
+          <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""}`}>
+            <Suspense fallback={<div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>}>
             <div style={{ display: activeView === "chat" ? "flex" : "none", flex: 1, flexDirection: "column", height: "100%", width: "100%" }}>
               <ChatView />
             </div>
@@ -73,9 +70,10 @@ function AppContent() {
               <SettingsPanel />
             </div>
           </Suspense>
+          </div>
         </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }
 
