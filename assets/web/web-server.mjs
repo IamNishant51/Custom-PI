@@ -607,6 +607,17 @@ const TOOLS = [
       required: ["title", "content"],
     },
   },
+  {
+    name: "post_to_twitter",
+    description: "Post a tweet to Twitter/X. Requires Twitter API credentials stored in vault (TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET).",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The tweet content to post (max 280 characters)" },
+      },
+      required: ["text"],
+    },
+  },
 ];
 
 // ── MCP Server Client ────────────────────────────────────────────────────────
@@ -986,9 +997,78 @@ async function executeTool(name, args, cwd) {
         return `Note written: ${safeName}.md`;
       } catch (e) { return `Error writing note: ${e.message}`; }
     }
+    case "post_to_twitter": {
+      return await postToTwitter(args.text);
+    }
     default:
       return `Error: Unknown tool '${name}'`;
   }
+}
+
+async function postToTwitter(text) {
+  const consumerKey = vaultGet("TWITTER_API_KEY");
+  const consumerSecret = vaultGet("TWITTER_API_SECRET");
+  const accessToken = vaultGet("TWITTER_ACCESS_TOKEN");
+  const accessSecret = vaultGet("TWITTER_ACCESS_SECRET");
+  if (!consumerKey || !consumerSecret || !accessToken || !accessSecret) {
+    return `Twitter API credentials not configured. Store them in vault using the vault_set tool:
+  vault_set key="TWITTER_API_KEY" value="<your_consumer_key>"
+  vault_set key="TWITTER_API_SECRET" value="<your_consumer_secret>"
+  vault_set key="TWITTER_ACCESS_TOKEN" value="<your_access_token>"
+  vault_set key="TWITTER_ACCESS_SECRET" value="<your_access_token_secret>"
+Get these from https://developer.twitter.com (free tier: 1500 tweets/month).`;
+  }
+
+  const method = "POST";
+  const url = "https://api.twitter.com/2/tweets";
+  const body = JSON.stringify({ text: text.slice(0, 280) });
+
+  const oauth = {
+    oauth_consumer_key: consumerKey,
+    oauth_token: accessToken,
+    oauth_nonce: crypto.randomBytes(16).toString("hex"),
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_version: "1.0",
+  };
+
+  // Build signature base string (OAuth params only — JSON body is not included)
+  const paramStr = Object.keys(oauth).sort()
+    .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(oauth[k])}`)
+    .join("&");
+
+  const sigBase = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(paramStr)}`;
+  const sigKey = `${encodeURIComponent(consumerSecret)}&${encodeURIComponent(accessSecret)}`;
+  oauth.oauth_signature = crypto.createHmac("sha1", sigKey).update(sigBase).digest("base64");
+
+  const authHeader = "OAuth " + Object.keys(oauth)
+    .map(k => `${encodeURIComponent(k)}="${encodeURIComponent(oauth[k])}"`)
+    .join(", ");
+
+  const https = await import("node:https");
+  return new Promise(resolve => {
+    const req = https.request(url, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    }, res => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try {
+          const p = JSON.parse(data);
+          if (p.data?.id) resolve(`Tweet posted successfully! Tweet ID: ${p.data.id}`);
+          else resolve(`Twitter API error: ${JSON.stringify(p)}`);
+        } catch { resolve(`Twitter API response: ${data}`); }
+      });
+    });
+    req.on("error", e => resolve(`Network error: ${e.message}`));
+    req.write(body);
+    req.end();
+  });
 }
 
 // ── Session Runtime ────────────────────────────────────────────────────────
@@ -1522,7 +1602,9 @@ async function handleSwarmGoal(socket, goal) {
   try {
     const planPrompt = `You are the CEO of a multi-agent swarm development team.
 Your task is to break down the user's high-level goal: "${goal}" into a team of 2 to 3 specialized sub-agents.
-Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch.
+Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch, post_to_twitter.
+
+If the goal involves posting to social media (Twitter/X), assign the post_to_twitter tool to the relevant sub-agent so they can publish content.
 
 Return your plan strictly as a JSON object with this shape:
 {
