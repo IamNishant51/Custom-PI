@@ -1948,9 +1948,74 @@ select {
 }
 
 .result-content {
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1.6;
+}
+
+/* ── Generic Markdown Rendering Styles ────────────────── */
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  color: #fff;
+  font-weight: 600;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.markdown-content h1 { font-size: 20px; border-bottom: 1px solid var(--hairline-strong); padding-bottom: 4px; }
+.markdown-content h2 { font-size: 17px; }
+.markdown-content h3 { font-size: 15px; }
+.markdown-content p {
+  margin: 8px 0;
   color: rgba(255, 255, 255, 0.9);
-  line-height: 1.5;
-  white-space: pre-wrap;
+}
+.markdown-content ul,
+.markdown-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+.markdown-content li {
+  margin: 4px 0;
+  color: rgba(255, 255, 255, 0.9);
+}
+.markdown-content strong {
+  color: #fff;
+  font-weight: bold;
+}
+.markdown-content code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: #e2e8f0;
+}
+.markdown-content pre {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 12px;
+}
+.markdown-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  color: var(--mute);
+  font-style: italic;
+  margin: 12px 0;
+}
+.markdown-content hr {
+  border: 0;
+  border-top: 1px solid var(--hairline-strong);
+  margin: 16px 0;
 }
 
 .empty-log-card {

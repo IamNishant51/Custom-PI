@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "./Toast";
+import Markdown from "./Markdown";
 
 interface Agent {
   id: string;
@@ -526,7 +527,9 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                   {selectedAgent.result && (
                     <div className="agent-result-box">
                       <div className="result-title font-mono text-xs">FINAL REPORT FROM AGENT</div>
-                      <div className="result-content text-sm">{selectedAgent.result}</div>
+                      <div className="result-content text-sm">
+                        <Markdown content={selectedAgent.result} />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -563,9 +566,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
               <div className="card final-summary-card">
                 <div className="card-header font-bold text-white text-lg">Final Swarm Summary Report</div>
                 <div className="summary-markdown text-sm">
-                  {finalSummary.split("\n").map((line, i) => (
-                    <p key={i} style={{ marginBottom: line.trim() === "" ? 12 : 6 }}>{line}</p>
-                  ))}
+                  <Markdown content={finalSummary} />
                 </div>
                 <div style={{ marginTop: 16 }}>
                   <button className="btn btn-primary" onClick={() => setSwarmStatus("idle")}>
