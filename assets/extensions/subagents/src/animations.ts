@@ -3,9 +3,9 @@ import path from "node:path";
 import os from "node:os";
 
 export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
-export const DOT_PULSE = ["◐", "◓", "◑", "◒"];
-export const PROGRESS_SPINNER = ["◐", "◓", "◑", "◒"];
-export const BOUNCING_BAR = ["◐", "◓", "◑", "◒"];
+export const DOT_PULSE = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+export const PROGRESS_SPINNER = ["▌", "▀", "▐", "▄"];
+export const BOUNCING_BAR = ["█", "▇", "▆", "▅", "▄", "▃", "▂", "▁"];
 
 function loadVerbs(): string[] {
   const env = process.env.PI_STATUS_VERBS;

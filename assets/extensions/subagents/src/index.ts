@@ -1141,7 +1141,7 @@ class SubAgentRuntime {
     /\bmv\s+\/[^\s]+\s+\/[^\s]+\b/,
   ];
 
-  private static readonly SECRET_PATTERNS = [
+  static readonly SECRET_PATTERNS = [
     /(?:api[_-]?key|secret|password|passwd|token|auth)[\s]*[:=][\s]*['"][a-zA-Z0-9_\-]{16,}['"]/i,
     /gh[pousr]_[a-zA-Z0-9]{36,}/,
     /sk-[a-zA-Z0-9]{20,}/,
