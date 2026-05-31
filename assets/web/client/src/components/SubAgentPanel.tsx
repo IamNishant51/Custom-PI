@@ -66,7 +66,7 @@ function formatTime(secs: number) {
 }
 
 export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
-  const { sendInterrupt } = useChat();
+  const { sendInterrupt, swarmRecovery, clearSwarmRecovery } = useChat();
   const [goal, setGoal] = useState("");
   const [activeGoal, setActiveGoal] = useState("");
   const [swarmStatus, setSwarmStatus] = useState<"idle" | "planning" | "running" | "done" | "error">("idle");
@@ -205,6 +205,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             }
             if (rc.summary) { setFinalSummary(rc.summary); setSwarmStatus("done"); }
             else if (rc.status === "completed") { setSwarmStatus("done"); if (!rc.summary) setFinalSummary("Swarm completed."); }
+            else if (rc.status === "running" && (!rc.agents || rc.agents.length === 0)) { setSwarmStatus("planning"); }
             else if (rc.status === "running" || rc.status === "planning") { setSwarmStatus("running"); }
             else if (rc.status === "error") { setSwarmStatus("error"); }
             break;
@@ -215,6 +216,32 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     ws.addEventListener("message", handleMessage);
     return () => ws.removeEventListener("message", handleMessage);
   }, [ws, toast]);
+
+  // Swarm recovery from context (survives page refresh — message arrives before this component mounts)
+  useEffect(() => {
+    if (!swarmRecovery) return;
+    const rc = swarmRecovery;
+    setActiveGoal(rc.goal || activeGoal);
+    setCeoLogs(rc.ceoLogs || []);
+    setPaused(!!rc.paused);
+    if (rc.agents && rc.agents.length > 0) {
+      setAgents(rc.agents.map((a: any) => ({
+        id: a.id,
+        role: a.role,
+        tools: a.tools,
+        status: (a.status as Agent["status"]) || "idle",
+        currentTask: a.currentTask || rc.goal,
+        logs: a.logs || []
+      })));
+      if (rc.agents.length > 0) setSelectedAgentId(rc.agents[0].id);
+    }
+    if (rc.summary) { setFinalSummary(rc.summary); setSwarmStatus("done"); }
+    else if (rc.status === "completed") { setSwarmStatus("done"); if (!rc.summary) setFinalSummary("Swarm completed."); }
+    else if (rc.status === "running" && (!rc.agents || rc.agents.length === 0)) { setSwarmStatus("planning"); }
+    else if (rc.status === "running" || rc.status === "planning") { setSwarmStatus("running"); }
+    else if (rc.status === "error") { setSwarmStatus("error"); }
+    clearSwarmRecovery();
+  }, [swarmRecovery, clearSwarmRecovery]);
 
   const fetchSavedTeams = useCallback(async () => {
     try { const r = await fetch("/api/swarm/teams"); if (r.ok) setSavedTeams((await r.json()).teams || []); } catch {}

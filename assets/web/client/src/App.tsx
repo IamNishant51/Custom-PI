@@ -33,6 +33,19 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { ws, connected } = useChat();
 
+  // Auto-navigate to SubAgent view on swarm recovery (survives page refresh)
+  useEffect(() => {
+    if (!ws) return;
+    const handler = (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.type === "swarm_recovery") setActiveView("agents");
+      } catch {}
+    };
+    ws.addEventListener("message", handler);
+    return () => ws.removeEventListener("message", handler);
+  }, [ws]);
+
   return (
     <ErrorBoundary>
       <div className="layout">

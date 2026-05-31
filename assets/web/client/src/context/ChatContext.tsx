@@ -20,6 +20,8 @@ interface ChatContextValue {
   sendInterrupt: () => void;
   ws: WebSocket | null;
   connected: boolean;
+  swarmRecovery: any;
+  clearSwarmRecovery: () => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -33,6 +35,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [input, setInput] = useState("");
+  const [swarmRecovery, setSwarmRecovery] = useState<any>(null);
+  const clearSwarmRecovery = useCallback(() => setSwarmRecovery(null), []);
   const activeStreamId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -191,6 +195,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           setLoading(false);
           activeStreamId.current = null;
           break;
+
+        case "chat_history": {
+          const msgs = data.messages || [];
+          const restored: ChatItem[] = msgs.map((m: any) => {
+            const text = (m.content || []).map((c: any) => c.text || "").filter(Boolean).join("\n");
+            return m.role === "user"
+              ? { id: nextId(), type: "user" as const, content: text }
+              : { id: nextId(), type: "assistant" as const, content: text };
+          });
+          if (restored.length > 0) setItems(restored);
+          break;
+        }
+
+        case "swarm_recovery":
+          setSwarmRecovery(data);
+          break;
       }
     };
 
@@ -199,7 +219,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [ws]);
 
   return (
-    <ChatContext.Provider value={{ items, loading, input, setInput, sendMessage, sendInterrupt, ws, connected }}>
+    <ChatContext.Provider value={{ items, loading, input, setInput, sendMessage, sendInterrupt, ws, connected, swarmRecovery, clearSwarmRecovery }}>
       {children}
     </ChatContext.Provider>
   );

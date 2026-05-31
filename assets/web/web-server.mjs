@@ -25,6 +25,50 @@ let currentSwarmState = null;
 let _swarmPaused = false;
 let _swarmPauseResolve = null;
 
+// Swarm broadcast — send to all connected WS clients; survives individual disconnections
+const swarmSockets = new Set();
+function broadcast(data) {
+  const msg = JSON.stringify(data);
+  for (const sock of swarmSockets) {
+    try { sock.send(msg); } catch { swarmSockets.delete(sock); }
+  }
+}
+
+// broadcast + track state for persistence across refresh
+function bcast(data) {
+  broadcast(data);
+  if (!currentSwarmState) return;
+  if (data.type === "ceo_thought" && data.message) {
+    currentSwarmState.ceoLogs.push(data.message);
+  } else if (data.type === "agent_status" && data.agentId) {
+    const a = currentSwarmState.agents.find(x => x.id === data.agentId);
+    if (a) {
+      if (data.status) a.status = data.status;
+      if (data.currentTool !== undefined) a.currentTool = data.currentTool;
+      if (data.currentTask !== undefined) a.currentTask = data.currentTask;
+    }
+  } else if (data.type === "agent_log" && data.agentId && data.message) {
+    const a = currentSwarmState.agents.find(x => x.id === data.agentId);
+    if (a) a.logs.push(data.message);
+  } else if (data.type === "tool_request" && data.agentId) {
+    currentSwarmState.ceoLogs.push(`⚠ Agent '${data.agentId}' requested tool: ${data.toolName}`);
+  } else if (data.type === "tool_provisioned" && data.agentId) {
+    currentSwarmState.ceoLogs.push(`✓ Custom tool '${data.toolName}' provisioned to '${data.agentId}'.`);
+  } else if (data.type === "swarm_start") {
+    currentSwarmState.ceoLogs.push(`Swarm initialized for: "${data.goal}"`);
+  }
+}
+
+// Module-level session so chat survives WS reconnect
+let globalSession = null;
+
+function getOrCreateSession() {
+  if (!globalSession) {
+    globalSession = new WebSession();
+  }
+  return globalSession;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const TEAMS_FILE = path.join(PI_DIR, "swarm-teams.json");
@@ -1257,11 +1301,14 @@ async function handleSubAgent(socket, agentId, task) {
 }
 
 async function executeSwarmCampaign(socket, goal, agents) {
+  // Add this socket to the broadcast set so it receives live updates
+  swarmSockets.add(socket);
+
   const model = resolveModel();
   const auth = getModelAuth(model);
 
   // Send plan to client
-  socket.send(JSON.stringify({ type: "ceo_plan", agents }));
+  bcast({ type: "ceo_plan", agents });
 
   // Save agents to persistent state
   if (currentSwarmState) {
@@ -1275,13 +1322,13 @@ async function executeSwarmCampaign(socket, goal, agents) {
   for (const agent of agents) {
     // Check pause before starting each agent
     if (_swarmPaused) {
-      socket.send(JSON.stringify({ type: "swarm_paused", agentId: agent.id }));
+      bcast({ type: "swarm_paused", agentId: agent.id });
       await new Promise(resolve => { _swarmPauseResolve = resolve; });
-      socket.send(JSON.stringify({ type: "swarm_resumed", agentId: agent.id }));
+      bcast({ type: "swarm_resumed", agentId: agent.id });
     }
 
-    socket.send(JSON.stringify({ type: "ceo_thought", message: `Activating sub-agent '${agent.id}' for task: ${agent.task}` }));
-    socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
+    bcast({ type: "ceo_thought", message: `Activating sub-agent '${agent.id}' for task: ${agent.task}` });
+    bcast({ type: "agent_status", agentId: agent.id, status: "running" });
 
     const agentPrompt = `You are the ${agent.id} agent, a specialized swarm member.
 Your role: ${agent.role}
@@ -1299,8 +1346,8 @@ Perform your task using your tools, think step-by-step, and report back with a c
     // Mock Tool Provisioning trigger for Coder agents to demonstrate the flow
     if (agent.id === "coder" && !agent.tools.includes("custom_parser")) {
       // Pause Coder
-      socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "paused", currentTask: "Requesting custom tool: custom_parser" }));
-      socket.send(JSON.stringify({ type: "tool_request", agentId: agent.id, toolName: "custom_parser", reason: "Specialized string parsing tool for files" }));
+      bcast({ type: "agent_status", agentId: agent.id, status: "paused", currentTask: "Requesting custom tool: custom_parser" });
+      bcast({ type: "tool_request", agentId: agent.id, toolName: "custom_parser", reason: "Specialized string parsing tool for files" });
       
       // Simulate CEO tool creation
       await new Promise(r => setTimeout(r, 2500));
@@ -1314,7 +1361,7 @@ process.exit(0);
 `, "utf8");
       } catch {}
 
-      socket.send(JSON.stringify({ type: "tool_provisioned", agentId: agent.id, toolName: "custom_parser" }));
+      bcast({ type: "tool_provisioned", agentId: agent.id, toolName: "custom_parser" });
       
       // Add custom parser tool schema to Coder's toolbelt
       agentTools.push({
@@ -1324,7 +1371,7 @@ process.exit(0);
       });
 
       // Resume Coder
-      socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running", currentTask: agent.task }));
+      bcast({ type: "agent_status", agentId: agent.id, status: "running", currentTask: agent.task });
       await new Promise(r => setTimeout(r, 500));
     }
 
@@ -1345,7 +1392,7 @@ process.exit(0);
             currentText += event.delta;
             // Send chunk as logs to keep terminal active
             if (event.delta.trim().length > 3) {
-              socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: event.delta.trim().slice(0, 100) }));
+              bcast({ type: "agent_log", agentId: agent.id, message: event.delta.trim().slice(0, 100) });
             }
           }
         }
@@ -1364,8 +1411,8 @@ process.exit(0);
           const tName = tc.name || tc.toolName;
           const tInput = tc.input || tc.arguments || {};
           
-          socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "calling_tool", currentTool: tName }));
-          socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Calling tool: ${tName} with ${JSON.stringify(tInput)}` }));
+          bcast({ type: "agent_status", agentId: agent.id, status: "calling_tool", currentTool: tName });
+          bcast({ type: "agent_log", agentId: agent.id, message: `Calling tool: ${tName} with ${JSON.stringify(tInput)}` });
 
           let toolOutput = "";
           try {
@@ -1378,7 +1425,7 @@ process.exit(0);
             toolOutput = `Error: ${e.message}`;
           }
 
-          socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Tool response: ${toolOutput.slice(0, 150)}...` }));
+          bcast({ type: "agent_log", agentId: agent.id, message: `Tool response: ${toolOutput.slice(0, 150)}...` });
           
           messages.push({
             role: "toolResult",
@@ -1390,22 +1437,22 @@ process.exit(0);
           });
         }
 
-        socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
+        bcast({ type: "agent_status", agentId: agent.id, status: "running" });
         turn++;
 
         // Check pause between turns
         if (_swarmPaused) {
-          socket.send(JSON.stringify({ type: "swarm_paused", agentId: agent.id }));
+          bcast({ type: "swarm_paused", agentId: agent.id });
           await new Promise(resolve => { _swarmPauseResolve = resolve; });
-          socket.send(JSON.stringify({ type: "swarm_resumed", agentId: agent.id }));
+          bcast({ type: "swarm_resumed", agentId: agent.id });
         }
       } catch (err) {
-        socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Error running turn: ${err.message}` }));
+        bcast({ type: "agent_log", agentId: agent.id, message: `Error running turn: ${err.message}` });
         break;
       }
     }
 
-    socket.send(JSON.stringify({ type: "agent_done", agentId: agent.id, result: lastTextResult || "Task execution finished." }));
+    bcast({ type: "agent_done", agentId: agent.id, result: lastTextResult || "Task execution finished." });
     agentResults[agent.id] = lastTextResult || "Completed.";
 
     // Save persistent state
@@ -1419,7 +1466,7 @@ process.exit(0);
   }
 
   // 3. CEO Summary Generation
-  socket.send(JSON.stringify({ type: "ceo_thought", message: "All sub-agents completed work. Compiling final summary report..." }));
+  bcast({ type: "ceo_thought", message: "All sub-agents completed work. Compiling final summary report..." });
   
   let summary = "";
   try {
@@ -1442,7 +1489,7 @@ Please write a brief summary report for the USER detailing what the sub-agents h
     summary = `Swarm goal accomplished!\n\n${Object.entries(agentResults).map(([id, res]) => `- Agent ${id.toUpperCase()}: ${res.slice(0, 200)}...`).join("\n")}`;
   }
 
-  socket.send(JSON.stringify({ type: "ceo_summary", summary }));
+  bcast({ type: "ceo_summary", summary });
 
   // Mark swarm as completed
   if (currentSwarmState) {
@@ -1452,6 +1499,8 @@ Please write a brief summary report for the USER detailing what the sub-agents h
 }
 
 async function handleSwarmGoal(socket, goal) {
+  swarmSockets.add(socket);
+
   // Initialize persistent state
   currentSwarmState = {
     goal,
@@ -1462,8 +1511,8 @@ async function handleSwarmGoal(socket, goal) {
     summary: null
   };
 
-  socket.send(JSON.stringify({ type: "swarm_start", goal }));
-  socket.send(JSON.stringify({ type: "ceo_thought", message: `CEO Agent initialized. Analyzing goal: "${goal}"` }));
+  bcast({ type: "swarm_start", goal });
+  bcast({ type: "ceo_thought", message: `CEO Agent initialized. Analyzing goal: "${goal}"` });
 
   const model = resolveModel();
   const auth = getModelAuth(model);
@@ -1837,12 +1886,19 @@ async function main() {
     console.log("WebSocket connected from", req.ip);
 
     let session;
-    try { session = new WebSession(); }
+    try { session = getOrCreateSession(); }
     catch (e) {
       try { socket.send(JSON.stringify({ type: "error", message: `Server init error: ${e.message}` })); } catch {}
       setTimeout(() => socket.close(), 500);
       return;
     }
+
+    // Send chat history if messages exist
+    try {
+      if (session.messages && session.messages.length > 0) {
+        socket.send(JSON.stringify({ type: "chat_history", messages: session.messages }));
+      }
+    } catch {}
 
     // Heartbeat — close stale connections
     let alive = true;
@@ -1859,6 +1915,7 @@ async function main() {
 
     // Send swarm recovery state if there's an active or completed swarm
     if (currentSwarmState) {
+      swarmSockets.add(socket);
       try {
         socket.send(JSON.stringify({
           type: "swarm_recovery",
@@ -1870,10 +1927,12 @@ async function main() {
 
     socket.on("close", () => {
       clearInterval(pingTimer);
+      swarmSockets.delete(socket);
       console.log("WebSocket disconnected from", req.ip);
     });
     socket.on("error", (err) => {
       clearInterval(pingTimer);
+      swarmSockets.delete(socket);
       console.error("WebSocket error:", err?.message);
     });
 
@@ -1954,7 +2013,7 @@ async function main() {
             ceoLogs: [],
             summary: null
           };
-          socket.send(JSON.stringify({ type: "swarm_start", goal }));
+          bcast({ type: "swarm_start", goal });
           await executeSwarmCampaign(socket, goal, normalized);
         }
         catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
