@@ -3982,11 +3982,13 @@ Perform your task using your tools, think step-by-step, and report back with a c
   let turn = 0;
   let status = "completed";
   let errorLog = null;
+  let hadChat = false;
 
   while (turn < MAX_TURNS) {
     try {
       const pendingChats = flushAgentChatBuffer(agentId);
       if (pendingChats.length > 0) {
+        hadChat = true;
         const chatSummary = pendingChats.map(c => `[User message]: ${c.content}`).join("\n");
         messages.push({
           role: "user",
@@ -4018,6 +4020,11 @@ Perform your task using your tools, think step-by-step, and report back with a c
 
       const toolCalls = result.content.filter(c => c.type === "toolUse" || c.type === "toolCall");
       if (toolCalls.length === 0) {
+        // If this turn was a response to user chat, broadcast it back
+        if (hadChat && lastTextResult.trim()) {
+          bcast({ type: "agent_chat", agentId, message: lastTextResult.trim(), fromAgent: true });
+          hadChat = false;
+        }
         break;
       }
 
@@ -4338,11 +4345,13 @@ process.exit(0);
     let lastTextResult = "";
     const MAX_TURNS = 15;
     let turn = 0;
+    let _hadChat = false;
     while (turn < MAX_TURNS) {
       try {
         // Inject pending user chat messages into agent context
         const pendingChats = flushAgentChatBuffer(agent.id);
         if (pendingChats.length > 0) {
+          _hadChat = true;
           const chatSummary = pendingChats.map(c => `[User message]: ${c.content}`).join("\n");
           messages.push({
             role: "user",
@@ -4375,6 +4384,10 @@ process.exit(0);
 
         const toolCalls = result.content.filter(c => c.type === "toolUse" || c.type === "toolCall");
         if (toolCalls.length === 0) {
+          if (_hadChat && lastTextResult.trim()) {
+            bcast({ type: "agent_chat", agentId: agent.id, message: lastTextResult.trim(), fromAgent: true });
+            _hadChat = false;
+          }
           break; // Done with execution
         }
 
@@ -4978,6 +4991,19 @@ async function main() {
         if (agentId && message) {
           getAgentChatBuffer(agentId).push({ role: "user", content: message, timestamp: Date.now() });
           bcast({ type: "agent_chat", agentId, message, fromAgent: false });
+
+          // If no swarm is currently running for this agent, route to main chat session
+          const isSwarmRunning = currentSwarmState && currentSwarmState.status === "running";
+          if (!isSwarmRunning || !currentSwarmState?.agents?.find(a => a.id === agentId)) {
+            try {
+              socket.send(JSON.stringify({ type: "session_start" }));
+              session.handleMessage(`[Message for agent '${agentId}']: ${message}`, data.cwd || process.cwd(), (event) => {
+                try { socket.send(JSON.stringify(event)); } catch {}
+              }, null);
+            } catch (e) {
+              try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {}
+            }
+          }
         }
       }
 
