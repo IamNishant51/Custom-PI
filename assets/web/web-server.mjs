@@ -1870,7 +1870,7 @@ async function main() {
       if (data.type === "swarm_saved_team") {
         const { goal, agents } = data;
         try {
-          const normalized = (agents || []).map((a: any) =>
+          const normalized = (agents || []).map(a =>
             typeof a === "string"
               ? { id: a, role: "sub-agent", task: `Contribute to: ${goal}`, tools: ["bash", "glob", "grep", "view_file", "write", "edit", "list_dir", "web_search", "web_fetch"] }
               : a
