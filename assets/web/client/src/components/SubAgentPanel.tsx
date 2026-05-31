@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "./Toast";
 import Markdown from "./Markdown";
+import { useChat } from "../context/ChatContext";
 
 interface Agent {
   id: string;
@@ -14,7 +15,7 @@ interface Agent {
 }
 
 interface SwarmMessage {
-  type: "swarm_start" | "ceo_thought" | "ceo_plan" | "agent_status" | "agent_log" | "agent_done" | "tool_request" | "tool_provisioned" | "ceo_summary" | "swarm_error";
+  type: "swarm_start" | "ceo_thought" | "ceo_plan" | "agent_status" | "agent_log" | "agent_done" | "tool_request" | "tool_provisioned" | "ceo_summary" | "swarm_error" | "interrupted";
   goal?: string;
   message?: string;
   agents?: Array<{ id: string; role: string; tools: string[]; task: string }>;
@@ -60,6 +61,7 @@ function formatTime(secs: number) {
 }
 
 export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
+  const { sendInterrupt } = useChat();
   const [goal, setGoal] = useState("");
   const [activeGoal, setActiveGoal] = useState("");
   const [swarmStatus, setSwarmStatus] = useState<"idle" | "planning" | "running" | "done" | "error">("idle");
@@ -153,6 +155,12 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             setSwarmStatus("error");
             setCeoLogs(prev => [...prev, `ERROR: ${data.message}`]);
             toast(`Swarm error: ${data.message}`, "error");
+            break;
+          case "interrupted":
+            setSwarmStatus("error");
+            setCeoLogs(prev => [...prev, "Swarm aborted by user."]);
+            setAgents(prev => prev.map(a => a.status === "running" || a.status === "calling_tool" ? { ...a, status: "error", logs: [...a.logs, "Aborted."] } : a));
+            toast("Swarm aborted", "error");
             break;
         }
       } catch {}
@@ -265,6 +273,15 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             </div>
             <div className="subagent-bar-right">
               <span className="subagent-bar-time">{formatTime(elapsedTime)}</span>
+              {swarmStatus === "running" || swarmStatus === "planning" ? (
+                <button className="subagent-bar-abort" onClick={() => { if (confirm("Abort this swarm?")) sendInterrupt(); }}>
+                  ■ Abort
+                </button>
+              ) : (swarmStatus === "done" || swarmStatus === "error") ? (
+                <button className="subagent-bar-reset" onClick={() => setSwarmStatus("idle")}>
+                  ✕ Reset
+                </button>
+              ) : null}
               {!isCurrentTeamSaved && agents.length > 0 && (
                 <button className="subagent-bar-save" onClick={() => setShowSaveModal(true)}>Save</button>
               )}
