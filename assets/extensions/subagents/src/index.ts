@@ -3,7 +3,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import fs from "node:fs";
 import path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
@@ -1227,10 +1227,13 @@ class SubAgentRuntime {
           if (!pattern) return "Error: Missing pattern argument.";
           const safePath = this.safeResolve(pathArg);
           try {
-            return execSync(`rg --no-filename --color never "${pattern}" ${safePath}`, {
+            const grepResult = spawnSync('rg', ['--no-filename', '--color', 'never', pattern, safePath], {
               cwd: this.ctx.cwd,
-              encoding: "utf8"
+              encoding: "utf8",
+              timeout: 30000,
             });
+            if (grepResult.error) throw grepResult.error;
+            return grepResult.stdout || "";
           } catch {
             return await localGrep(pattern, safePath);
           }

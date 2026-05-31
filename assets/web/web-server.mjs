@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { execSync, spawn } from "node:child_process";
+import { execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +17,8 @@ const MCP_CONFIG_FILE = path.join(PI_DIR, "mcp-servers.json");
 const CLIENT_DIR = path.join(__dirname, "client", "dist");
 const PORT = parseInt(process.env.WEB_PORT || "4321", 10);
 const HOST = process.env.WEB_HOST || "127.0.0.1";
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max upload
+const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -781,11 +783,19 @@ function expandPath(p) {
 
 function safeResolve(cwd, p) {
   const resolved = path.resolve(cwd, expandPath(p || "."));
-  const relative = path.relative(cwd, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  // Resolve symlinks to prevent traversal bypass
+  let real;
+  try {
+    real = fs.realpathSync(resolved);
+  } catch {
+    real = resolved;
+  }
+  const realCwd = fs.realpathSync(cwd);
+  const relative = path.relative(realCwd, real);
+  if (relative.startsWith("..")) {
     throw new Error(`Path traversal denied: ${p}`);
   }
-  return resolved;
+  return real;
 }
 
 async function executeTool(name, args, cwd) {
@@ -839,7 +849,10 @@ async function executeTool(name, args, cwd) {
     }
     case "grep": {
       try {
-        return execSync(`rg --no-filename --color never "${args.pattern}" ${args.path || cwd}`, { encoding: "utf8" });
+        const grepArgs = ['--no-filename', '--color', 'never', args.pattern, args.path || cwd];
+        const result = spawnSync('rg', grepArgs, { encoding: "utf8", timeout: 30000 });
+        if (result.error) throw result.error;
+        return result.stdout || "";
       } catch {
         const searchPath = args.path || cwd;
         const results = [];
@@ -885,8 +898,11 @@ async function executeTool(name, args, cwd) {
       const agent = agents[args.agentId];
       if (!agent) return `Error: Sub-agent '${args.agentId}' not found. Available: ${Object.keys(agents).join(", ")}`;
       try {
-        const result = execSync(`${agent.config.command || "echo"} ${agent.config.args || ""} "${args.task}"`, { timeout: 30000, encoding: "utf8" });
-        return `Sub-agent '${args.agentId}' result:\n${result.slice(0, 2000)}`;
+        const cmd = agent.config.command || "echo";
+        const cmdArgs = agent.config.args ? [agent.config.args, args.task] : [args.task];
+        const result = spawnSync(cmd, cmdArgs, { timeout: 30000, encoding: "utf8", shell: false });
+        if (result.error) throw result.error;
+        return `Sub-agent '${args.agentId}' result:\n${(result.stdout || "").slice(0, 2000)}`;
       } catch (e) {
         return `Sub-agent '${args.agentId}' error: ${e.message}. Running inline instead.\n\n${agent.body ? agent.body.slice(0, 500) : ""}`;
       }
@@ -1589,10 +1605,12 @@ async function main() {
   app.post("/api/mcp/test", async (req) => {
     const { name, command, args } = req.body;
     try {
-      const result = execSync(`${command} ${(args || []).join(" ")} --version 2>/dev/null || echo "no version"`, { timeout: 5000, encoding: "utf8" });
-      return { ok: true, output: result.trim() };
+      const testArgs = [...(args || []), '--version'];
+      const result = spawnSync(command, testArgs, { timeout: 5000, encoding: "utf8", shell: false });
+      const output = (result.stdout || "").trim() || (result.stderr || "").trim() || "no version";
+      return { ok: result.status === 0, output };
     } catch (e) {
-      return { ok: false, output: e.stderr || e.message };
+      return { ok: false, output: e.message };
     }
   });
 
@@ -1650,8 +1668,27 @@ async function main() {
       return;
     }
 
-    socket.on("close", () => console.log("WebSocket disconnected from", req.ip));
-    socket.on("error", (err) => console.error("WebSocket error:", err?.message));
+    // Heartbeat — close stale connections
+    let alive = true;
+    const pingTimer = setInterval(() => {
+      if (!alive) {
+        try { socket.close(); } catch {}
+        return;
+      }
+      alive = false;
+      try { socket.ping(); } catch {}
+    }, WS_PING_INTERVAL);
+
+    socket.on("pong", () => { alive = true; });
+
+    socket.on("close", () => {
+      clearInterval(pingTimer);
+      console.log("WebSocket disconnected from", req.ip);
+    });
+    socket.on("error", (err) => {
+      clearInterval(pingTimer);
+      console.error("WebSocket error:", err?.message);
+    });
 
     socket.on("message", async (raw) => {
       let data;
@@ -1659,6 +1696,18 @@ async function main() {
       catch { try { socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" })); } catch {} return; }
 
       if (data.type === "chat") {
+        // Limit total attachment size
+        if (data.attachments) {
+          let totalSize = 0;
+          for (const att of data.attachments) {
+            if (att.data) totalSize += att.data.length;
+            if (att.text) totalSize += att.text.length;
+          }
+          if (totalSize > MAX_FILE_SIZE) {
+            try { socket.send(JSON.stringify({ type: "error", message: `Attachment total size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit. Please reduce file sizes.` })); } catch {}
+            return;
+          }
+        }
         try { socket.send(JSON.stringify({ type: "session_start" })); } catch {}
         try {
           await session.handleMessage(data.message, data.cwd || process.cwd(), (event) => {
