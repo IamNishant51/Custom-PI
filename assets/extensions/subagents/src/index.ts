@@ -1245,7 +1245,8 @@ class SubAgentRuntime {
   constructor(
     private ctx: ExtensionContext,
     private config: AgentConfig,
-    private trackerId: string
+    private trackerId: string,
+    private signal?: AbortSignal
   ) {
     this.storage = new LocalStorageDriver(this.ctx.cwd);
     this.tracker = {
@@ -1630,15 +1631,18 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
       this.ctx.ui.setStatus("subagents", `${chalk.hex(C.lavender)(getSpinner())} ${this.config.name} (turn ${turnCount}/${MAX_TURNS})`);
       this.onProgress?.call(null, `${chalk.hex(C.lavender)(getSpinner())} ${this.config.name} — turn ${turnCount}/${MAX_TURNS}`);
 
-      const response = await this.callWithRetry(() => completeSimple(model, {
-        systemPrompt: this.systemPrompt,
-        messages,
-        tools: tools.length > 0 ? tools : undefined,
-      }, {
-        apiKey: auth.apiKey,
-        headers: auth.headers,
-        reasoning: this.config.thinking as any || undefined,
-      }));
+      const response = await this.callWithRetry(() => {
+        if (this.signal?.aborted) throw new Error("Aborted by user.");
+        return completeSimple(model, {
+          systemPrompt: this.systemPrompt,
+          messages,
+          tools: tools.length > 0 ? tools : undefined,
+        }, {
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          reasoning: this.config.thinking as any || undefined,
+        });
+      });
 
       // Track cost
       try {
@@ -2132,10 +2136,21 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         const MAX_RETRIES = 2;
         let lastError: Error | null = null;
         let result: string = "";
+        let runtime: SubAgentRuntime | null = null;
+
+        // Stop animation and clean up if abort signal fires
+        if (signal) {
+          signal.addEventListener("abort", () => {
+            stopGlobalAnimation();
+            context.ui.setWorkingIndicator();
+            context.ui.setWorkingMessage();
+            context.ui.setStatus("subagents", undefined);
+          }, { once: true });
+        }
 
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
           try {
-            const runtime = new SubAgentRuntime(context, config, id);
+            runtime = new SubAgentRuntime(context, config, id, signal);
             const updateFn = update as ((u: any) => void) | undefined;
             runtime.onProgress = (msg: string) => {
               context.ui.setWorkingMessage(msg);
@@ -2189,6 +2204,8 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
           content: [{ type: "text", text: `Error running sub-agent ${config.name}: ${error.message}` }],
           isError: true,
         };
+      } finally {
+        stopGlobalAnimation();
       }
     },
   });
@@ -3169,6 +3186,21 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     // Set playful geometric thinking indicator
     const megaFrames = ["◐", "◓", "◑", "◒"];
     ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });
+
+    // Listen for abort signal (Escape key) to stop animation and clear working state
+    if (ctx.signal) {
+      ctx.signal.addEventListener("abort", () => {
+        stopGlobalAnimation();
+        ctx.ui.setWorkingIndicator();
+        ctx.ui.setWorkingMessage();
+        ctx.ui.setStatus("subagents", undefined);
+        if (globalVerbCycler) {
+          clearInterval(globalVerbCycler);
+          globalVerbCycler = null;
+        }
+      }, { once: true });
+    }
+
     // Cycle global working message with playful verbs and typing effect
     if (!globalVerbCycler) {
       let verbIdx = 0;
