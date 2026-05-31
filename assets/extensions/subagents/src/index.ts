@@ -1975,13 +1975,33 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
       );
 
       try {
-        const runtime = new SubAgentRuntime(context, config, id);
-        const updateFn = update as ((u: any) => void) | undefined;
-        runtime.onProgress = (msg: string) => {
-          context.ui.setWorkingMessage(msg);
-          updateFn?.({ content: [{ type: "text" as const, text: msg }] });
-        };
-        const result = await runtime.execute(params.task);
+        const MAX_RETRIES = 2;
+        let lastError: Error | null = null;
+        let result: string = "";
+
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const runtime = new SubAgentRuntime(context, config, id);
+            const updateFn = update as ((u: any) => void) | undefined;
+            runtime.onProgress = (msg: string) => {
+              context.ui.setWorkingMessage(msg);
+              updateFn?.({ content: [{ type: "text" as const, text: msg }] });
+            };
+            result = await runtime.execute(params.task);
+            break;
+          } catch (err: any) {
+            lastError = err;
+            if (attempt < MAX_RETRIES && err.message?.includes("rate limit") || err.message?.includes("timeout") || err.message?.includes("ECONNRESET")) {
+              const delay = Math.pow(2, attempt) * 1000;
+              await new Promise(r => setTimeout(r, delay));
+              context.ui.notify(`Retrying sub-agent (attempt ${attempt + 2}/${MAX_RETRIES + 1})...`, "info");
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        if (lastError && !result) throw lastError;
 
         // Restore default working indicator
         context.ui.setWorkingIndicator();
