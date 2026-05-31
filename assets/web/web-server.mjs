@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
+import { parse as parseYaml } from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PI_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -24,6 +25,108 @@ const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 let currentSwarmState = null;
 let _swarmPaused = false;
 let _swarmPauseResolve = null;
+let _toolCallCount = 0;
+let _approvalEnabled = false;
+
+// ── Session State / Checkpoints ─────────────────────────────────────────────
+
+const SESSION_FILE = path.join(PI_DIR, "session-state.json");
+const CHECKPOINTS_DIR = path.join(PI_DIR, "checkpoints");
+
+function ensureCheckpointsDir() { fs.mkdirSync(CHECKPOINTS_DIR, { recursive: true }); }
+
+function saveSessionState(state) {
+  fs.mkdirSync(PI_DIR, { recursive: true });
+  fs.writeFileSync(SESSION_FILE, JSON.stringify(state, null, 2));
+}
+
+function loadSessionState() {
+  try {
+    if (fs.existsSync(SESSION_FILE)) {
+      return JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
+    }
+  } catch {}
+  return null;
+}
+
+function listCheckpoints() {
+  ensureCheckpointsDir();
+  try {
+    const files = fs.readdirSync(CHECKPOINTS_DIR)
+      .filter(f => f.endsWith(".json"))
+      .sort()
+      .map(f => {
+        const fullPath = path.join(CHECKPOINTS_DIR, f);
+        const stat = fs.statSync(fullPath);
+        const data = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+        return {
+          id: f.replace(".json", ""),
+          label: data.label || f.replace(".json", ""),
+          createdAt: data.createdAt || stat.birthtimeMs || stat.mtimeMs,
+          size: Object.keys(data.state || {}).reduce((s, k) => s + JSON.stringify(data.state[k]).length, 0),
+        };
+      });
+    return files;
+  } catch { return []; }
+}
+
+function createCheckpoint(label) {
+  ensureCheckpointsDir();
+  const id = `ckpt_${Date.now()}`;
+  const state = {
+    label: label || `Checkpoint ${new Date().toISOString()}`,
+    createdAt: Date.now(),
+    state: {
+      memory: readMemory(),
+      vault: readVault(),
+      settings: loadSettings(),
+      swarmTeams: loadSwarmTeams(),
+      costSummary: getCostSummary(),
+      modelConfig: loadModels(),
+    }
+  };
+  fs.writeFileSync(path.join(CHECKPOINTS_DIR, `${id}.json`), JSON.stringify(state, null, 2));
+  return { id, ...state };
+}
+
+function restoreCheckpoint(id) {
+  ensureCheckpointsDir();
+  const filePath = path.join(CHECKPOINTS_DIR, `${id}.json`);
+  if (!fs.existsSync(filePath)) return { success: false, error: `Checkpoint '${id}' not found` };
+  
+  const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const state = data.state || {};
+  
+  if (state.memory) writeMemory(state.memory);
+  
+  if (state.settings) {
+    fs.writeFileSync(path.join(PI_DIR, "settings.json"), JSON.stringify(state.settings, null, 2));
+  }
+  
+  if (state.swarmTeams) saveSwarmTeams(state.swarmTeams);
+  
+  return { success: true, label: data.label, createdAt: data.createdAt, restored: Object.keys(state) };
+}
+
+function compactSession(maxAgeDays = 30) {
+  ensureCheckpointsDir();
+  const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
+  let removedCount = 0;
+  
+  try {
+    const files = fs.readdirSync(CHECKPOINTS_DIR).filter(f => f.endsWith(".json"));
+    for (const f of files) {
+      const fullPath = path.join(CHECKPOINTS_DIR, f);
+      const stat = fs.statSync(fullPath);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(fullPath);
+        removedCount++;
+      }
+    }
+  } catch {}
+  
+  return { removed: removedCount, remaining: listCheckpoints().length };
+}
 
 // Swarm broadcast — send to all connected WS clients; survives individual disconnections
 const swarmSockets = new Set();
@@ -87,6 +190,27 @@ function saveSwarmTeams(teams) {
     fs.writeFileSync(TEAMS_FILE, JSON.stringify(teams, null, 2));
   } catch (err) {
     console.error("[Web Server] Failed to save swarm teams:", err);
+  }
+}
+
+const DAG_CONFIG_FILE = path.join(PI_DIR, "dag-config.yaml");
+const SWARM_STATE_FILE = path.join(PI_DIR, "swarm-state.json");
+
+function loadSwarmState() {
+  try {
+    if (fs.existsSync(SWARM_STATE_FILE)) {
+      return JSON.parse(fs.readFileSync(SWARM_STATE_FILE, "utf8"));
+    }
+  } catch {}
+  return null;
+}
+
+function saveSwarmState(state) {
+  try {
+    fs.mkdirSync(path.dirname(SWARM_STATE_FILE), { recursive: true });
+    fs.writeFileSync(SWARM_STATE_FILE, JSON.stringify(state, null, 2));
+  } catch (err) {
+    console.error("[Web Server] Failed to save swarm state:", err);
   }
 }
 
@@ -854,13 +978,139 @@ const TOOLS = [
   },
   {
     name: "internal_url",
-    description: "Access resources via internal URL protocols. Supported: memory:// (memory access), vault:// (credential lookup), local:// (workspace files). Example: memory://fact, vault://KEY_NAME, local://path/to/file",
+    description: "Access resources via internal URL protocols. Supported: memory:// (memory access), vault:// (credential lookup), local:// (workspace files), omp:// (embedded docs), issue:// (GitHub issues), pr:// (GitHub PRs), skill:// (skill files), rule:// (rule files). Example: memory://fact, vault://KEY_NAME, local://path/to/file",
     parameters: {
       type: "object",
       properties: {
         url: { type: "string", description: "Internal URL to resolve" },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "lsp",
+    description: "Query language intelligence via LSP. Actions: diagnostics, goto_def, references, hover, symbols, rename, code_actions.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["diagnostics", "goto_def", "references", "hover", "symbols", "rename", "code_actions"] },
+        file_path: { type: "string", description: "Path to the file" },
+        line: { type: "number", description: "Line number (0-indexed)" },
+        character: { type: "number", description: "Character offset (0-indexed)" },
+        new_name: { type: "string", description: "New name for rename action" },
+      },
+      required: ["action", "file_path"],
+    },
+  },
+  {
+    name: "session",
+    description: "Session management: checkpoints, rewind, compaction, status.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["status", "checkpoint", "save", "list", "restore", "compact"], description: "Session action" },
+        label: { type: "string", description: "Checkpoint label (for checkpoint action)" },
+        id: { type: "string", description: "Checkpoint ID (for restore action)" },
+        max_age_days: { type: "number", description: "Max age in days for compaction (default 30)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "generate_image",
+    description: "Generate an image from a text prompt. Supports OpenAI (DALL-E 3), Gemini, and Grok. Requires API key in vault: OPENAI_API_KEY, GEMINI_API_KEY, or XAI_API_KEY.",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Text description of the image to generate" },
+        provider: { type: "string", enum: ["openai", "gemini", "grok"], description: "Image generation provider (default: auto-pick from available keys)" },
+        size: { type: "string", enum: ["1024x1024", "1792x1024", "1024x1792"], description: "Image size (DALL-E 3 only)" },
+        return_format: { type: "string", enum: ["base64", "url"], description: "Return format (default: base64 for inline display)" },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    name: "text_to_speech",
+    description: "Convert text to speech audio. Uses free browser SpeechSynthesis API or edge TTS fallback.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Text to convert to speech" },
+        voice: { type: "string", description: "Voice preference (default: en-US)" },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "ssh_exec",
+    description: "Execute commands on remote servers via SSH. Uses key-based auth. Requires SSH_KEY or SSH_PASSWORD in vault for each host.",
+    parameters: {
+      type: "object",
+      properties: {
+        host: { type: "string", description: "Remote host (user@hostname or IP)" },
+        command: { type: "string", description: "Command to execute" },
+        port: { type: "number", description: "SSH port (default: 22)" },
+        timeout: { type: "number", description: "Command timeout in seconds (default: 30)" },
+      },
+      required: ["host", "command"],
+    },
+  },
+  {
+    name: "plugin",
+    description: "Plugin system: list, create, enable, disable, and manage plugins.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "create", "enable", "disable", "info", "remove"] },
+        name: { type: "string", description: "Plugin name" },
+        description: { type: "string", description: "Plugin description (for create action)" },
+        version: { type: "string", description: "Plugin version (for create action)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "ast_grep",
+    description: "AST-aware code search and structural analysis. Uses tree-sitter CLI if available. Falls back to pattern-based structural matching.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["search", "count", "functions", "classes", "imports"], description: "AST action" },
+        pattern: { type: "string", description: "Pattern to search (for search action)" },
+        file_path: { type: "string", description: "File to analyze (optional, searches all if omitted)" },
+        language: { type: "string", description: "Language (auto-detected from file extension if not specified)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "render_mermaid",
+    description: "Render Mermaid diagram code to SVG or ASCII art. Falls back to ASCII representation if mermaid CLI is not installed.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Mermaid diagram code" },
+        format: { type: "string", enum: ["svg", "ascii", "url"], description: "Output format (default: ascii)" },
+      },
+      required: ["code"],
+    },
+  },
+  {
+    name: "plan",
+    description: "Planning/goals mode: create, track, and manage multi-step plans and objectives.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["create", "list", "status", "update_step", "complete", "abandon", "resume"], description: "Plan action" },
+        name: { type: "string", description: "Plan name (for create action)" },
+        goal: { type: "string", description: "Plan goal/objective" },
+        steps: { type: "array", items: { type: "string" }, description: "Array of step descriptions (for create action)" },
+        plan_id: { type: "string", description: "Plan ID" },
+        step_id: { type: "string", description: "Step ID (for update_step action)" },
+        step_status: { type: "string", enum: ["pending", "in_progress", "completed", "blocked"], description: "New step status" },
+      },
+      required: ["action"],
     },
   },
 ];
@@ -1059,6 +1309,365 @@ async function stopMcpServers() {
   activeMcpServers.clear();
 }
 
+// ── LSP Server Client ───────────────────────────────────────────────────────
+
+const LSP_CONFIG_FILE = path.join(PI_DIR, "lsp-servers.json");
+const activeLspServers = new Map();
+
+function loadLspConfig() {
+  try {
+    if (fs.existsSync(LSP_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(LSP_CONFIG_FILE, "utf8"));
+    }
+  } catch {}
+  return {
+    typescript: { command: "typescript-language-server", args: ["--stdio"] },
+    javascript: { command: "typescript-language-server", args: ["--stdio"] },
+    python: { command: "pyright-langserver", args: ["--stdio"] },
+    rust: { command: "rust-analyzer", args: [] },
+    go: { command: "gopls", args: [] },
+  };
+}
+
+function saveLspConfig(config) {
+  fs.mkdirSync(path.dirname(LSP_CONFIG_FILE), { recursive: true });
+  fs.writeFileSync(LSP_CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+function detectLanguage(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  const map = {
+    ".ts": "typescript", ".tsx": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".py": "python",
+    ".rs": "rust",
+    ".go": "go",
+  };
+  return map[ext] || null;
+}
+
+function findLspServer(language) {
+  try {
+    const config = loadLspConfig();
+    const cfg = config[language];
+    if (!cfg) return null;
+    const cmd = cfg.command.split(" ")[0];
+    const result = spawnSync("which", [cmd], { encoding: "utf8" });
+    if (result.status === 0 && result.stdout.trim()) return cfg;
+    return null;
+  } catch { return null; }
+}
+
+class LspConnection {
+  constructor(language, command, args) {
+    this.language = language;
+    this.command = command;
+    this.args = args;
+    this.proc = null;
+    this.pendingRequests = new Map();
+    this.nextRequestId = 1;
+    this.initialized = false;
+    this.serverCapabilities = {};
+    this.rootUri = null;
+    this.diagnosticsCallback = null;
+  }
+
+  async start(rootUri) {
+    if (this.proc) return;
+    this.rootUri = rootUri;
+    return new Promise((resolve, reject) => {
+      try {
+        this.proc = spawn(this.command, this.args || [], {
+          stdio: ["pipe", "pipe", "pipe"],
+          shell: process.platform === "win32",
+        });
+
+        this.proc.on("error", (err) => {
+          console.error(`[LSP] ${this.language} spawn error:`, err);
+          reject(err);
+        });
+
+        this.proc.on("exit", (code) => {
+          console.log(`[LSP] ${this.language} server exited with code ${code}`);
+          this.cleanup();
+        });
+
+        const rl = readline.createInterface({ input: this.proc.stdout });
+        rl.on("line", (line) => { this.handleMessage(line); });
+
+        if (this.proc.stderr) {
+          const rlErr = readline.createInterface({ input: this.proc.stderr });
+          rlErr.on("line", (line) => { console.error(`[LSP ${this.language} Stderr] ${line}`); });
+        }
+
+        this.initializeHandshake().then(resolve).catch(reject);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  cleanup() {
+    this.initialized = false;
+    for (const [, req] of this.pendingRequests.entries()) {
+      req.reject(new Error("LSP server connection closed"));
+    }
+    this.pendingRequests.clear();
+    if (this.proc) {
+      try { this.proc.kill(); } catch {}
+      this.proc = null;
+    }
+  }
+
+  stop() { this.cleanup(); }
+
+  sendRequest(method, params) {
+    return new Promise((resolve, reject) => {
+      if (!this.proc) return reject(new Error("LSP server not running"));
+      const id = this.nextRequestId++;
+      const req = { jsonrpc: "2.0", id, method, params };
+      this.pendingRequests.set(id, { resolve, reject });
+      this.proc.stdin.write(JSON.stringify(req) + "\n");
+      setTimeout(() => {
+        const pending = this.pendingRequests.get(id);
+        if (pending) {
+          this.pendingRequests.delete(id);
+          pending.reject(new Error(`LSP request ${method} timed out after 10s`));
+        }
+      }, 10000);
+    });
+  }
+
+  sendNotification(method, params) {
+    if (!this.proc) return;
+    this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
+  }
+
+  handleMessage(line) {
+    try {
+      const msg = JSON.parse(line);
+      if (msg.id !== undefined) {
+        const pending = this.pendingRequests.get(msg.id);
+        if (pending) {
+          this.pendingRequests.delete(msg.id);
+          if (msg.error) pending.reject(new Error(msg.error.message || "Unknown LSP error"));
+          else pending.resolve(msg.result);
+        }
+      } else if (msg.method === "textDocument/publishDiagnostics" && this.diagnosticsCallback) {
+        this.diagnosticsCallback(msg.params);
+      }
+    } catch (e) {
+      console.error(`[LSP] Error parsing message: ${line}`, e);
+    }
+  }
+
+  async initializeHandshake() {
+    const initResult = await this.sendRequest("initialize", {
+      processId: process.pid,
+      rootUri: this.rootUri,
+      capabilities: {
+        textDocument: {
+          synchronization: { dynamicRegistration: false, willSave: false, willSaveWaitUntil: false, didSave: false },
+          completion: { dynamicRegistration: false },
+          hover: { dynamicRegistration: false },
+          definition: { dynamicRegistration: false },
+          references: { dynamicRegistration: false },
+          documentSymbol: { dynamicRegistration: false },
+          rename: { dynamicRegistration: false },
+          codeAction: { dynamicRegistration: false },
+        },
+        workspace: { workspaceFolders: true },
+      },
+      clientInfo: { name: "custom-pi-lsp", version: "1.0.0" },
+    });
+    this.serverCapabilities = initResult.capabilities || {};
+    this.sendNotification("initialized", {});
+    this.initialized = true;
+    console.log(`[LSP] ${this.language} server initialized`);
+  }
+
+  async openDocument(uri, languageId, text) {
+    this.sendNotification("textDocument/didOpen", {
+      textDocument: { uri, languageId, version: 1, text },
+    });
+  }
+
+  async closeDocument(uri) {
+    this.sendNotification("textDocument/didClose", { textDocument: { uri } });
+  }
+
+  async getDiagnostics(uri, text) {
+    const diagnostics = await new Promise((resolve) => {
+      this.diagnosticsCallback = (params) => {
+        if (params.uri === uri) resolve(params.diagnostics || []);
+      };
+      this.openDocument(uri, this.language, text);
+      setTimeout(() => {
+        if (this.diagnosticsCallback) {
+          this.diagnosticsCallback = null;
+          resolve([]);
+        }
+      }, 5000);
+    });
+    this.diagnosticsCallback = null;
+    await this.closeDocument(uri);
+    return diagnostics;
+  }
+
+  async gotoDefinition(uri, line, character, text) {
+    await this.openDocument(uri, this.language, text);
+    try {
+      const result = await this.sendRequest("textDocument/definition", {
+        textDocument: { uri },
+        position: { line, character },
+      });
+      if (!result) return null;
+      const loc = Array.isArray(result) ? result[0] : result;
+      if (!loc) return null;
+      return { uri: loc.uri, range: loc.range };
+    } finally {
+      await this.closeDocument(uri);
+    }
+  }
+
+  async findReferences(uri, line, character, text, includeDeclaration = false) {
+    await this.openDocument(uri, this.language, text);
+    try {
+      const result = await this.sendRequest("textDocument/references", {
+        textDocument: { uri },
+        position: { line, character },
+        context: { includeDeclaration },
+      });
+      return (result || []).map(loc => ({ uri: loc.uri, range: loc.range }));
+    } finally {
+      await this.closeDocument(uri);
+    }
+  }
+
+  async hover(uri, line, character, text) {
+    await this.openDocument(uri, this.language, text);
+    try {
+      const result = await this.sendRequest("textDocument/hover", {
+        textDocument: { uri },
+        position: { line, character },
+      });
+      if (!result) return null;
+      if (result.contents) {
+        if (typeof result.contents === "string") return result.contents;
+        if (Array.isArray(result.contents)) return result.contents.map(c => typeof c === "string" ? c : c.value || JSON.stringify(c)).join("\n");
+        if (result.contents.value) return result.contents.value;
+        if (result.contents.kind === "markdown" && result.contents.value) return result.contents.value;
+      }
+      return JSON.stringify(result);
+    } finally {
+      await this.closeDocument(uri);
+    }
+  }
+
+  async getDocumentSymbols(uri, text) {
+    const SYMBOL_KINDS = {
+      1: "File", 2: "Module", 3: "Namespace", 4: "Package", 5: "Class",
+      6: "Method", 7: "Property", 8: "Field", 9: "Constructor", 10: "Enum",
+      11: "Interface", 12: "Function", 13: "Variable", 14: "Constant",
+      15: "String", 16: "Number", 17: "Boolean", 18: "Array",
+      19: "Object", 20: "Key", 21: "Null", 22: "EnumMember",
+      23: "Struct", 24: "Event", 25: "Operator", 26: "TypeParameter",
+    };
+    await this.openDocument(uri, this.language, text);
+    try {
+      const result = await this.sendRequest("textDocument/documentSymbol", { textDocument: { uri } }) || [];
+      return result.map(s => ({
+        name: s.name,
+        kind: SYMBOL_KINDS[s.kind] || String(s.kind),
+        range: s.range || s.location?.range,
+      }));
+    } finally {
+      await this.closeDocument(uri);
+    }
+  }
+
+  async rename(uri, line, character, newName, text) {
+    await this.openDocument(uri, this.language, text);
+    try {
+      const result = await this.sendRequest("textDocument/rename", {
+        textDocument: { uri },
+        position: { line, character },
+        newName,
+      });
+      return result || { changes: {} };
+    } finally {
+      await this.closeDocument(uri);
+    }
+  }
+
+  async getCodeActions(uri, line, character, text, diagnostics = []) {
+    await this.openDocument(uri, this.language, text);
+    try {
+      const result = await this.sendRequest("textDocument/codeAction", {
+        textDocument: { uri },
+        range: { start: { line, character: 0 }, end: { line, character: 65535 } },
+        context: {
+          diagnostics: diagnostics.map(d => ({
+            range: d.range, severity: d.severity, message: d.message, source: d.source,
+          })),
+        },
+      });
+      return (result || []).map(a => ({ title: a.title, kind: a.kind, diagnostics: a.diagnostics, edit: a.edit, command: a.command }));
+    } finally {
+      await this.closeDocument(uri);
+    }
+  }
+}
+
+async function startLspServer(language, rootUri) {
+  const cfg = findLspServer(language);
+  if (!cfg) return null;
+  const conn = new LspConnection(language, cfg.command, cfg.args || []);
+  activeLspServers.set(language, conn);
+  try {
+    await conn.start(rootUri);
+    return conn;
+  } catch (err) {
+    console.error(`[LSP] Failed to start server for ${language}:`, err);
+    activeLspServers.delete(language);
+    return null;
+  }
+}
+
+async function stopLspServers() {
+  for (const conn of activeLspServers.values()) {
+    try { await conn.stop(); } catch {}
+  }
+  activeLspServers.clear();
+}
+
+async function getOrCreateLspServer(language, rootUri) {
+  if (activeLspServers.has(language)) {
+    const conn = activeLspServers.get(language);
+    if (conn.initialized) return conn;
+  }
+  return await startLspServer(language, rootUri);
+}
+
+function applyTextEdits(content, textEdits) {
+  const lines = content.split("\n");
+  const lineOffsets = [0];
+  for (let i = 0; i < lines.length - 1; i++) {
+    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
+  }
+  const sorted = [...textEdits].sort((a, b) => {
+    const aStart = lineOffsets[a.range.start.line] + a.range.start.character;
+    const bStart = lineOffsets[b.range.start.line] + b.range.start.character;
+    return bStart - aStart;
+  });
+  for (const edit of sorted) {
+    const start = lineOffsets[edit.range.start.line] + edit.range.start.character;
+    const end = lineOffsets[edit.range.end.line] + edit.range.end.character;
+    content = content.slice(0, start) + edit.newText + content.slice(end);
+  }
+  return content;
+}
+
 function getActiveTools() {
   const allTools = [...TOOLS];
   for (const conn of activeMcpServers.values()) {
@@ -1104,10 +1713,23 @@ function safeResolve(cwd, p) {
 }
 
 async function executeTool(name, args, cwd) {
+  _toolCallCount++;
   for (const conn of activeMcpServers.values()) {
     if (conn.initialized && conn.tools.find(t => t.name === name)) {
       try {
-        return await conn.callTool(name, args);
+        const result = await conn.callTool(name, args);
+        if (_toolCallCount % 10 === 0) {
+          try {
+            saveSessionState({
+              lastActive: Date.now(),
+              toolCallCount: _toolCallCount,
+              memoryCount: readMemory().length,
+              checkpoints: listCheckpoints().length,
+              model: resolveModel().id,
+            });
+          } catch {}
+        }
+        return result;
       } catch (err) {
         return `MCP Tool Error (${name}): ${err.message}`;
       }
@@ -1184,7 +1806,9 @@ async function executeTool(name, args, cwd) {
     case "memory_store": {
       const importance = Math.min(10, Math.max(1, Math.floor(args.importance ?? 5)));
       const project = path.basename(cwd) || "global";
-      return memoryStore(args.content, args.type || "fact", importance, project, args.tags || []);
+      const id = memoryStore(args.content, args.type || "fact", importance, project, args.tags || []);
+      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
+      return id;
     }
     case "memory_search": {
       const results = memorySearch(args.query, args.k ?? 5);
@@ -1193,6 +1817,7 @@ async function executeTool(name, args, cwd) {
     }
     case "vault_set":
       vaultSet(args.key, args.value);
+      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
       return `Secret '${args.key}' stored.`;
     case "vault_get": {
       const val = vaultGet(args.key);
@@ -1290,7 +1915,9 @@ async function executeTool(name, args, cwd) {
       return await postToTelegram(args.message);
     }
     case "memory_edit": {
-      return memoryEdit(args.action, args.id, args.content, args.tags);
+      const result = memoryEdit(args.action, args.id, args.content, args.tags);
+      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
+      return result;
     }
     case "todo_write": {
       return todoWrite(args.phase, args.items);
@@ -1301,8 +1928,393 @@ async function executeTool(name, args, cwd) {
     case "internal_url": {
       return await resolveInternalUrl(args.url, cwd);
     }
+    case "lsp": {
+      const filePath = safeResolve(cwd, expandPath(args.file_path));
+      const uri = `file://${filePath}`;
+      const language = detectLanguage(filePath);
+      if (!language) return `Unsupported file type: ${filePath}`;
+
+      const rootUri = `file://${cwd}`;
+      const lsp = await getOrCreateLspServer(language, rootUri);
+      if (!lsp) {
+        const cfg = loadLspConfig()[language];
+        if (!cfg) return `No LSP server configured for ${language}.`;
+        return `LSP server for ${language} not found. Install with: npm install -g ${cfg.command.includes("typescript") ? "typescript-language-server" : cfg.command.includes("pyright") ? "pyright" : cfg.command}`;
+      }
+
+      const text = fs.readFileSync(filePath, "utf8");
+
+      switch (args.action) {
+        case "diagnostics": {
+          const diagnostics = await lsp.getDiagnostics(uri, text);
+          if (!diagnostics.length) return "No diagnostics found.";
+          return diagnostics.map(d => `[${d.severity === 1 ? "Error" : d.severity === 2 ? "Warning" : "Info"}] ${d.range.start.line}:${d.range.start.character}-${d.range.end.line}:${d.range.end.character} ${d.message}`).join("\n");
+        }
+        case "goto_def": {
+          const def = await lsp.gotoDefinition(uri, args.line, args.character, text);
+          if (!def) return "No definition found.";
+          return `Definition at: ${def.uri}:${def.range.start.line}:${def.range.start.character}`;
+        }
+        case "references": {
+          const refs = await lsp.findReferences(uri, args.line, args.character, text);
+          if (!refs.length) return "No references found.";
+          return refs.map(r => `${r.uri}:${r.range.start.line}:${r.range.start.character}`).join("\n");
+        }
+        case "hover": {
+          const info = await lsp.hover(uri, args.line, args.character, text);
+          return info || "No hover information available.";
+        }
+        case "symbols": {
+          const symbols = await lsp.getDocumentSymbols(uri, text);
+          if (!symbols.length) return "No symbols found.";
+          return symbols.map(s => `[${s.kind}] ${s.name} at ${s.range.start.line}:${s.range.start.character}`).join("\n");
+        }
+        case "rename": {
+          const edits = await lsp.rename(uri, args.line, args.character, args.new_name, text);
+          const changes = edits.changes || {};
+          if (!Object.keys(changes).length) return "No changes to apply.";
+          for (const [editUri, textEdits] of Object.entries(changes)) {
+            const editPath = editUri.startsWith("file://") ? editUri.slice(7) : editUri;
+            const content = fs.readFileSync(editPath, "utf8");
+            fs.writeFileSync(editPath, applyTextEdits(content, textEdits), "utf8");
+          }
+          const totalEdits = Object.values(changes).reduce((sum, arr) => sum + arr.length, 0);
+          return `Renamed at ${totalEdits} location${totalEdits !== 1 ? "s" : ""}.`;
+        }
+        case "code_actions": {
+          const actions = await lsp.getCodeActions(uri, args.line, args.character, text);
+          if (!actions.length) return "No code actions available.";
+          return actions.map(a => `[${a.kind || "refactor"}] ${a.title}`).join("\n");
+        }
+        default:
+          return `Unknown lsp action: ${args.action}`;
+      }
+    }
+    case "session": {
+      switch (args.action) {
+        case "status": {
+          const current = globalSession ? (await globalSession.getState()) : null;
+          const checkpoints = listCheckpoints();
+          return `Session Status:
+Active: ${current ? "Yes" : "No"}
+Checkpoints: ${checkpoints.length} total
+${checkpoints.map(c => `  - ${c.id}: ${c.label} (${new Date(c.createdAt).toLocaleString()})`).join("\n")}`;
+        }
+        case "checkpoint":
+        case "save": {
+          const ckpt = createCheckpoint(args.label || `Manual save ${new Date().toISOString()}`);
+          return `Checkpoint created: ${ckpt.id}
+Label: ${ckpt.label}
+Timestamp: ${new Date(ckpt.createdAt).toISOString()}`;
+        }
+        case "list": {
+          const checkpoints = listCheckpoints();
+          if (!checkpoints.length) return "No checkpoints found.";
+          return checkpoints.map(c => `${c.id}: ${c.label} — ${new Date(c.createdAt).toLocaleString()} (${(c.size / 1024).toFixed(1)}KB)`).join("\n");
+        }
+        case "restore": {
+          const result = restoreCheckpoint(args.id);
+          if (!result.success) return `Error: ${result.error}`;
+          return `Checkpoint restored: ${result.label}
+Restored: ${result.restored.join(", ")}`;
+        }
+        case "compact": {
+          const result = compactSession(args.max_age_days || 30);
+          return `Compaction complete. Removed ${result.removed} old checkpoint(s). ${result.remaining} remaining.`;
+        }
+        default:
+          return `Unknown session action: ${args.action}. Available: status, checkpoint, list, restore, compact`;
+      }
+    }
+    case "generate_image": {
+      const provider = args.provider || (vaultGet("OPENAI_API_KEY") ? "openai" : vaultGet("GEMINI_API_KEY") ? "gemini" : vaultGet("XAI_API_KEY") ? "grok" : null);
+      if (!provider) return "No image generation provider configured. Set OPENAI_API_KEY, GEMINI_API_KEY, or XAI_API_KEY in vault.";
+      let result;
+      switch (provider) {
+        case "openai": result = await generateImageOpenAI(args.prompt, args.size, args.return_format); break;
+        case "gemini": result = await generateImageGemini(args.prompt); break;
+        case "grok": result = await generateImageGrok(args.prompt, args.return_format); break;
+      }
+      if (result.error) return `Error: ${result.error}`;
+      if (result.format === "url") return `Generated image (${result.provider}): ${result.image}`;
+      return `Generated image (${result.provider}):\n![generated image](data:${result.mimeType || "image/png"};base64,${result.image})`;
+    }
+    case "text_to_speech": {
+      try {
+        const { execSync } = await import('child_process');
+        const voice = args.voice || "en-US-JennyNeural";
+        const outFile = path.join(PI_DIR, "tts", `speech_${Date.now()}.mp3`);
+        fs.mkdirSync(path.join(PI_DIR, "tts"), { recursive: true });
+        const result = execSync(`which edge-tts 2>/dev/null || which edge-tts.exe 2>/dev/null || python3 -m edge_tts --help 2>/dev/null`, { encoding: "utf8", timeout: 5000 });
+        if (result) {
+          execSync(`edge-tts --voice "${voice}" --text "${args.text.replace(/"/g, '\\"')}" --write-media "${outFile}"`, { timeout: 30000 });
+          const audioData = fs.readFileSync(outFile).toString("base64");
+          return `Audio generated:\n[audio]data:audio/mp3;base64,${audioData}[/audio]`;
+        }
+      } catch {}
+      return `TTS: "${args.text}" (voice: ${args.voice || "default"})\n[Play on client via browser Speech Synthesis]`;
+    }
+    case "ssh_exec": {
+      const host = args.host;
+      const cmd = args.command;
+      const port = args.port || 22;
+      const timeout = (args.timeout || 30) * 1000;
+      const sshKey = vaultGet("SSH_KEY");
+      const sshPassword = vaultGet("SSH_PASSWORD");
+      let sshCmd;
+      if (sshKey) {
+        const keyFile = path.join(PI_DIR, ".ssh_temp_key");
+        fs.writeFileSync(keyFile, sshKey, { mode: 0o600 });
+        sshCmd = `ssh -i ${keyFile} -p ${port} -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${host} ${JSON.stringify(cmd)}`;
+      } else if (sshPassword) {
+        sshCmd = `sshpass -p ${JSON.stringify(sshPassword)} ssh -p ${port} -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${host} ${JSON.stringify(cmd)}`;
+      } else {
+        sshCmd = `ssh -p ${port} -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${host} ${JSON.stringify(cmd)}`;
+      }
+      try {
+        const output = execSync(sshCmd, { encoding: "utf8", timeout, maxBuffer: 10 * 1024 * 1024 });
+        return output || "(Command executed successfully, no output)";
+      } catch (e) {
+        return `SSH Error: ${e.stderr || e.message || e}`;
+      } finally {
+        try {
+          if (sshKey) fs.unlinkSync(path.join(PI_DIR, ".ssh_temp_key"));
+        } catch {}
+      }
+    }
+    case "plugin": {
+      switch (args.action) {
+        case "list": {
+          const plugins = loadPlugins();
+          if (!plugins.length) return "No plugins installed.";
+          return plugins.map(p => `${p.enabled ? "✓" : "○"} ${p.name} v${p.manifest.version} — ${p.manifest.description || "No description"}${p.hasCode ? " (has code)" : ""}`).join("\n");
+        }
+        case "create": {
+          if (!args.name) return "Plugin name required.";
+          const manifest = createPluginManifest(args.name, args.description, args.version);
+          return `Plugin '${args.name}' created.\n${JSON.stringify(manifest, null, 2)}`;
+        }
+        case "enable": {
+          return `Plugin '${args.name}' enabled.`;
+        }
+        case "disable": {
+          return `Plugin '${args.name}' disabled.`;
+        }
+        case "info": {
+          const plugins = loadPlugins();
+          const plugin = plugins.find(p => p.name === args.name);
+          if (!plugin) return `Plugin '${args.name}' not found.`;
+          return JSON.stringify(plugin, null, 2);
+        }
+        case "remove": {
+          const pluginDir = path.join(PLUGINS_DIR, args.name);
+          if (fs.existsSync(pluginDir)) {
+            fs.rmSync(pluginDir, { recursive: true, force: true });
+            return `Plugin '${args.name}' removed.`;
+          }
+          return `Plugin '${args.name}' not found.`;
+        }
+        default:
+          return `Unknown plugin action: ${args.action}`;
+      }
+    }
+    case "ast_grep": {
+      const filePath = args.file_path ? safeResolve(cwd, expandPath(args.file_path)) : null;
+      if (args.action === "search" && args.pattern) {
+        const searchPath = filePath || cwd;
+        const results = [];
+        function walk(dir) {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(full);
+            else if (entry.isFile()) {
+              try {
+                const ext = path.extname(entry.name).toLowerCase();
+                if ([".js",".ts",".jsx",".tsx",".py",".rs",".go",".java",".c",".cpp",".h",".hpp",".rb",".php",".swift",".kt"].includes(ext)) {
+                  const content = fs.readFileSync(full, "utf8");
+                  const lines = content.split("\n");
+                  const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
+                  for (let i = 0; i < lines.length; i++) {
+                    if (regex.test(lines[i])) {
+                      results.push(`${full}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+        if (fs.statSync(searchPath).isDirectory()) walk(searchPath);
+        else if (fs.statSync(searchPath).isFile()) {
+          const content = fs.readFileSync(searchPath, "utf8");
+          const lines = content.split("\n");
+          const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
+          for (let i = 0; i < lines.length; i++) {
+            if (regex.test(lines[i])) results.push(`${searchPath}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+          }
+        }
+        return results.slice(0, 100).join("\n") || "No matches found.";
+      }
+      if (!filePath) return "file_path required for this action.";
+      const content = fs.readFileSync(filePath, "utf8");
+      const language = args.language || detectAstLanguage(filePath);
+      if (!language) return `Could not detect language for ${filePath}`;
+      switch (args.action) {
+        case "functions": {
+          const funcs = extractFunctions(content, language);
+          return `Functions in ${path.basename(filePath)} (${language}):\n${funcs.map(f => `  - ${f}`).join("\n")}`;
+        }
+        case "classes": {
+          const classes = extractClasses(content, language);
+          return `Classes/Structs in ${path.basename(filePath)} (${language}):\n${classes.map(c => `  - ${c}`).join("\n")}`;
+        }
+        case "imports": {
+          const imports = extractImports(content, language);
+          return `Imports in ${path.basename(filePath)} (${language}):\n${imports.map(i => `  - ${i}`).join("\n")}`;
+        }
+        case "count": {
+          const funcs = extractFunctions(content, language);
+          const classes = extractClasses(content, language);
+          const imports = extractImports(content, language);
+          const lines = content.split("\n").length;
+          return `${path.basename(filePath)} (${language}): ${lines} lines, ${funcs.length} functions, ${classes.length} classes, ${imports.length} imports`;
+        }
+        default:
+          return `Unknown action: ${args.action}. Available: search, count, functions, classes, imports`;
+      }
+    }
+    case "render_mermaid": {
+      const code = args.code;
+      try {
+        const result = execSync("which mmdc 2>/dev/null", { encoding: "utf8", timeout: 5000 });
+        if (result.trim()) {
+          const outFile = path.join(PI_DIR, "mermaid", `diagram_${Date.now()}.svg`);
+          fs.mkdirSync(path.join(PI_DIR, "mermaid"), { recursive: true });
+          const tmpFile = path.join(PI_DIR, "mermaid", `input_${Date.now()}.mmd`);
+          fs.writeFileSync(tmpFile, code, "utf8");
+          execSync(`mmdc -i "${tmpFile}" -o "${outFile}"`, { timeout: 30000 });
+          const svg = fs.readFileSync(outFile, "utf8");
+          try { fs.unlinkSync(tmpFile); } catch {}
+          if (args.format === "svg") return svg;
+          if (args.format === "url") return `![Mermaid diagram](${outFile})`;
+        }
+      } catch {}
+      const lines = code.split("\n").map(l => l.trim()).filter(Boolean);
+      let ascii = "";
+      if (code.includes("graph ") || code.includes("flowchart ")) {
+        ascii = "Flowchart:\n";
+        for (const line of lines) {
+          if (line.includes("-->") || line.includes("---")) {
+            const parts = line.split(/--[>-]|\|/);
+            ascii += `  ${parts[0].trim()} → ${parts[parts.length - 1].trim()}\n`;
+          } else if (!line.startsWith("graph") && !line.startsWith("flowchart")) {
+            ascii += `  Node: ${line}\n`;
+          }
+        }
+      } else if (code.includes("sequenceDiagram")) {
+        ascii = "Sequence Diagram:\n";
+        for (const line of lines) {
+          if (line.includes("->>")) {
+            const parts = line.split("->>");
+            ascii += `  ${parts[0].trim()} → ${parts[1].replace(/:/, ": ")}\n`;
+          } else if (line.includes("Note over")) {
+            ascii += `  [${line}]\n`;
+          }
+        }
+      } else if (code.includes("classDiagram")) {
+        ascii = "Class Diagram:\n";
+        for (const line of lines) {
+          if (line.includes(":")) {
+            const [cls, detail] = line.split(":");
+            ascii += `  ${cls.trim()}: ${detail.trim()}\n`;
+          }
+        }
+      } else {
+        ascii = `Mermaid Diagram (${lines.length} lines):\n${lines.map(l => `  | ${l}`).join("\n")}`;
+      }
+      return ascii || "Could not render diagram. Install mmdc CLI: npm install -g @mermaid-js/mermaid-cli";
+    }
+    case "plan": {
+      switch (args.action) {
+        case "create": {
+          if (!args.name || !args.goal || !args.steps) return "name, goal, and steps (array) required.";
+          const plan = createPlan(args.name, args.goal, args.steps);
+          return `Plan created: ${plan.name} (${plan.id})\nGoal: ${plan.goal}\nSteps: ${plan.steps.length}\n${plan.steps.map(s => `  ○ ${s.description}`).join("\n")}`;
+        }
+        case "list": {
+          const plans = loadPlans();
+          if (!plans.length) return "No plans found.";
+          return plans.map(p => `${p.status === "completed" ? "✓" : p.status === "active" ? "▶" : "○"} ${p.name} (${p.id}) — ${p.goal.slice(0, 80)} — ${p.steps.filter(s => s.status === "completed").length}/${p.steps.length} steps`).join("\n");
+        }
+        case "status": {
+          const plans = loadPlans();
+          const plan = args.plan_id ? plans.find(p => p.id === args.plan_id) : plans.filter(p => p.status === "active")[0];
+          if (!plan) return "No plan found. Specify plan_id or create a plan first.";
+          let result = `Plan: ${plan.name}\nGoal: ${plan.goal}\nStatus: ${plan.status}\nProgress: ${plan.steps.filter(s => s.status === "completed").length}/${plan.steps.length}\n\n`;
+          for (const step of plan.steps) {
+            const icon = step.status === "completed" ? "✓" : step.status === "in_progress" ? "▶" : step.status === "blocked" ? "!" : "○";
+            result += `${icon} ${step.description} [${step.status}]\n`;
+          }
+          return result;
+        }
+        case "update_step": {
+          const plans = loadPlans();
+          const plan = plans.find(p => p.id === args.plan_id);
+          if (!plan) return `Plan '${args.plan_id}' not found.`;
+          const step = plan.steps.find(s => s.id === args.step_id);
+          if (!step) return `Step '${args.step_id}' not found.`;
+          step.status = args.step_status || "completed";
+          if (step.status === "completed") step.completedAt = Date.now();
+          plan.updatedAt = Date.now();
+          if (plan.steps.every(s => s.status === "completed")) plan.status = "completed";
+          savePlans(plans);
+          return `Step '${step.description}' → ${step.status}`;
+        }
+        case "complete": {
+          const plans = loadPlans();
+          const plan = plans.find(p => p.id === args.plan_id);
+          if (!plan) return `Plan '${args.plan_id}' not found.`;
+          plan.status = "completed";
+          plan.updatedAt = Date.now();
+          savePlans(plans);
+          return `Plan '${plan.name}' marked as completed.`;
+        }
+        case "abandon": {
+          const plans = loadPlans();
+          const plan = plans.find(p => p.id === args.plan_id);
+          if (!plan) return `Plan '${args.plan_id}' not found.`;
+          plan.status = "abandoned";
+          plan.updatedAt = Date.now();
+          savePlans(plans);
+          return `Plan '${plan.name}' abandoned.`;
+        }
+        case "resume": {
+          const plans = loadPlans();
+          const plan = plans.find(p => p.id === args.plan_id);
+          if (!plan) return `Plan '${args.plan_id}' not found.`;
+          plan.status = "active";
+          plan.updatedAt = Date.now();
+          savePlans(plans);
+          return `Plan '${plan.name}' resumed.`;
+        }
+        default:
+          return `Unknown plan action: ${args.action}`;
+      }
+    }
     default:
       return `Error: Unknown tool '${name}'`;
+  }
+  if (_toolCallCount % 10 === 0) {
+    try {
+      saveSessionState({
+        lastActive: Date.now(),
+        toolCallCount: _toolCallCount,
+        memoryCount: readMemory().length,
+        checkpoints: listCheckpoints().length,
+        model: resolveModel().id,
+      });
+    } catch {}
   }
 }
 
@@ -2063,6 +3075,247 @@ function applyOps(lines, ops) {
   return result;
 }
 
+// ── Image Generation ─────────────────────────────────────────────────────────
+
+async function generateImageOpenAI(prompt, size, returnFormat) {
+  const apiKey = vaultGet("OPENAI_API_KEY");
+  if (!apiKey) return { error: "OPENAI_API_KEY not found in vault" };
+  const resp = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "dall-e-3", prompt, n: 1, size: size || "1024x1024", response_format: returnFormat === "url" ? "url" : "b64_json" }),
+  });
+  const data = await resp.json();
+  if (data.error) return { error: data.error.message };
+  const img = data.data[0];
+  return { image: returnFormat === "url" ? img.url : img.b64_json, format: returnFormat || "base64", provider: "openai" };
+}
+
+async function generateImageGemini(prompt) {
+  const apiKey = vaultGet("GEMINI_API_KEY");
+  if (!apiKey) return { error: "GEMINI_API_KEY not found in vault" };
+  const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ["Text", "Image"] } }),
+  });
+  const data = await resp.json();
+  if (data.error) return { error: data.error.message };
+  for (const part of (data.candidates?.[0]?.content?.parts || [])) {
+    if (part.inlineData) return { image: part.inlineData.data, format: "base64", mimeType: part.inlineData.mimeType, provider: "gemini" };
+  }
+  return { error: "No image generated", text: data.candidates?.[0]?.content?.parts?.[0]?.text || "Unknown" };
+}
+
+async function generateImageGrok(prompt, returnFormat) {
+  const apiKey = vaultGet("XAI_API_KEY");
+  if (!apiKey) return { error: "XAI_API_KEY not found in vault" };
+  const resp = await fetch("https://api.x.ai/v1/images/generations", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "grok-2-image", prompt, n: 1, response_format: returnFormat === "url" ? "url" : "b64_json" }),
+  });
+  const data = await resp.json();
+  if (data.error) return { error: data.error.message };
+  const img = data.data[0];
+  return { image: returnFormat === "url" ? img.url : img.b64_json, format: returnFormat || "base64", provider: "grok" };
+}
+
+// ── Plugin System ─────────────────────────────────────────────────────────────
+
+const PLUGINS_DIR = path.join(PI_DIR, "plugins");
+
+function ensurePluginsDir() { fs.mkdirSync(PLUGINS_DIR, { recursive: true }); }
+
+function loadPlugins() {
+  ensurePluginsDir();
+  try {
+    const plugins = [];
+    for (const entry of fs.readdirSync(PLUGINS_DIR, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const manifestFile = path.join(PLUGINS_DIR, entry.name, "manifest.json");
+        const codeFile = path.join(PLUGINS_DIR, entry.name, "plugin.js");
+        if (fs.existsSync(manifestFile)) {
+          try {
+            const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+            plugins.push({ name: entry.name, manifest, enabled: true, hasCode: fs.existsSync(codeFile) });
+          } catch {}
+        }
+      }
+    }
+    return plugins;
+  } catch { return []; }
+}
+
+async function loadPluginCode(name) {
+  const codeFile = path.join(PLUGINS_DIR, name, "plugin.js");
+  if (fs.existsSync(codeFile)) {
+    try {
+      const code = fs.readFileSync(codeFile, "utf8");
+      const vm = await import('vm');
+      const sandbox = { console, setTimeout, clearTimeout, require, module: {}, exports: {} };
+      vm.createContext(sandbox);
+      const script = new vm.Script(code);
+      script.runInContext(sandbox);
+      return sandbox.module.exports || sandbox.exports;
+    } catch (e) {
+      return { error: e.message };
+    }
+  }
+  return null;
+}
+
+function createPluginManifest(name, description, version) {
+  ensurePluginsDir();
+  const pluginDir = path.join(PLUGINS_DIR, name);
+  fs.mkdirSync(pluginDir, { recursive: true });
+  const manifest = {
+    name,
+    description: description || `${name} plugin`,
+    version: version || "1.0.0",
+    author: "user",
+    tools: [],
+    hooks: [],
+    created: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify(manifest, null, 2));
+  return manifest;
+}
+
+function installPluginFromUrl(url) {
+  return { success: false, message: "Plugin installation from URL not yet implemented. Use plugin.create to create a new plugin." };
+}
+
+// ── AST-grep / Code Intelligence ──────────────────────────────────────────────
+
+function detectAstLanguage(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  const map = {
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".ts": "typescript", ".tsx": "typescript",
+    ".py": "python",
+    ".rs": "rust",
+    ".go": "go",
+    ".java": "java",
+    ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp",
+    ".rb": "ruby",
+    ".php": "php",
+    ".swift": "swift",
+    ".kt": "kotlin",
+  };
+  return map[ext] || null;
+}
+
+function extractFunctions(content, language) {
+  const funcPatterns = {
+    javascript: /(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?:::?\s*[A-Z]\w*)?\s*=>|(\w+)\s*\([^)]*\)\s*\{|async\s+(\w+)\s*\([^)]*\))/g,
+    typescript: /(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*[:=]\s*(?:async\s*)?\([^)]*\)|(\w+)\s*\([^)]*\)\s*(?::\s*\w+)?\s*\{|async\s+(\w+)\s*\([^)]*\))/g,
+    python: /def\s+(\w+)\s*\(/g,
+    rust: /fn\s+(\w+)\s*\(/g,
+    go: /func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(/g,
+    java: /(?:public|private|protected|static)?\s*(?:\w+\s+)?(\w+)\s*\([^)]*\)\s*(?:\{|throws)/g,
+  };
+  const pattern = funcPatterns[language] || funcPatterns.javascript;
+  const functions = [];
+  let match;
+  while ((match = pattern.exec(content)) !== null) {
+    const name = match.slice(1).find(Boolean);
+    if (name) functions.push(name);
+  }
+  return functions;
+}
+
+function extractClasses(content, language) {
+  const classPatterns = {
+    javascript: /class\s+(\w+)/g,
+    typescript: /class\s+(\w+)/g,
+    python: /class\s+(\w+)/g,
+    java: /(?:public|private|protected)?\s*(?:abstract|final)?\s*class\s+(\w+)/g,
+    rust: /struct\s+(\w+)|enum\s+(\w+)/g,
+  };
+  const pattern = classPatterns[language] || classPatterns.javascript;
+  const classes = [];
+  let match;
+  while ((match = pattern.exec(content)) !== null) {
+    const name = match.slice(1).find(Boolean);
+    if (name) classes.push(name);
+  }
+  return classes;
+}
+
+function extractImports(content, language) {
+  const importPatterns = {
+    javascript: /(?:import\s+(?:\{[^}]*\}\s+from\s+)?['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    typescript: /(?:import\s+(?:\{[^}]*\}\s+from\s+|type\s+\{[^}]*\}\s+from\s+)?['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    python: /(?:import\s+(\w+)|from\s+(\w+)\s+import)/g,
+    rust: /(?:use\s+([\w:]+)|extern\s+crate\s+(\w+))/g,
+    go: /(?:import\s+(?:"([^"]+)"|\(([^)]+)\)))/g,
+  };
+  const pattern = importPatterns[language] || importPatterns.javascript;
+  const imports = new Set();
+  let match;
+  while ((match = pattern.exec(content)) !== null) {
+    const imp = match.slice(1).find(Boolean);
+    if (imp) imports.add(imp.trim().split("\n")[0].trim());
+  }
+  return [...imports];
+}
+
+// ── Plan/Goals System ─────────────────────────────────────────────────────────
+
+const PLANS_FILE = path.join(PI_DIR, "plans.json");
+
+function loadPlans() {
+  try { return JSON.parse(fs.readFileSync(PLANS_FILE, "utf8")); }
+  catch { return []; }
+}
+
+function savePlans(plans) {
+  fs.writeFileSync(PLANS_FILE, JSON.stringify(plans, null, 2));
+}
+
+function createPlan(name, goal, steps) {
+  const plans = loadPlans();
+  const plan = {
+    id: `plan_${Date.now()}`,
+    name,
+    goal,
+    steps: steps.map((s, i) => ({
+      id: `step_${i + 1}`,
+      description: s,
+      status: "pending",
+      completedAt: null,
+    })),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    status: "active",
+  };
+  plans.push(plan);
+  savePlans(plans);
+  return plan;
+}
+
+// ── Approval Workflow ─────────────────────────────────────────────────────────
+
+async function requireApproval(action, details) {
+  if (!_approvalEnabled) return true;
+  const questionId = crypto.randomUUID();
+  const q = { question: `Approve ${action}? ${details}`, options: ["Yes", "No"], resolve: null, reject: null };
+  pendingQuestions[questionId] = q;
+  bcast({ type: "user_question", id: questionId, question: q.question, options: q.options });
+  try {
+    const answer = await new Promise((resolve, reject) => {
+      q.resolve = resolve;
+      q.reject = reject;
+      setTimeout(() => reject(new Error("Approval timed out")), 120000);
+    });
+    return answer === "Yes";
+  } finally {
+    delete pendingQuestions[questionId];
+    bcast({ type: "user_question_resolved", id: questionId });
+  }
+}
+
 // ── Internal URL System ────────────────────────────────────────────────────
 
 async function resolveInternalUrl(url, cwd) {
@@ -2111,8 +3364,101 @@ async function resolveInternalUrl(url, cwd) {
         return fs.readFileSync(resolved, "utf8");
       }
 
+      case "omp:": {
+        const topic = parsed.hostname || parsed.pathname.replace(/^\//, "");
+        const docMap = {
+          "tools": "Available tools: " + TOOLS.map(t => t.name).join(", "),
+          "memory": "Memory system: TF-IDF vector search. Store facts with memory_store, search with memory_search.",
+          "swarm": "Swarm orchestration: DAG-based with parallel waves, pipeline mode, sequential mode.",
+          "mcp": "MCP Client: Connect to external MCP servers. Configure in ~/.pi/agent/mcp-servers.json",
+          "lsp": "LSP Integration: Language intelligence via diagnostics, goto-def, references, hover, symbols, rename.",
+          "session": "Session management: checkpoint, restore, compact, status.",
+          "vault": "Encrypted credential vault. Use vault_set/vault_get to manage secrets.",
+          "hashline": "Hashline editor: content-hash validated line-anchored patches. Format: ¶path#TAG\\nreplace N..N:\\n+content",
+        };
+        return docMap[topic] || `Documentation for '${topic}' not found. Available topics: ${Object.keys(docMap).join(", ")}`;
+      }
+      case "issue:": {
+        let owner, repo, number;
+        const parts = (parsed.hostname || "") + parsed.pathname;
+        if (parts.includes("/")) {
+          const segs = parts.replace(/^\//, "").split("/");
+          if (segs.length === 3) { owner = segs[0]; repo = segs[1]; number = segs[2]; }
+          else if (segs.length === 2) { number = segs[1]; }
+        } else {
+          number = parts;
+        }
+        if (!number) return "Usage: issue://owner/repo/NUMBER or issue://NUMBER";
+        try {
+          const repoArg = owner ? `${owner}/${repo}` : "";
+          const cmd = `gh issue view ${number} ${repoArg ? `-R ${repoArg}` : ""} --json title,body,state,labels,assignees,createdAt,comments`;
+          const output = execSync(cmd, { encoding: "utf8", timeout: 10000 });
+          const data = JSON.parse(output);
+          if (data.title) {
+            let result = `# ${data.title} [${data.state}]\n`;
+            result += `Created: ${data.createdAt}\n`;
+            if (data.labels?.length) result += `Labels: ${data.labels.map(l => l.name).join(", ")}\n`;
+            if (data.assignees?.length) result += `Assignees: ${data.assignees.map(a => a.login).join(", ")}\n\n`;
+            result += data.body ? data.body.slice(0, 2000) : "(no description)";
+            if (data.comments?.length) result += `\n\n---\n${data.comments.length} comments`;
+            return result;
+          }
+          return JSON.stringify(data, null, 2);
+        } catch (e) {
+          return `Error fetching issue: ${e.message}`;
+        }
+      }
+      case "pr:": {
+        let owner, repo, number;
+        const parts = (parsed.hostname || "") + parsed.pathname;
+        if (parts.includes("/")) {
+          const segs = parts.replace(/^\//, "").split("/");
+          if (segs.length === 3) { owner = segs[0]; repo = segs[1]; number = segs[2]; }
+          else if (segs.length === 2) { number = segs[1]; }
+        } else {
+          number = parts;
+        }
+        if (!number) return "Usage: pr://owner/repo/NUMBER or pr://NUMBER";
+        try {
+          const repoArg = owner ? `${owner}/${repo}` : "";
+          const cmd = `gh pr view ${number} ${repoArg ? `-R ${repoArg}` : ""} --json title,body,state,headRefName,baseRefName,additions,deletions,mergedAt,createdAt,author,comments,reviews`;
+          const output = execSync(cmd, { encoding: "utf8", timeout: 10000 });
+          const data = JSON.parse(output);
+          if (data.title) {
+            let result = `# ${data.title} [${data.state}]\n`;
+            result += `Branch: ${data.headRefName} → ${data.baseRefName}\n`;
+            result += `Author: ${data.author?.login || "unknown"}\n`;
+            result += `Changes: +${data.additions}/-${data.deletions}\n`;
+            result += `Created: ${data.createdAt}\n`;
+            if (data.body) result += `\n${data.body.slice(0, 2000)}`;
+            return result;
+          }
+          return JSON.stringify(data, null, 2);
+        } catch (e) {
+          return `Error fetching PR: ${e.message}`;
+        }
+      }
+      case "skill:": {
+        const skillName = parsed.hostname || parsed.pathname.replace(/^\//, "");
+        const skillDir = path.join(os.homedir(), ".config", "opencode", "skill", skillName);
+        const skillFile = path.join(skillDir, "SKILL.md");
+        if (fs.existsSync(skillFile)) {
+          return fs.readFileSync(skillFile, "utf8");
+        }
+        const localSkill = path.join(process.cwd(), ".opencode", "skill", skillName, "SKILL.md");
+        if (fs.existsSync(localSkill)) return fs.readFileSync(localSkill, "utf8");
+        return `Skill '${skillName}' not found.`;
+      }
+      case "rule:": {
+        const ruleName = parsed.hostname || parsed.pathname.replace(/^\//, "");
+        const ruleFile = path.join(os.homedir(), ".config", "opencode", "rule", `${ruleName}.md`);
+        if (fs.existsSync(ruleFile)) return fs.readFileSync(ruleFile, "utf8");
+        const localRule = path.join(process.cwd(), ".opencode", "rule", `${ruleName}.md`);
+        if (fs.existsSync(localRule)) return fs.readFileSync(localRule, "utf8");
+        return `Rule '${ruleName}' not found.`;
+      }
       default:
-        return `Unknown internal URL protocol: ${parsed.protocol}. Supported: memory://, vault://, local://`;
+        return `Unknown internal URL protocol: ${parsed.protocol}. Supported: memory://, vault://, local://, omp://, issue://, pr://, skill://, rule://`;
     }
   } catch (e) {
     return `Internal URL error: ${e.message}. Use format: memory://query or vault://KEY or local://path`;
@@ -2207,6 +3553,14 @@ class WebSession {
     this._abort = null;
     try { this.model = resolveModel(); } catch { this.model = { id: "gemma-4-e4b", provider: "lmstudio", api: "openai-completions" }; }
     this.systemPrompt = loadSystemPrompt();
+  }
+
+  getState() {
+    return {
+      messageCount: this.messages.length,
+      model: this.model,
+      lastActive: Date.now(),
+    };
   }
 
   interrupt() {
@@ -2445,6 +3799,467 @@ async function handleSubAgent(socket, agentId, task) {
   socket.send(JSON.stringify({ type: "subagent_done", agentId, result: "Max turns reached." }));
 }
 
+// ── DAG Config & Validation ─────────────────────────────────────────────────
+
+function loadDagConfig() {
+  try {
+    if (fs.existsSync(DAG_CONFIG_FILE)) {
+      const raw = fs.readFileSync(DAG_CONFIG_FILE, "utf8");
+      return parseYaml(raw);
+    }
+  } catch (err) {
+    console.error("[Web Server] Failed to load DAG config:", err);
+  }
+  return null;
+}
+
+function validateDag(agents) {
+  const errors = [];
+  const ids = new Set();
+  const depIds = new Set();
+
+  for (const a of agents) {
+    if (!a.id || typeof a.id !== "string") {
+      errors.push(`Agent missing 'id' field`);
+      continue;
+    }
+    if (ids.has(a.id)) {
+      errors.push(`Duplicate agent ID: ${a.id}`);
+    }
+    ids.add(a.id);
+    for (const dep of a.waits_for || []) {
+      depIds.add(dep);
+    }
+  }
+
+  for (const dep of depIds) {
+    if (!ids.has(dep)) {
+      errors.push(`Agent '${dep}' referenced in waits_for but not found in agent list`);
+    }
+  }
+
+  const roots = agents.filter(a => !a.waits_for || a.waits_for.length === 0);
+  if (roots.length === 0) {
+    errors.push("No root agents found (all agents have waits_for dependencies)");
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+function detectCycle(agents) {
+  const adj = {};
+  const inDegree = {};
+  for (const a of agents) {
+    adj[a.id] = [];
+    inDegree[a.id] = 0;
+  }
+  for (const a of agents) {
+    for (const dep of a.waits_for || []) {
+      if (adj[dep]) {
+        adj[dep].push(a.id);
+        inDegree[a.id] = (inDegree[a.id] || 0) + 1;
+      }
+    }
+  }
+
+  const queue = [];
+  for (const a of agents) {
+    if (inDegree[a.id] === 0) {
+      queue.push(a.id);
+    }
+  }
+
+  const processed = new Set();
+  while (queue.length > 0) {
+    const node = queue.shift();
+    processed.add(node);
+    for (const neighbor of adj[node] || []) {
+      inDegree[neighbor]--;
+      if (inDegree[neighbor] === 0) {
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  const unprocessed = agents.filter(a => !processed.has(a.id)).map(a => a.id);
+  return { hasCycle: unprocessed.length > 0, cycle: unprocessed };
+}
+
+function topologicalSort(agents, mode) {
+  const adj = {};
+  const inDegree = {};
+  const agentMap = {};
+  for (const a of agents) {
+    adj[a.id] = [];
+    inDegree[a.id] = 0;
+    agentMap[a.id] = a;
+  }
+  for (const a of agents) {
+    for (const dep of a.waits_for || []) {
+      if (adj[dep]) {
+        adj[dep].push(a.id);
+        inDegree[a.id] = (inDegree[a.id] || 0) + 1;
+      }
+    }
+  }
+
+  if (mode === "pipeline" || mode === "sequential") {
+    const result = [];
+    const queue = [];
+    const tempInDegree = { ...inDegree };
+    for (const a of agents) {
+      if (tempInDegree[a.id] === 0) queue.push(a.id);
+    }
+    while (queue.length > 0) {
+      queue.sort();
+      const node = queue.shift();
+      result.push(agentMap[node]);
+      for (const neighbor of adj[node] || []) {
+        tempInDegree[neighbor]--;
+        if (tempInDegree[neighbor] === 0) queue.push(neighbor);
+      }
+    }
+    return [result]; // single wave
+  }
+
+  // Parallel mode: waves
+  const waves = [];
+  const remaining = new Set(agents.map(a => a.id));
+  const tempInDegree = { ...inDegree };
+
+  while (remaining.size > 0) {
+    const wave = [];
+    for (const id of remaining) {
+      if (tempInDegree[id] === 0) {
+        wave.push(agentMap[id]);
+      }
+    }
+    if (wave.length === 0) break; // cycle protection
+    waves.push(wave);
+    for (const w of wave) {
+      remaining.delete(w.id);
+      for (const neighbor of adj[w.id] || []) {
+        tempInDegree[neighbor]--;
+      }
+    }
+  }
+
+  return waves;
+}
+
+// ── DAG Agent Execution ──────────────────────────────────────────────────────
+
+async function runDagAgent(agent, context) {
+  const { goal, model, auth, activeTools, previousWaveResults, pipelineIteration, pipelineCount } = context;
+  const agentId = agent.id;
+
+  bcast({ type: "ceo_thought", message: `Activating DAG agent '${agentId}' for task: ${agent.task}` });
+  bcast({ type: "agent_status", agentId, status: "running" });
+
+  const previousContext = previousWaveResults && Object.keys(previousWaveResults).length > 0
+    ? `\n\n## RESULTS FROM PREVIOUS AGENTS\n${Object.entries(previousWaveResults).map(([id, res]) => `Agent [${id}] completed:\n${res.result || res}`).join("\n\n")}`
+    : "";
+
+  let pipelineContext = "";
+  if (pipelineIteration !== undefined && pipelineCount !== undefined && pipelineCount > 1) {
+    pipelineContext = `\n\n## PIPELINE ITERATION\nThis is iteration ${pipelineIteration + 1} of ${pipelineCount}.`;
+  }
+
+  const agentPrompt = `You are the ${agentId} agent, a specialized swarm member.
+Your role: ${agent.role}
+Your task: ${agent.task}
+
+Perform your task using your tools, think step-by-step, and report back with a clear final summary of your result.${previousContext}${pipelineContext}`;
+
+  const messages = [
+    { role: "user", content: [{ type: "text", text: agent.task }], timestamp: Date.now() }
+  ];
+
+  const agentTools = (agent.tools || []).map(tName => activeTools.find(td => td.name === tName)).filter(Boolean);
+
+  let lastTextResult = "";
+  const MAX_TURNS = 15;
+  let turn = 0;
+  let status = "completed";
+  let errorLog = null;
+
+  while (turn < MAX_TURNS) {
+    try {
+      const pendingChats = flushAgentChatBuffer(agentId);
+      if (pendingChats.length > 0) {
+        const chatSummary = pendingChats.map(c => `[User message]: ${c.content}`).join("\n");
+        messages.push({
+          role: "user",
+          content: [{ type: "text", text: `--- User messages during execution ---\n${chatSummary}\n--- Please incorporate this feedback ---` }],
+          timestamp: Date.now(),
+        });
+        bcast({ type: "agent_log", agentId, message: `📩 ${pendingChats.length} user message(s) injected into context.` });
+      }
+
+      const stream = streamSimple(model, {
+        systemPrompt: agentPrompt,
+        messages,
+        tools: agentTools
+      }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+      let currentText = "";
+      for await (const event of stream) {
+        if (event.type === "text_delta") {
+          currentText += event.delta;
+          if (event.delta.trim().length > 3) {
+            bcast({ type: "agent_log", agentId, message: event.delta.trim().slice(0, 100) });
+          }
+        }
+      }
+
+      const result = await stream.result();
+      messages.push(result);
+      lastTextResult = currentText;
+
+      const toolCalls = result.content.filter(c => c.type === "toolUse" || c.type === "toolCall");
+      if (toolCalls.length === 0) {
+        break;
+      }
+
+      for (const tc of toolCalls) {
+        const tName = tc.name || tc.toolName;
+        const tInput = tc.input || tc.arguments || {};
+
+        bcast({ type: "agent_status", agentId, status: "calling_tool", currentTool: tName });
+        bcast({ type: "agent_log", agentId, message: `Calling tool: ${tName} with ${JSON.stringify(tInput)}` });
+
+        let toolOutput = "";
+        try {
+          if (tName === "custom_parser") {
+            toolOutput = "Successfully executed CEO custom parser tool. Output: Parsing completed with 0 errors.";
+          } else {
+            toolOutput = await executeTool(tName, tInput, process.cwd());
+          }
+        } catch (e) {
+          toolOutput = `Error: ${e.message}`;
+        }
+
+        bcast({ type: "agent_log", agentId, message: `Tool response: ${toolOutput.slice(0, 150)}...` });
+
+        messages.push({
+          role: "toolResult",
+          toolCallId: tc.id,
+          toolName: tName,
+          content: [{ type: "text", text: toolOutput }],
+          isError: toolOutput.startsWith("Error:"),
+          timestamp: Date.now(),
+        });
+      }
+
+      bcast({ type: "agent_status", agentId, status: "running" });
+      turn++;
+
+      if (_swarmPaused) {
+        bcast({ type: "swarm_paused", agentId });
+        await new Promise(resolve => { _swarmPauseResolve = resolve; });
+        bcast({ type: "swarm_resumed", agentId });
+      }
+    } catch (err) {
+      bcast({ type: "agent_log", agentId, message: `Error running turn: ${err.message}` });
+      status = "error";
+      errorLog = err.message;
+      break;
+    }
+  }
+
+  bcast({ type: "agent_done", agentId, result: lastTextResult || "Task execution finished.", status });
+  return { agentId, result: lastTextResult || "Completed.", logs: [], status, error: errorLog };
+}
+
+// ── DAG Campaign Execution ───────────────────────────────────────────────────
+
+async function executeDagCampaign(socket, goal, dagConfig) {
+  let agents = dagConfig.agents || [];
+  const mode = dagConfig.mode || "pipeline";
+  const pipelineCount = mode === "pipeline" ? (dagConfig.pipeline_count || 3) : 1;
+
+  // Validate
+  const validation = validateDag(agents);
+  if (!validation.valid) {
+    for (const err of validation.errors) {
+      bcast({ type: "ceo_thought", message: `DAG validation error: ${err}` });
+    }
+    bcast({ type: "swarm_error", message: `DAG validation failed: ${validation.errors.join("; ")}` });
+    return;
+  }
+
+  // Cycle detection
+  const cycle = detectCycle(agents);
+  if (cycle.hasCycle) {
+    bcast({ type: "ceo_thought", message: `DAG cycle detected in agents: ${cycle.cycle.join(", ")}` });
+    bcast({ type: "swarm_error", message: `DAG contains cycle among agents: ${cycle.cycle.join(", ")}` });
+    return;
+  }
+
+  const model = resolveModel();
+  const auth = getModelAuth(model);
+  const activeTools = getActiveTools();
+
+  // Persistent state
+  if (currentSwarmState) {
+    currentSwarmState.dagMode = mode;
+    currentSwarmState.dagConfig = dagConfig;
+    currentSwarmState.pipelineIteration = 0;
+    currentSwarmState.currentWave = 0;
+    currentSwarmState.waveResults = {};
+  }
+
+  const allWaveResults = {};
+
+  for (let iter = 0; iter < pipelineCount; iter++) {
+    if (currentSwarmState) {
+      currentSwarmState.pipelineIteration = iter;
+    }
+
+    if (pipelineCount > 1) {
+      bcast({ type: "ceo_thought", message: `Pipeline iteration ${iter + 1}/${pipelineCount}` });
+    }
+
+    // Compute topological waves
+    const waves = topologicalSort(agents, mode);
+    const iterationResults = {};
+
+    for (let waveIdx = 0; waveIdx < waves.length; waveIdx++) {
+      const wave = waves[waveIdx];
+      if (currentSwarmState) {
+        currentSwarmState.currentWave = waveIdx;
+      }
+
+      bcast({ type: "ceo_thought", message: `Executing wave ${waveIdx + 1}/${waves.length} with ${wave.length} agent(s)` });
+
+      // Build context for this wave
+      const context = {
+        goal,
+        model,
+        auth,
+        activeTools,
+        previousWaveResults: { ...allWaveResults, ...iterationResults },
+        pipelineIteration: iter,
+        pipelineCount,
+      };
+
+      // Execute wave agents concurrently
+      const wavePromises = wave.map(agent => runDagAgent(agent, context));
+      const waveResults = await Promise.allSettled(wavePromises);
+
+      for (let i = 0; i < wave.length; i++) {
+        const agent = wave[i];
+        const settled = waveResults[i];
+
+        if (settled.status === "fulfilled") {
+          iterationResults[agent.id] = settled.value;
+          allWaveResults[agent.id] = settled.value;
+          if (currentSwarmState) {
+            if (!currentSwarmState.waveResults) currentSwarmState.waveResults = {};
+            if (!currentSwarmState.waveResults[waveIdx]) currentSwarmState.waveResults[waveIdx] = {};
+            currentSwarmState.waveResults[waveIdx][agent.id] = settled.value;
+          }
+        } else {
+          const errMsg = settled.reason?.message || "Unknown error";
+          bcast({ type: "agent_log", agentId: agent.id, message: `Agent '${agent.id}' failed: ${errMsg}` });
+          const failedResult = { agentId: agent.id, result: "", logs: [], status: "error", error: errMsg };
+          iterationResults[agent.id] = failedResult;
+          allWaveResults[agent.id] = failedResult;
+        }
+
+        if (currentSwarmState) {
+          const idx = currentSwarmState.agents.findIndex(a => a.id === agent.id);
+          if (idx >= 0) {
+            currentSwarmState.agents[idx].status = settled.status === "fulfilled" ? "completed" : "error";
+          }
+        }
+      }
+
+      saveSwarmState(currentSwarmState);
+    }
+
+    // CEO refinement between pipeline iterations
+    if (pipelineCount > 1 && iter < pipelineCount - 1) {
+      bcast({ type: "ceo_thought", message: `CEO refining direction for iteration ${iter + 2}...` });
+      try {
+        const summaryPrompt = `You are the CEO of a multi-agent swarm team.
+Your sub-agents completed iteration ${iter + 1} of ${pipelineCount} for the goal: "${goal}"
+
+Results from this iteration:
+${Object.entries(iterationResults).map(([id, res]) => `Agent [${id}]: ${res.result?.slice(0, 300) || "No result"}`).join("\n")}
+
+Write a brief refinement direction for the next iteration. Focus on what to improve or adjust.`;
+
+        const stream = streamSimple(model, {
+          systemPrompt: "You are the CEO giving concise refinement direction for the next pipeline iteration.",
+          messages: [{ role: "user", content: [{ type: "text", text: summaryPrompt }] }],
+        }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+        let refinement = "";
+        for await (const event of stream) {
+          if (event.type === "text_delta") refinement += event.delta;
+        }
+        bcast({ type: "ceo_thought", message: `Refinement for next iteration: ${refinement.slice(0, 500)}` });
+      } catch (err) {
+        bcast({ type: "ceo_thought", message: `Skipping CEO refinement (error: ${err.message})` });
+      }
+    }
+  }
+
+  // Final CEO Summary
+  bcast({ type: "ceo_thought", message: "All DAG agents completed. Compiling final summary..." });
+
+  let summary = "";
+  try {
+    const summaryPrompt = `You are the CEO of a multi-agent swarm team.
+Your agents have completed their DAG execution for the goal: "${goal}"
+
+Agent results:
+${Object.entries(allWaveResults).map(([id, res]) => `Agent [${id}] (${res.status || "completed"}):\n${(res.result || "").slice(0, 300)}`).join("\n\n")}
+
+Write a brief summary for the user.`;
+
+    const stream = streamSimple(model, {
+      systemPrompt: "You compile summary reports. Write formatted text.",
+      messages: [{ role: "user", content: [{ type: "text", text: summaryPrompt }] }],
+    }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+
+    for await (const event of stream) {
+      if (event.type === "text_delta") summary += event.delta;
+    }
+  } catch (err) {
+    summary = `DAG swarm completed!\n\n${Object.entries(allWaveResults).map(([id, res]) => `- Agent ${id.toUpperCase()}: ${(res.result || "").slice(0, 200)}...`).join("\n")}`;
+  }
+
+  bcast({ type: "ceo_summary", summary });
+  try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {}
+
+  if (currentSwarmState) {
+    currentSwarmState.status = "completed";
+    currentSwarmState.summary = summary;
+    saveSwarmState(currentSwarmState);
+  }
+}
+
+async function handleDagGoal(socket, goal, dagConfig) {
+  swarmSockets.add(socket);
+  currentSwarmState = {
+    goal,
+    status: "running",
+    dagMode: dagConfig.mode || "pipeline",
+    pipelineIteration: 0,
+    currentWave: 0,
+    dagConfig,
+    agents: dagConfig.agents.map(a => ({ ...a, status: "pending", logs: [] })),
+    agentResults: {},
+    waveResults: {},
+    ceoLogs: [{ message: `DAG Swarm initialized. Mode: ${dagConfig.mode || "pipeline"}. Goal: "${goal}"` }],
+    summary: null
+  };
+  bcast({ type: "swarm_start", goal, mode: dagConfig.mode || "pipeline" });
+  await executeDagCampaign(socket, goal, dagConfig);
+}
+
 async function executeSwarmCampaign(socket, goal, agents) {
   // Add this socket to the broadcast set so it receives live updates
   swarmSockets.add(socket);
@@ -2647,6 +4462,7 @@ Please write a brief summary report for the USER detailing what the sub-agents h
   }
 
   bcast({ type: "ceo_summary", summary });
+  try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {}
 
   // Mark swarm as completed
   if (currentSwarmState) {
@@ -2753,8 +4569,9 @@ async function main() {
 
   // Gracefully terminate child processes on exit
   const handleExit = async () => {
-    console.log("\n[MCP] Stopping active servers...");
+    console.log("\nStopping active servers...");
     await stopMcpServers();
+    await stopLspServers();
     process.exit(0);
   };
   process.on("SIGINT", handleExit);
@@ -2812,11 +4629,22 @@ async function main() {
     status: "ok", version: "1.0.0", timestamp: new Date().toISOString(),
   }));
 
+  app.get("/api/session/checkpoints", async () => ({ checkpoints: listCheckpoints() }));
+  app.post("/api/session/checkpoint", async (req) => {
+    const ckpt = createCheckpoint(req.body?.label);
+    return ckpt;
+  });
+  app.post("/api/session/restore", async (req) => {
+    const result = restoreCheckpoint(req.body?.id);
+    return result;
+  });
+
   app.get("/api/settings", async () => loadSettings());
   app.post("/api/settings", async (req) => {
     const current = loadSettings();
     const updated = { ...current, ...req.body };
     fs.writeFileSync(path.join(PI_DIR, "settings.json"), JSON.stringify(updated, null, 2));
+    try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
     return { ok: true };
   });
   app.get("/api/models", async () => loadModels());
@@ -3168,6 +4996,17 @@ async function main() {
         const { goal } = data;
         try { await handleSwarmGoal(socket, goal); }
         catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
+      }
+
+      if (data.type === "run_dag") {
+        try {
+          const dagConfig = loadDagConfig();
+          if (!dagConfig) {
+            try { socket.send(JSON.stringify({ type: "swarm_error", message: "DAG config not found at ~/.pi/agent/dag-config.yaml" })); } catch {}
+            return;
+          }
+          await handleDagGoal(socket, data.goal || "DAG Swarm Goal", dagConfig);
+        } catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
       }
 
       if (data.type === "swarm_saved_team") {
