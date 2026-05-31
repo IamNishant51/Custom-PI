@@ -89,6 +89,158 @@ function innerBoxLine(content: string, width: number, colorFn: (s: string) => st
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  TEXT FORMATTING — Word Wrapping & Markdown Table Rendering
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function wordWrap(text: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const rawLine of text.split("\n")) {
+    if (stripAnsi(rawLine).length <= maxWidth) {
+      lines.push(rawLine);
+      continue;
+    }
+    let remaining = rawLine;
+    while (stripAnsi(remaining).length > maxWidth) {
+      let breakIdx = -1;
+      const visible = remaining;
+      let visLen = 0;
+      let inAnsi = false;
+      for (let i = 0; i < remaining.length; i++) {
+        const ch = remaining[i];
+        if (ch === "\x1B") { inAnsi = true; continue; }
+        if (inAnsi) { if (ch.match(/[a-zA-Z]/)) inAnsi = false; continue; }
+        visLen++;
+        if (visLen > maxWidth) break;
+        if (ch === " ") breakIdx = i;
+      }
+      if (breakIdx <= 0) {
+        const ansiMatch = remaining.match(/^\x1B\[[0-9;]*m/);
+        if (ansiMatch) { breakIdx = ansiMatch[0].length + maxWidth - 1; }
+        else { breakIdx = maxWidth; }
+      }
+      lines.push(remaining.slice(0, breakIdx + 1).trimEnd());
+      remaining = remaining.slice(breakIdx + 1).trimStart();
+    }
+    if (remaining) lines.push(remaining);
+  }
+  return lines;
+}
+
+const MARKDOWN_TABLE_RE = /^\|.+\|$/;
+
+function parseMarkdownTable(lines: string[]): { rows: string[][]; headerLen: number } | null {
+  if (lines.length < 2) return null;
+  const dataStartIdx = lines[1].trim().startsWith("|") && lines[1].includes("-") ? 1 : -1;
+  const headerIdx = dataStartIdx === 1 ? 0 : -1;
+  if (headerIdx < 0) return null;
+  const headerCells = lines[headerIdx].split("|").filter((_, i, arr) => i > 0 && i < arr.length - 1 || arr.length === 2);
+  const actualCells = lines[headerIdx].split("|");
+  const numCols = actualCells.length - 2;
+  if (numCols < 1) return null;
+  const rows: string[][] = [];
+  for (let r = headerIdx; r < lines.length; r++) {
+    const parts = lines[r].split("|");
+    if (parts.length < numCols + 2) continue;
+    const row: string[] = [];
+    for (let c = 0; c < numCols; c++) {
+      row.push((parts[c + 1] || "").trim());
+    }
+    if (r !== 1 || headerIdx !== 0) rows.push(row);
+  }
+  return { rows, headerLen: numCols };
+}
+
+function renderTableGrid(rows: string[][], boxWidth: number, colorFn: (s: string) => string): string[] {
+  if (!rows.length) return [];
+  const numCols = rows[0].length;
+  const colWidths: number[] = new Array(numCols).fill(0);
+  for (const row of rows) {
+    for (let c = 0; c < numCols; c++) {
+      colWidths[c] = Math.max(colWidths[c], stripAnsi(row[c] || "").length);
+    }
+  }
+  const innerW = boxWidth - 6;
+  const totalContent = colWidths.reduce((s, w) => s + w, 0);
+  const sepCount = numCols - 1;
+  if (totalContent + sepCount < innerW) {
+    const extra = Math.floor((innerW - totalContent - sepCount) / numCols);
+    for (let c = 0; c < numCols; c++) colWidths[c] += extra;
+    let remainder = innerW - totalContent - sepCount - extra * numCols;
+    for (let c = 0; remainder > 0 && c < numCols; c++, remainder--) colWidths[c]++;
+  }
+
+  const out: string[] = [];
+  const sep = colorFn(BOX.v);
+  const renderRow = (cells: string[]) => {
+    const parts: string[] = [];
+    for (let c = 0; c < numCols; c++) {
+      const cell = cells[c] || "";
+      const cellLen = stripAnsi(cell).length;
+      parts.push(cell + " ".repeat(Math.max(0, colWidths[c] - cellLen)));
+    }
+    return `${sep}  ${parts.join(` ${sep} `)}  ${sep}`;
+  };
+
+  const renderSep = () => {
+    const segs: string[] = [];
+    for (let c = 0; c < numCols; c++) {
+      segs.push(BOX.h.repeat(colWidths[c]));
+    }
+    return colorFn(BOX.ltee + BOX.h) + segs.join(colorFn(BOX.h + BOX.ltee + BOX.h)) + colorFn(BOX.h + BOX.rtee);
+  };
+
+  const isSepRow = (row: string[]) => row.every(c => /^[-: ]+$/.test(c));
+
+  for (let r = 0; r < rows.length; r++) {
+    if (isSepRow(rows[r])) {
+      out.push(renderSep());
+    } else {
+      out.push(renderRow(rows[r]));
+    }
+  }
+  return out;
+}
+
+function formatBoxContent(text: string, boxWidth: number, colorFn: (s: string) => string, contentColor: (s: string) => string): string[] {
+  const lines: string[] = [];
+  const rawLines = text.split("\n");
+
+  let i = 0;
+  while (i < rawLines.length) {
+    if (MARKDOWN_TABLE_RE.test(rawLines[i])) {
+      const tableLines: string[] = [];
+      while (i < rawLines.length && MARKDOWN_TABLE_RE.test(rawLines[i])) {
+        tableLines.push(rawLines[i]);
+        i++;
+      }
+      const parsed = parseMarkdownTable(tableLines);
+      if (parsed) {
+        const grid = renderTableGrid(parsed.rows, boxWidth, colorFn);
+        for (const row of grid) {
+          const contentLen = stripAnsi(row).length;
+          const padding = Math.max(0, boxWidth - 4 - contentLen);
+          lines.push(colorFn(BOX.v) + "  " + row.slice(2, -2).trimEnd() + " ".repeat(padding) + " " + colorFn(BOX.v));
+        }
+      } else {
+        for (const tl of tableLines) {
+          const wrapped = wordWrap(tl, boxWidth - 6);
+          for (const wl of wrapped) {
+            lines.push(boxLine(contentColor(wl), boxWidth, colorFn));
+          }
+        }
+      }
+    } else {
+      const wrapped = wordWrap(rawLines[i], boxWidth - 6);
+      for (const wl of wrapped) {
+        lines.push(boxLine(contentColor(wl), boxWidth, colorFn));
+      }
+      i++;
+    }
+  }
+  return lines;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  FILE UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -416,14 +568,11 @@ class SubAgentResultCard implements Component {
       const COLLAPSED_LINES = 8;
       const showAll = this.expanded || resultLines.length <= COLLAPSED_LINES;
       const displayLines = showAll ? resultLines : resultLines.slice(0, COLLAPSED_LINES);
+      const contentColor = isError ? chalk.hex(C.coral) : chalk.hex(C.sand);
 
-      for (const line of displayLines) {
-        const trimmed = truncate(line, w - 6);
-        lines.push(boxLine(
-          chalk.hex(isError ? C.coral : C.sand)(trimmed),
-          w, borderColor
-        ));
-      }
+      // Use formatBoxContent for word-wrapping and table detection
+      const formatted = formatBoxContent(displayLines.join("\n"), w, borderColor, contentColor);
+      for (const fLine of formatted) lines.push(fLine);
 
       if (!showAll) {
         const remaining = resultLines.length - COLLAPSED_LINES;
@@ -622,9 +771,11 @@ class ParallelAgentsResultCard implements Component {
 
       if (tracker.result) {
         const resultLines = tracker.result.split("\n").slice(0, 8);
-        for (const rl of resultLines) {
-          const trimmed = rl.length > w - 8 ? rl.slice(0, w - 8) + "…" : rl;
-          lines.push(boxLine(chalk.hex(C.sand)("  " + trimmed), w, borderColor));
+        const contentColor = chalk.hex(C.sand);
+        const block = formatBoxContent(resultLines.join("\n"), w, borderColor, (s: string) => contentColor("  " + s));
+        for (const line of block) {
+          const inner = line.slice(3, -2).trimEnd();
+          lines.push(boxLine(inner, w, borderColor));
         }
         if (tracker.result.split("\n").length > 8) {
           lines.push(boxLine(chalk.hex(C.dusty)("  ... more lines"), w, borderColor));
