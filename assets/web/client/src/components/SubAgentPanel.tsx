@@ -7,7 +7,7 @@ interface Agent {
   id: string;
   role: string;
   tools: string[];
-  status: "idle" | "running" | "calling_tool" | "paused" | "done" | "error";
+  status: "idle" | "running" | "calling_tool" | "paused" | "done" | "error" | "completed" | "planning";
   currentTool?: string;
   currentTask?: string;
   logs: string[];
@@ -15,10 +15,10 @@ interface Agent {
 }
 
 interface SwarmMessage {
-  type: "swarm_start" | "ceo_thought" | "ceo_plan" | "agent_status" | "agent_log" | "agent_done" | "tool_request" | "tool_provisioned" | "ceo_summary" | "swarm_error" | "interrupted";
+  type: "swarm_start" | "ceo_thought" | "ceo_plan" | "agent_status" | "agent_log" | "agent_done" | "tool_request" | "tool_provisioned" | "ceo_summary" | "swarm_error" | "interrupted" | "swarm_recovery" | "swarm_paused" | "swarm_resumed";
   goal?: string;
   message?: string;
-  agents?: Array<{ id: string; role: string; tools: string[]; task: string }>;
+  agents?: Array<{ id: string; role: string; tools: string[]; task: string; status?: string; currentTask?: string; logs?: string[] }>;
   agentId?: string;
   status?: Agent["status"];
   currentTool?: string;
@@ -27,6 +27,9 @@ interface SwarmMessage {
   reason?: string;
   result?: string;
   summary?: string;
+  paused?: boolean;
+  agentResults?: Record<string, string>;
+  ceoLogs?: string[];
 }
 
 interface SavedTeam {
@@ -44,6 +47,8 @@ function AgentStatusBadge({ status }: { status: Agent["status"] }) {
     done: { bg: "rgba(16,185,129,0.15)", color: "#34d399", label: "Done" },
     error: { bg: "rgba(239,68,68,0.15)", color: "#f87171", label: "Error" },
     idle: { bg: "rgba(255,255,255,0.04)", color: "var(--mute)", label: "Idle" },
+    completed: { bg: "rgba(16,185,129,0.15)", color: "#34d399", label: "Done" },
+    planning: { bg: "rgba(168,85,247,0.1)", color: "#a855f7", label: "Planning" },
   };
   const s = styles[status] || styles.idle;
   return (
@@ -75,6 +80,18 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [isCurrentTeamSaved, setIsCurrentTeamSaved] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  // Resizable panes
+  const [leftColW, setLeftColW] = useState(() => {
+    try { return Number(localStorage.getItem("subagent-lcw")) || 40; } catch { return 40; }
+  });
+  const [ceoH, setCeoH] = useState(() => {
+    try { return Number(localStorage.getItem("subagent-ceoh")) || 120; } catch { return 120; }
+  });
+  const colResize = useRef<{ startX: number; startW: number } | null>(null);
+  const ceoResize = useRef<{ startY: number; startH: number } | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ceoEndRef = useRef<HTMLDivElement | null>(null);
@@ -162,6 +179,36 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             setAgents(prev => prev.map(a => a.status === "running" || a.status === "calling_tool" ? { ...a, status: "error", logs: [...a.logs, "Aborted."] } : a));
             toast("Swarm aborted", "error");
             break;
+          case "swarm_paused":
+            setPaused(true);
+            setCeoLogs(prev => [...prev, "Swarm paused."]);
+            break;
+          case "swarm_resumed":
+            setPaused(false);
+            setCeoLogs(prev => [...prev, "Swarm resumed."]);
+            break;
+          case "swarm_recovery": {
+            const rc = data;
+            setActiveGoal(rc.goal || activeGoal);
+            setCeoLogs(rc.ceoLogs || []);
+            setPaused(!!rc.paused);
+            if (rc.agents && rc.agents.length > 0) {
+              setAgents(rc.agents.map(a => ({
+                id: a.id,
+                role: a.role,
+                tools: a.tools,
+                status: (a.status as Agent["status"]) || "idle",
+                currentTask: a.currentTask || rc.goal,
+                logs: a.logs || []
+              })));
+              if (rc.agents.length > 0) setSelectedAgentId(rc.agents[0].id);
+            }
+            if (rc.summary) { setFinalSummary(rc.summary); setSwarmStatus("done"); }
+            else if (rc.status === "completed") { setSwarmStatus("done"); if (!rc.summary) setFinalSummary("Swarm completed."); }
+            else if (rc.status === "running" || rc.status === "planning") { setSwarmStatus("running"); }
+            else if (rc.status === "error") { setSwarmStatus("error"); }
+            break;
+          }
         }
       } catch {}
     };
@@ -195,6 +242,59 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const deleteSavedTeam = async (name: string) => {
     try { const r = await fetch("/api/swarm/teams/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); if (r.ok) { toast("Team deleted.", "success"); fetchSavedTeams(); } } catch {}
   };
+
+  // Drag-to-resize handlers
+  const onColDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    colResize.current = { startX: e.clientX, startW: leftColW };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev: MouseEvent) => {
+      if (!colResize.current) return;
+      const totalW = gridRef.current?.offsetWidth || 800;
+      const pct = Math.max(20, Math.min(80, ((colResize.current.startW / 100) * totalW + ev.clientX - colResize.current.startX) / totalW * 100));
+      setLeftColW(pct);
+    };
+    const onUp = () => {
+      if (colResize.current) {
+        localStorage.setItem("subagent-lcw", String(leftColW));
+        colResize.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [leftColW]);
+
+  const onCeoDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    ceoResize.current = { startY: e.clientY, startH: ceoH };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev: MouseEvent) => {
+      if (!ceoResize.current) return;
+      const gridBottom = gridRef.current?.getBoundingClientRect().bottom || 0;
+      const h = Math.max(60, Math.min(500, ceoResize.current.startH + (gridBottom - ev.clientY)));
+      setCeoH(h);
+    };
+    const onUp = () => {
+      if (ceoResize.current) {
+        localStorage.setItem("subagent-ceoh", String(ceoH));
+        ceoResize.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [ceoH]);
 
   const startSwarm = useCallback(() => {
     if (!goal.trim() || !ws || swarmStatus === "running" || swarmStatus === "planning") return;
@@ -274,9 +374,20 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             <div className="subagent-bar-right">
               <span className="subagent-bar-time">{formatTime(elapsedTime)}</span>
               {swarmStatus === "running" || swarmStatus === "planning" ? (
-                <button className="subagent-bar-abort" onClick={() => { if (confirm("Abort this swarm?")) sendInterrupt(); }}>
-                  ■ Abort
-                </button>
+                <>
+                  {paused ? (
+                    <button className="subagent-bar-resume" onClick={() => { ws?.send(JSON.stringify({ type: "swarm_resume" })); }}>
+                      ▶ Resume
+                    </button>
+                  ) : (
+                    <button className="subagent-bar-pause" onClick={() => { ws?.send(JSON.stringify({ type: "swarm_pause" })); }}>
+                      ⏸ Pause
+                    </button>
+                  )}
+                  <button className="subagent-bar-abort" onClick={() => { if (confirm("Abort this swarm?")) sendInterrupt(); }}>
+                    ■ Abort
+                  </button>
+                </>
               ) : (swarmStatus === "done" || swarmStatus === "error") ? (
                 <button className="subagent-bar-reset" onClick={() => setSwarmStatus("idle")}>
                   ✕ Reset
@@ -302,7 +413,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
           )}
 
           {/* Main Grid */}
-          <div className="subagent-grid">
+          <div className="subagent-grid" ref={gridRef} style={{ gridTemplateColumns: `${leftColW}fr 4px ${100 - leftColW}fr` }}>
             {/* Left: Agent Cards */}
             <div className="subagent-agents-col">
               {swarmStatus === "planning" && (
@@ -338,6 +449,9 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 ))}
               </div>
             </div>
+
+            {/* Column Drag Handle */}
+            <div className="subagent-col-handle" onMouseDown={onColDragStart} />
 
             {/* Right: Agent Logs */}
             <div className="subagent-logs-col">
@@ -378,8 +492,11 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             </div>
           </div>
 
+          {/* CEO Drag Handle */}
+          <div className="subagent-ceo-handle" onMouseDown={onCeoDragStart} />
+
           {/* CEO Console */}
-          <div className="subagent-ceo-console">
+          <div className="subagent-ceo-console" style={{ maxHeight: ceoH, minHeight: ceoH }}>
             <div className="subagent-ceo-console-header">
               <span>CEO Console</span>
               <span className="subagent-ceo-console-count">{ceoLogs.length} lines</span>

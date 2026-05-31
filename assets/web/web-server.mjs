@@ -20,6 +20,11 @@ const HOST = process.env.WEB_HOST || "127.0.0.1";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max upload
 const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 
+// Global swarm state for persistence across refresh
+let currentSwarmState = null;
+let _swarmPaused = false;
+let _swarmPauseResolve = null;
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const TEAMS_FILE = path.join(PI_DIR, "swarm-teams.json");
@@ -1258,11 +1263,23 @@ async function executeSwarmCampaign(socket, goal, agents) {
   // Send plan to client
   socket.send(JSON.stringify({ type: "ceo_plan", agents }));
 
+  // Save agents to persistent state
+  if (currentSwarmState) {
+    currentSwarmState.agents = agents.map(a => ({ ...a, status: "pending", logs: [] }));
+  }
+
   const agentResults = {};
   const activeTools = getActiveTools();
 
   // 2. Sequential Agent Execution Loop
   for (const agent of agents) {
+    // Check pause before starting each agent
+    if (_swarmPaused) {
+      socket.send(JSON.stringify({ type: "swarm_paused", agentId: agent.id }));
+      await new Promise(resolve => { _swarmPauseResolve = resolve; });
+      socket.send(JSON.stringify({ type: "swarm_resumed", agentId: agent.id }));
+    }
+
     socket.send(JSON.stringify({ type: "ceo_thought", message: `Activating sub-agent '${agent.id}' for task: ${agent.task}` }));
     socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
 
@@ -1375,6 +1392,13 @@ process.exit(0);
 
         socket.send(JSON.stringify({ type: "agent_status", agentId: agent.id, status: "running" }));
         turn++;
+
+        // Check pause between turns
+        if (_swarmPaused) {
+          socket.send(JSON.stringify({ type: "swarm_paused", agentId: agent.id }));
+          await new Promise(resolve => { _swarmPauseResolve = resolve; });
+          socket.send(JSON.stringify({ type: "swarm_resumed", agentId: agent.id }));
+        }
       } catch (err) {
         socket.send(JSON.stringify({ type: "agent_log", agentId: agent.id, message: `Error running turn: ${err.message}` }));
         break;
@@ -1383,6 +1407,14 @@ process.exit(0);
 
     socket.send(JSON.stringify({ type: "agent_done", agentId: agent.id, result: lastTextResult || "Task execution finished." }));
     agentResults[agent.id] = lastTextResult || "Completed.";
+
+    // Save persistent state
+    if (currentSwarmState) {
+      currentSwarmState.agentResults = { ...agentResults };
+      const idx = currentSwarmState.agents.findIndex(a => a.id === agent.id);
+      if (idx >= 0) currentSwarmState.agents[idx].status = "completed";
+    }
+
     await new Promise(r => setTimeout(r, 1000));
   }
 
@@ -1411,9 +1443,25 @@ Please write a brief summary report for the USER detailing what the sub-agents h
   }
 
   socket.send(JSON.stringify({ type: "ceo_summary", summary }));
+
+  // Mark swarm as completed
+  if (currentSwarmState) {
+    currentSwarmState.status = "completed";
+    currentSwarmState.summary = summary;
+  }
 }
 
 async function handleSwarmGoal(socket, goal) {
+  // Initialize persistent state
+  currentSwarmState = {
+    goal,
+    status: "running",
+    agents: [],
+    agentResults: {},
+    ceoLogs: [{ message: `CEO Agent initialized. Analyzing goal: "${goal}"` }],
+    summary: null
+  };
+
   socket.send(JSON.stringify({ type: "swarm_start", goal }));
   socket.send(JSON.stringify({ type: "ceo_thought", message: `CEO Agent initialized. Analyzing goal: "${goal}"` }));
 
@@ -1809,6 +1857,17 @@ async function main() {
 
     socket.on("pong", () => { alive = true; });
 
+    // Send swarm recovery state if there's an active or completed swarm
+    if (currentSwarmState) {
+      try {
+        socket.send(JSON.stringify({
+          type: "swarm_recovery",
+          ...currentSwarmState,
+          paused: _swarmPaused
+        }));
+      } catch {}
+    }
+
     socket.on("close", () => {
       clearInterval(pingTimer);
       console.log("WebSocket disconnected from", req.ip);
@@ -1850,6 +1909,17 @@ async function main() {
         if (session) session.interrupt();
       }
 
+      if (data.type === "swarm_pause") {
+        _swarmPaused = true;
+        try { socket.send(JSON.stringify({ type: "swarm_paused" })); } catch {}
+      }
+
+      if (data.type === "swarm_resume") {
+        _swarmPaused = false;
+        if (_swarmPauseResolve) { _swarmPauseResolve(); _swarmPauseResolve = null; }
+        try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
+      }
+
       if (data.type === "memory_search") {
         try { socket.send(JSON.stringify({ type: "memory_results", results: memorySearch(data.query, data.k ?? 5) })); }
         catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
@@ -1875,6 +1945,15 @@ async function main() {
               ? { id: a, role: "sub-agent", task: `Contribute to: ${goal}`, tools: ["bash", "glob", "grep", "view_file", "write", "edit", "list_dir", "web_search", "web_fetch"] }
               : a
           );
+          // Initialize persistent state for saved team runs
+          currentSwarmState = {
+            goal,
+            status: "running",
+            agents: normalized.map(a => ({ ...a, status: "pending", logs: [] })),
+            agentResults: {},
+            ceoLogs: [],
+            summary: null
+          };
           socket.send(JSON.stringify({ type: "swarm_start", goal }));
           await executeSwarmCampaign(socket, goal, normalized);
         }
