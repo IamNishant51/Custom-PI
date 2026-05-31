@@ -154,6 +154,8 @@ function progressBar(current: number, total: number, width: number): string {
 }
 
 // ── Pure-JS recursive grep fallback (no rg/grep dependency) ──
+const MAX_GREP_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
 async function localGrep(pattern: string, dirOrFile: string, maxResults = 1000): Promise<string> {
   const results: string[] = [];
   let count = 0;
@@ -171,6 +173,7 @@ async function localGrep(pattern: string, dirOrFile: string, maxResults = 1000):
     let stat: fs.Stats;
     try { stat = await fs.promises.stat(currentPath); } catch { return; }
     if (stat.isFile()) {
+      if (stat.size > MAX_GREP_FILE_SIZE) return; // skip large files
       try {
         const content = await fs.promises.readFile(currentPath, "utf8");
         const lines = content.split("\n");
@@ -884,7 +887,18 @@ function parseMarkdownAgent(content: string): { config: AgentConfig; body: strin
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AGENT LOADING — Markdown Agent Loader with TTL Cache
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let agentsCache: { data: Map<string, AgentConfig>; timestamp: number } | null = null;
+const AGENTS_CACHE_TTL = 30_000; // 30 seconds
+
 function loadAgents(): Map<string, AgentConfig> {
+  const now = Date.now();
+  if (agentsCache && (now - agentsCache.timestamp) < AGENTS_CACHE_TTL) {
+    return agentsCache.data;
+  }
   const agents = new Map<string, AgentConfig>();
   const dirs = [AGENTS_DIR_GLOBAL, AGENTS_DIR_LOCAL];
 
@@ -910,6 +924,7 @@ function loadAgents(): Map<string, AgentConfig> {
       }
     }
   }
+  agentsCache = { data: agents, timestamp: Date.now() };
   return agents;
 }
 
