@@ -83,3 +83,11 @@ export function AsciiEye({ className }: AsciiProps) {
 export function AsciiRefresh({ className }: AsciiProps) {
   return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[R]</span>;
 }
+
+export function AsciiTeams({ className }: AsciiProps) {
+  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[T]</span>;
+}
+
+export function AsciiUsers({ className }: AsciiProps) {
+  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[U]</span>;
+}

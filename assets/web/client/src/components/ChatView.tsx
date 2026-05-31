@@ -106,7 +106,7 @@ export default function ChatView() {
         };
         reader.readAsText(file);
       }
-    });
+    }
     e.target.value = "";
   };
 

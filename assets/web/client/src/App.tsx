@@ -8,13 +8,15 @@ import MemoryPanel from "./components/MemoryPanel";
 import WorkProductsPanel from "./components/WorkProductsPanel";
 import SubAgentPanel from "./components/SubAgentPanel";
 import MCPPanel from "./components/MCPPanel";
+import AgentsPanel from "./components/AgentsPanel";
+import TeamPanel from "./components/TeamPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import { ToasterProvider } from "./components/Toast";
 import { AsciiMenu } from "./components/Icons";
 import { ChatProvider, useChat } from "./context/ChatContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "work-products" | "agents" | "mcp" | "settings";
+export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings";
 
 export default function App() {
   return (
@@ -63,6 +65,12 @@ function AppContent() {
             <div style={{ display: activeView === "agents" ? "block" : "none", height: "100%", width: "100%" }}>
               <SubAgentPanel ws={ws} />
             </div>
+            <div style={{ display: activeView === "agent-discovery" ? "block" : "none", height: "100%", width: "100%" }}>
+              <AgentsPanel />
+            </div>
+            <div style={{ display: activeView === "teams" ? "block" : "none", height: "100%", width: "100%" }}>
+              <TeamPanel />
+            </div>
             <div style={{ display: activeView === "mcp" ? "block" : "none", height: "100%", width: "100%" }}>
               <MCPPanel />
             </div>
@@ -81,7 +89,8 @@ const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { 
   const labels: Record<string, string> = {
     chat: "Chat", dashboard: "Dashboard", vault: "Secrets Vault",
     budget: "Budget", memory: "Memory", "work-products": "Work Products",
-    agents: "Sub-Agents", mcp: "MCP Servers", settings: "Settings",
+    agents: "Sub-Agents", "agent-discovery": "Agent Discovery", mcp: "MCP Servers",
+    teams: "Teams", settings: "Settings",
   };
   return (
     <div className="topbar">
