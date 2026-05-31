@@ -15,6 +15,7 @@ import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex } from "./animations";
 import { TuiManager } from "./tui/tui-manager";
+import { TuiApp } from "./tui/tui-app";
 import { SPINNERS } from "./tui/types";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
@@ -35,6 +36,7 @@ import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMc
 import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext, type Team, type TeamAgent } from "./team-manager";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
+let globalTuiApp: TuiApp | null = null;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  UNICODE BOX DRAWING — Beautiful Rounded Borders
@@ -3159,10 +3161,42 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help, /tui. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // Command: Toggle fullscreen TUI mode
+  pi.registerCommand("tui", {
+    description: "Toggle fullscreen TUI mode with animated rendering (/tui fullscreen, /tui default)",
+    handler(args, ctx) {
+      const mode = (args as string || "").trim().toLowerCase();
+      if (mode === "fullscreen" || mode === "fs") {
+        if (globalTuiApp?.isActive) {
+          ctx.ui.notify("Fullscreen TUI already active", "info");
+          return;
+        }
+        globalTuiApp = new TuiApp();
+        globalTuiApp.onSubmit = (text) => {
+          pi.sendMessage({ role: "user" as any, content: [{ type: "text", text }] });
+          globalTuiApp?.addMessage("user", text);
+        };
+        globalTuiApp.start();
+        ctx.ui.notify("Fullscreen TUI activated. Run /tui default to switch back.", "info");
+      } else {
+        if (globalTuiApp?.isActive) {
+          globalTuiApp.stop();
+          globalTuiApp = null;
+          ctx.ui.notify("Switched to default TUI", "info");
+        } else {
+          ctx.ui.notify("Usage: /tui fullscreen — switch to animated fullscreen TUI. /tui default — switch back.", "info");
+        }
+      }
     },
     execute(args, ctx) {
       return (this as any).handler(args, ctx);

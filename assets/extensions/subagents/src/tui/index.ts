@@ -3,6 +3,7 @@ export { StylePool } from "./style-pool";
 export { AnsiWriter } from "./ansi-writer";
 export { ScreenRenderer } from "./screen-renderer";
 export { TuiManager } from "./tui-manager";
+export { TuiApp } from "./tui-app";
 export { VimInputHandler, VimState } from "./input/vim-input";
 export { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
 export { measureWidth, truncateToWidth, wordWrap, stripAnsi } from "./utils/measure-text";
