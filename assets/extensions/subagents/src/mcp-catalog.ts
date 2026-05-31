@@ -59,27 +59,34 @@ const BUILTIN_MCP_SERVERS: McpServerConfig[] = [
 
 export function loadMcpServers(): McpServerConfig[] {
   if (cachedServers) return cachedServers;
-  const servers = [...BUILTIN_MCP_SERVERS];
+  const serverMap = new Map<string, McpServerConfig>();
+  for (const b of BUILTIN_MCP_SERVERS) serverMap.set(b.id, { ...b });
   try {
     if (fs.existsSync(MCP_CONFIG_PATH)) {
       const raw = fs.readFileSync(MCP_CONFIG_PATH, "utf8");
-      const userServers: McpServerConfig[] = JSON.parse(raw);
-      for (const us of userServers) {
-        if (!servers.find(s => s.id === us.id)) {
-          us.isBuiltin = false;
-          servers.push(us);
-        }
-      }
+      const persisted: McpServerConfig[] = JSON.parse(raw);
+  for (const p of persisted) {
+    const existing = serverMap.get(p.id);
+    if (existing && existing.isBuiltin) {
+      existing.enabled = p.enabled;
+      if (p.name) existing.name = p.name;
+      if (p.command) existing.command = p.command;
+      if (p.args) existing.args = p.args;
+    } else if (!existing) {
+      p.isBuiltin = false;
+      serverMap.set(p.id, p);
+    }
+  }
     }
   } catch {}
+  const servers = Array.from(serverMap.values());
   cachedServers = servers;
   return servers;
 }
 
 export function saveMcpServers(servers: McpServerConfig[]): void {
-  const userServers = servers.filter(s => !s.isBuiltin);
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(MCP_CONFIG_PATH, JSON.stringify(userServers, null, 2), "utf8");
+  fs.writeFileSync(MCP_CONFIG_PATH, JSON.stringify(servers, null, 2), "utf8");
   cachedServers = null;
 }
 
