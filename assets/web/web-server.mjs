@@ -1188,7 +1188,7 @@ async function handleSubAgent(socket, agentId, task) {
   const activeTools = getActiveTools();
   const subTools = (agent.config.tools || []).map(t => activeTools.find(td => td.name === t)).filter(Boolean);
 
-  const MAX_TURNS = 3;
+  const MAX_TURNS = 15;
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const stream = streamSimple(model, {
       systemPrompt,
@@ -1296,7 +1296,7 @@ process.exit(0);
     }
 
     let lastTextResult = "";
-    const MAX_TURNS = 3;
+    const MAX_TURNS = 15;
     let turn = 0;
     while (turn < MAX_TURNS) {
       try {

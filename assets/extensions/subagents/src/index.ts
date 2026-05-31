@@ -1068,7 +1068,7 @@ async function updateAgentTools(agentName: string, tools: string[]): Promise<voi
 class SubAgentRuntime {
   private tracker: SubAgentProgress;
   private readonly systemPrompt: string;
-  private static readonly MAX_TURNS = 3;
+  private static readonly MAX_TURNS = 15;
   private storage: StorageDriver;
 
   public onProgress: ((msg: string) => void) | null = null;
