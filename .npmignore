@@ -1,18 +1,11 @@
-# Never publish these
 node_modules/
 .pi/
-.git/
-.github/
-scripts/
 *.log
 .env
 .env.local
-.env.*
-/dist/
-*.tmp.*
 .DS_Store
-*.swp
-*.swo
-__tests__/
-vitest.config.ts
-tsconfig.json
+*.tmp.*
+
+# Exclude dist directories, but re-include web client build output
+dist/
+!assets/web/client/dist/
