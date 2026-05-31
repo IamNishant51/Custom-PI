@@ -69,7 +69,7 @@ function AppContent() {
               <AgentsPanel />
             </div>
             <div style={{ display: activeView === "teams" ? "block" : "none", height: "100%", width: "100%" }}>
-              <TeamPanel />
+              <TeamPanel onNavigate={(v) => setActiveView(v as View)} />
             </div>
             <div style={{ display: activeView === "mcp" ? "block" : "none", height: "100%", width: "100%" }}>
               <MCPPanel />

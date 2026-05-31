@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "./Toast";
+import { useChat } from "../context/ChatContext";
 
 interface TeamSlot {
   id: string;
@@ -51,12 +52,14 @@ function TeamCard({
   onDelete,
   onAddAgent,
   onRemoveAgent,
+  onRunTeam,
   knownAgents,
 }: {
   team: Team;
   onDelete: (id: string) => void;
   onAddAgent: (teamId: string, agentId: string) => void;
   onRemoveAgent: (teamId: string, slotId: string) => void;
+  onRunTeam: (team: Team) => void;
   knownAgents: DiscoveredAgent[];
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -85,6 +88,9 @@ function TeamCard({
           </div>
         </div>
         <div className="team-card-header-right">
+          <button className="btn btn-small" style={{ background: "var(--accent)", color: "#fff", border: "none" }} onClick={e => { e.stopPropagation(); onRunTeam(team); }} title="Run team">
+            ▶ Run
+          </button>
           <button className="btn btn-small btn-ghost" onClick={e => { e.stopPropagation(); setExpanded(o => !o); }}>
             {expanded ? "▲" : "▼"}
           </button>
@@ -154,6 +160,51 @@ function TeamCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function RunTeamModal({ team, onClose, onRun }: { team: Team; onClose: () => void; onRun: (goal: string) => void }) {
+  const [goal, setGoal] = useState("");
+  return (
+    <div className="create-team-overlay" onClick={onClose}>
+      <div className="create-team-form" onClick={e => e.stopPropagation()}>
+        <div className="create-team-form-header">
+          <span>Run Team: {team.name}</span>
+          <button className="btn btn-small btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div className="create-team-form-body">
+          <div className="form-field">
+            <label className="form-label">Goal</label>
+            <textarea
+              className="text-input"
+              style={{ minHeight: 80, resize: "vertical", fontFamily: "var(--font-sans)" }}
+              value={goal}
+              onChange={e => setGoal(e.target.value)}
+              placeholder="What should this team accomplish?"
+              autoFocus
+            />
+          </div>
+          <div className="team-card-members" style={{ marginTop: 4 }}>
+            <div className="section-label" style={{ marginBottom: 6 }}>Team</div>
+            {team.slots.map(slot => (
+              <div key={slot.id} className="team-member-row" style={{ padding: "4px 0" }}>
+                <div className="team-member-info">
+                  <AgentAvatar name={slot.agentId} size={20} />
+                  <span className="team-member-name">{slot.agentId}</span>
+                  <span className={`team-member-role role-${slot.role}`}>{slot.role}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="create-team-form-footer">
+          <button className="btn btn-small btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-small btn-primary" disabled={!goal.trim()} onClick={() => onRun(goal.trim())}>
+            Launch Team
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -231,12 +282,14 @@ function CreateTeamForm({
   );
 }
 
-export default function TeamPanel() {
+export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => void }) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [knownAgents, setKnownAgents] = useState<DiscoveredAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [runTeam, setRunTeam] = useState<Team | null>(null);
   const { toast } = useToast();
+  const { ws } = useChat();
 
   function normalizeTeam(raw: any): Team {
     return {
@@ -320,25 +373,30 @@ export default function TeamPanel() {
     }
   }, [loadData]);
 
+  const openRunModal = useCallback((team: Team) => { setRunTeam(team); }, []);
+
+  const handleRunTeam = useCallback((goal: string) => {
+    if (!runTeam || !ws) { toast("WebSocket not connected", "error"); return; }
+    const agents = runTeam.slots.map(s => s.agentId);
+    ws.send(JSON.stringify({ type: "swarm_saved_team", goal, agents }));
+    setRunTeam(null);
+    toast(`Team "${runTeam.name}" launched!`, "success");
+    if (onNavigate) onNavigate("agents");
+  }, [runTeam, ws, onNavigate]);
+
   return (
     <div className="team-panel">
+      {runTeam && <RunTeamModal team={runTeam} onClose={() => setRunTeam(null)} onRun={handleRunTeam} />}
+
       <div className="team-panel-topbar">
         <div className="team-panel-topbar-left">
           <h2 className="team-panel-title">Teams</h2>
           {!loading && <span className="team-panel-count">{teams.length}</span>}
         </div>
-        <button className="btn btn-small" onClick={() => setShowCreate(true)}>
-          + New Team
-        </button>
+        <button className="btn btn-small" onClick={() => setShowCreate(true)}>+ New Team</button>
       </div>
 
-      {showCreate && (
-        <CreateTeamForm
-          knownAgents={knownAgents}
-          onClose={() => setShowCreate(false)}
-          onCreated={loadData}
-        />
-      )}
+      {showCreate && <CreateTeamForm knownAgents={knownAgents} onClose={() => setShowCreate(false)} onCreated={loadData} />}
 
       {loading && (
         <div className="team-panel-loading">
@@ -357,14 +415,7 @@ export default function TeamPanel() {
       )}
 
       {!loading && teams.map(team => (
-        <TeamCard
-          key={team.id}
-          team={team}
-          onDelete={deleteTeam}
-          onAddAgent={addAgent}
-          onRemoveAgent={removeAgent}
-          knownAgents={knownAgents}
-        />
+        <TeamCard key={team.id} team={team} onDelete={deleteTeam} onAddAgent={addAgent} onRemoveAgent={removeAgent} onRunTeam={openRunModal} knownAgents={knownAgents} />
       ))}
     </div>
   );
