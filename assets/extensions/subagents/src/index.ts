@@ -3287,6 +3287,8 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         }
       });
     }
+
+    ctx.ui.notify("Fullscreen TUI available: /tui fullscreen", "info");
   });
 
   // Event Hook: Inject task memory into system prompt
