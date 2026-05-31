@@ -23,6 +23,29 @@ interface DiscoveredAgent {
   available: boolean;
 }
 
+function getInitials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
+}
+
+function getColor(name: string): string {
+  const colors = [
+    "#ff7a17", "#7c3aed", "#30d158", "#ff9f0a", "#ff3b30",
+    "#22d3ee", "#c084fc", "#34d399", "#fbbf24", "#f87171",
+  ];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return colors[Math.abs(h) % colors.length];
+}
+
+function AgentAvatar({ name, size = 28 }: { name: string; size?: number }) {
+  const color = getColor(name);
+  return (
+    <div className="agent-avatar" style={{ width: size, height: size, background: color, color: "#fff", fontSize: size * 0.4, fontWeight: 700, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, lineHeight: 1 }}>
+      {getInitials(name)}
+    </div>
+  );
+}
+
 function TeamCard({
   team,
   onDelete,
@@ -39,77 +62,171 @@ function TeamCard({
   const [expanded, setExpanded] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const availableAgents = knownAgents.filter(a => a.available && !team.slots.some(s => s.agentId === a.name));
+  const leader = team.slots.find(s => s.role === "leader");
+  const color = getColor(team.name);
 
   return (
-    <div className="card" style={{ marginBottom: 12 }}>
-      <div className="card-header" style={{ cursor: "pointer" }} onClick={() => setExpanded(o => !o)}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontWeight: 600 }}>{team.name}</span>
-          <span className="badge" style={{ background: "var(--accent)", color: "#fff" }}>{team.slots.length} member{team.slots.length !== 1 ? "s" : ""}</span>
+    <div className="team-card" style={{ borderLeft: `3px solid ${color}` }}>
+      <div className="team-card-header" onClick={() => setExpanded(o => !o)}>
+        <div className="team-card-header-left">
+          <AgentAvatar name={team.name} size={36} />
+          <div className="team-card-info">
+            <div className="team-card-name">{team.name}</div>
+            <div className="team-card-meta">
+              {leader && <span>{leader.agentId}</span>}
+              <span className="team-card-dot">·</span>
+              <span>{team.slots.length} member{team.slots.length !== 1 ? "s" : ""}</span>
+              <span className="team-card-dot">·</span>
+              <span>{team.workspace}</span>
+            </div>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button className="btn btn-xs" onClick={e => { e.stopPropagation(); setExpanded(o => !o); }}>
-            {expanded ? "Collapse" : "Expand"}
+        <div className="team-card-header-right">
+          <button className="btn btn-small btn-ghost" onClick={e => { e.stopPropagation(); setExpanded(o => !o); }}>
+            {expanded ? "▲" : "▼"}
           </button>
-          <button className="btn btn-xs btn-danger" onClick={e => { e.stopPropagation(); if (confirm(`Delete team "${team.name}"?`)) onDelete(team.id); }}>
-            Delete
-          </button>
+          {!confirmDelete ? (
+            <button className="btn btn-small btn-ghost" style={{ color: "var(--danger)" }} onClick={e => { e.stopPropagation(); setConfirmDelete(true); }} title="Delete team">
+              ✕
+            </button>
+          ) : (
+            <div className="team-card-confirm" onClick={e => e.stopPropagation()}>
+              <span style={{ fontSize: 12, color: "var(--mute)", marginRight: 6 }}>Delete?</span>
+              <button className="btn btn-small" style={{ background: "var(--danger)", color: "#fff", border: "none" }} onClick={() => { onDelete(team.id); setConfirmDelete(false); }}>Yes</button>
+              <button className="btn btn-small btn-ghost" onClick={() => setConfirmDelete(false)}>No</button>
+            </div>
+          )}
         </div>
-      </div>
-      <div className="card-body" style={{ padding: "8px 12px" }}>
-        <div className="field-row"><label>Workspace</label><code>{team.workspace}</code></div>
-        <div className="field-row"><label>Created</label><span style={{ fontSize: 12, color: "var(--mute)" }}>{new Date(team.createdAt).toLocaleDateString()}</span></div>
       </div>
 
       {expanded && (
-        <div style={{ borderTop: "1px solid var(--hairline)", padding: 12 }}>
-          <div className="section-label" style={{ marginBottom: 8 }}>Members</div>
-
-          {team.slots.length === 0 && (
-            <div style={{ fontSize: 13, color: "var(--mute)", padding: "4px 0 8px" }}>No members yet</div>
-          )}
-
-          {team.slots.map(slot => (
-            <div key={slot.id} className="member-row">
-              <div className="member-info">
-                <span className="status-dot" style={{ background: slot.status === "active" ? "var(--success)" : "var(--mute)", width: 8, height: 8 }} />
-                <span style={{ fontWeight: slot.role === "leader" ? 600 : 400 }}>{slot.agentId}</span>
-                <span className="badge" style={{ fontSize: 10, background: slot.role === "leader" ? "var(--accent)" : "var(--surface2)", color: slot.role === "leader" ? "#fff" : "var(--text)" }}>
-                  {slot.role}
-                </span>
-              </div>
-              {slot.role !== "leader" && (
-                <button className="btn btn-xs btn-danger" onClick={() => onRemoveAgent(team.id, slot.id)}>Remove</button>
-              )}
+        <div className="team-card-body">
+          <div className="team-card-section">
+            <div className="team-card-section-title">Members</div>
+            {team.slots.length === 0 && <div className="team-card-empty">No members yet</div>}
+            <div className="team-card-members">
+              {team.slots.map(slot => (
+                <div key={slot.id} className="team-member-row">
+                  <div className="team-member-info">
+                    <AgentAvatar name={slot.agentId} size={24} />
+                    <div className="team-member-details">
+                      <span className="team-member-name">{slot.agentId}</span>
+                      <span className={`team-member-role role-${slot.role}`}>{slot.role}</span>
+                    </div>
+                    <span className={`team-member-status status-${slot.status}`}>{slot.status}</span>
+                  </div>
+                  {slot.role !== "leader" && (
+                    <button className="btn btn-small btn-ghost" style={{ color: "var(--danger)", opacity: 0.6 }} onClick={() => onRemoveAgent(team.id, slot.id)} title="Remove agent">
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
 
-          {!showAdd ? (
-            <button className="btn btn-xs" style={{ marginTop: 8 }} onClick={() => setShowAdd(true)}>+ Add Agent</button>
-          ) : (
-            <div className="add-agent-form">
-              <select
-                className="input"
-                value={selectedAgent}
-                onChange={e => setSelectedAgent(e.target.value)}
-              >
-                <option value="">Select agent...</option>
-                {availableAgents.map(a => (
-                  <option key={a.name} value={a.name}>{a.name}</option>
-                ))}
-              </select>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button className="btn btn-sm" disabled={!selectedAgent} onClick={() => { onAddAgent(team.id, selectedAgent); setShowAdd(false); setSelectedAgent(""); }}>
-                  Add
-                </button>
-                <button className="btn btn-sm" onClick={() => { setShowAdd(false); setSelectedAgent(""); }}>Cancel</button>
+          <div className="team-card-section">
+            {!showAdd ? (
+              <button className="btn btn-small" style={{ border: "1px dashed var(--hairline-strong)", width: "100%", justifyContent: "center", borderRadius: 4 }} onClick={() => { setShowAdd(true); setSelectedAgent(""); }}>
+                + Add Agent
+              </button>
+            ) : (
+              <div className="team-card-add-agent">
+                <select className="select-input" value={selectedAgent} onChange={e => setSelectedAgent(e.target.value)}>
+                  <option value="">Select an available agent...</option>
+                  {availableAgents.map(a => (
+                    <option key={a.name} value={a.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="team-card-add-actions">
+                  <button className="btn btn-small btn-primary" disabled={!selectedAgent} onClick={() => { onAddAgent(team.id, selectedAgent); setShowAdd(false); setSelectedAgent(""); }}>
+                    Add
+                  </button>
+                  <button className="btn btn-small btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CreateTeamForm({
+  knownAgents,
+  onClose,
+  onCreated,
+}: {
+  knownAgents: DiscoveredAgent[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [form, setForm] = useState({ name: "", workspace: "default", leaderAgentId: "" });
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const availableLeaders = knownAgents.filter(a => a.available);
+
+  const handleSubmit = useCallback(async () => {
+    if (!form.name.trim()) { toast("Team name is required", "error"); return; }
+    if (!form.leaderAgentId) { toast("Select a leader agent", "error"); return; }
+    setSaving(true);
+    try {
+      const r = await fetch("/api/teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: form.name.trim(), workspace: form.workspace || "default", leaderAgentId: form.leaderAgentId }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      toast("Team created", "success");
+      onCreated();
+      onClose();
+    } catch (e: any) {
+      toast(e.message || "Failed to create team", "error");
+    } finally {
+      setSaving(false);
+    }
+  }, [form, onClose, onCreated]);
+
+  return (
+    <div className="create-team-overlay" onClick={onClose}>
+      <div className="create-team-form" onClick={e => e.stopPropagation()}>
+        <div className="create-team-form-header">
+          <span>New Team</span>
+          <button className="btn btn-small btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div className="create-team-form-body">
+          <div className="form-field">
+            <label className="form-label">Team Name</label>
+            <input className="text-input" type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Dev Squad" autoFocus />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Workspace</label>
+            <input className="text-input" type="text" value={form.workspace} onChange={e => setForm(f => ({ ...f, workspace: e.target.value }))} placeholder="default" />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Leader Agent</label>
+            <select className="select-input" value={form.leaderAgentId} onChange={e => setForm(f => ({ ...f, leaderAgentId: e.target.value }))}>
+              <option value="">Select a leader...</option>
+              {availableLeaders.map(a => (
+                <option key={a.name} value={a.name}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="create-team-form-footer">
+          <button className="btn btn-small btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-small btn-primary" onClick={handleSubmit} disabled={!form.name.trim() || !form.leaderAgentId || saving}>
+            {saving ? "Creating..." : "Create Team"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -119,7 +236,6 @@ export default function TeamPanel() {
   const [knownAgents, setKnownAgents] = useState<DiscoveredAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: "", workspace: "default", leaderAgentId: "" });
   const { toast } = useToast();
 
   const loadData = useCallback(async () => {
@@ -141,27 +257,6 @@ export default function TeamPanel() {
   }, []);
 
   useEffect(() => { loadData(); }, []);
-
-  const createTeam = useCallback(async () => {
-    if (!form.name || !form.leaderAgentId) {
-      toast("Name and leader agent required", "error");
-      return;
-    }
-    try {
-      const r = await fetch("/api/teams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      toast("Team created", "success");
-      setShowCreate(false);
-      setForm({ name: "", workspace: "default", leaderAgentId: "" });
-      loadData();
-    } catch (e: any) {
-      toast(e.message || "Failed to create team", "error");
-    }
-  }, [form, loadData]);
 
   const deleteTeam = useCallback(async (teamId: string) => {
     try {
@@ -209,55 +304,39 @@ export default function TeamPanel() {
     }
   }, [loadData]);
 
-  const availableLeaders = knownAgents.filter(a => a.available);
-
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <h2>Teams ({teams.length})</h2>
-        <button className="btn btn-sm" onClick={() => setShowCreate(o => !o)}>
-          {showCreate ? "Cancel" : "New Team"}
+    <div className="team-panel">
+      <div className="team-panel-topbar">
+        <div className="team-panel-topbar-left">
+          <h2 className="team-panel-title">Teams</h2>
+          {!loading && <span className="team-panel-count">{teams.length}</span>}
+        </div>
+        <button className="btn btn-small" onClick={() => setShowCreate(true)}>
+          + New Team
         </button>
       </div>
 
       {showCreate && (
-        <div className="card" style={{ marginBottom: 16, border: "1px solid var(--accent)" }}>
-          <div className="card-header" style={{ background: "var(--accent)", color: "#fff" }}>Create Team</div>
-          <div className="card-body">
-            <div className="form-group">
-              <label>Team Name *</label>
-              <input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Dev Squad" />
-            </div>
-            <div className="form-group">
-              <label>Workspace</label>
-              <input className="input" value={form.workspace} onChange={e => setForm(f => ({ ...f, workspace: e.target.value }))} placeholder="default" />
-            </div>
-            <div className="form-group">
-              <label>Leader Agent *</label>
-              <select className="input" value={form.leaderAgentId} onChange={e => setForm(f => ({ ...f, leaderAgentId: e.target.value }))}>
-                <option value="">Select leader agent...</option>
-                {availableLeaders.map(a => (
-                  <option key={a.name} value={a.name}>{a.name}</option>
-                ))}
-              </select>
-            </div>
-            <button className="btn btn-primary btn-sm" onClick={createTeam} disabled={!form.name || !form.leaderAgentId}>Create</button>
-          </div>
-        </div>
+        <CreateTeamForm
+          knownAgents={knownAgents}
+          onClose={() => setShowCreate(false)}
+          onCreated={loadData}
+        />
       )}
 
       {loading && (
-        <div style={{ padding: 32, textAlign: "center" }}>
-          <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
-          <div style={{ fontSize: 13, color: "var(--mute)" }}>Loading teams...</div>
+        <div className="team-panel-loading">
+          <div className="loading-spinner" />
+          <span>Loading teams...</span>
         </div>
       )}
 
       {!loading && teams.length === 0 && (
-        <div className="empty-state" style={{ padding: 48, textAlign: "center" }}>
-          <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}>[T]</div>
-          <p style={{ color: "var(--mute)", marginBottom: 16 }}>No teams yet. Create one to start collaborating.</p>
-          <button className="btn btn-sm btn-primary" onClick={() => setShowCreate(true)}>Create Your First Team</button>
+        <div className="team-panel-empty">
+          <div className="team-panel-empty-icon">👥</div>
+          <div className="team-panel-empty-title">No Teams Yet</div>
+          <div className="team-panel-empty-desc">Create a team to organize your agents and start collaborating.</div>
+          <button className="btn btn-small btn-primary" onClick={() => setShowCreate(true)}>Create Your First Team</button>
         </div>
       )}
 
