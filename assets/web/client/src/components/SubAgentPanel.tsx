@@ -372,11 +372,17 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                       <h4>{team.name}</h4>
                       <div className="saved-team-goal">"{team.goal}"</div>
                       <div className="saved-team-agent-tags">
-                        {team.agents.map((agent, aIdx) => (
-                          <span key={aIdx} className="saved-team-agent-tag">
-                            {agent.id}
-                          </span>
-                        ))}
+                        {team.agents.map((agent, aIdx) => {
+                          let colorClass = "saved-team-agent-tag-slate";
+                          if (agent.id === "researcher") colorClass = "saved-team-agent-tag-teal";
+                          else if (agent.id === "coder") colorClass = "saved-team-agent-tag-purple";
+                          else if (agent.id === "reviewer") colorClass = "saved-team-agent-tag-orange";
+                          return (
+                            <span key={aIdx} className={`saved-team-agent-tag ${colorClass}`}>
+                              {agent.id}
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                     <div className="saved-team-actions">
@@ -526,7 +532,19 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
                   {selectedAgent.result && (
                     <div className="agent-result-box">
-                      <div className="result-title font-mono text-xs">FINAL REPORT FROM AGENT</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <div className="result-title font-mono text-xs">FINAL REPORT FROM AGENT</div>
+                        <button
+                          className="btn btn-secondary btn-small"
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedAgent.result || "");
+                            toast("Report copied to clipboard!", "success");
+                          }}
+                          style={{ height: 24, fontSize: 10 }}
+                        >
+                          📋 Copy
+                        </button>
+                      </div>
                       <div className="result-content text-sm">
                         <Markdown content={selectedAgent.result} />
                       </div>
@@ -564,7 +582,21 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             {/* Final Compiled Report */}
             {finalSummary && (
               <div className="card final-summary-card">
-                <div className="card-header font-bold text-white text-lg">Final Swarm Summary Report</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div className="card-header font-bold text-white text-lg" style={{ border: "none", margin: 0, padding: 0 }}>
+                    Final Swarm Summary Report
+                  </div>
+                  <button
+                    className="btn btn-secondary btn-small"
+                    onClick={() => {
+                      navigator.clipboard.writeText(finalSummary || "");
+                      toast("Final report copied!", "success");
+                    }}
+                    style={{ display: "flex", alignItems: "center", gap: 4 }}
+                  >
+                    📋 Copy Report
+                  </button>
+                </div>
                 <div className="summary-markdown text-sm">
                   <Markdown content={finalSummary} />
                 </div>
