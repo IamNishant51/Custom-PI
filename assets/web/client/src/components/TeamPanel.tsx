@@ -238,6 +238,22 @@ export default function TeamPanel() {
   const [showCreate, setShowCreate] = useState(false);
   const { toast } = useToast();
 
+  function normalizeTeam(raw: any): Team {
+    return {
+      id: raw.id,
+      name: raw.name,
+      workspace: raw.workspace || "default",
+      leaderAgentId: raw.leaderAgentId || "",
+      slots: (raw.agents || raw.slots || []).map((s: any) => ({
+        id: s.slotId || s.id || "",
+        agentId: s.agentId || s.agentName || "",
+        role: s.role || "teammate",
+        status: s.status || "idle",
+      })),
+      createdAt: raw.createdAt || new Date().toISOString(),
+    };
+  }
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -247,7 +263,7 @@ export default function TeamPanel() {
       ]);
       const teamsData = await teamsRes.json();
       const agentsData = await agentsRes.json();
-      setTeams(teamsData.teams || []);
+      setTeams((teamsData.teams || []).map(normalizeTeam));
       setKnownAgents(agentsData.agents || []);
     } catch {
       toast("Failed to load teams", "error");
