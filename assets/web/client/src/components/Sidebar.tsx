@@ -2,6 +2,7 @@ import { View } from "../App";
 import {
   AsciiChat, AsciiDashboard, AsciiVault, AsciiBudget, AsciiMemory,
   AsciiWorkProducts, AsciiAgents, AsciiMCP, AsciiSettings, AsciiTeams, AsciiUsers,
+  AsciiBanner,
 } from "./Icons";
 
 interface SidebarProps {
@@ -28,7 +29,7 @@ export default function Sidebar({ activeView, onNavigate, wsConnected }: Sidebar
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <span>CUSTOM-PI</span>
+        <AsciiBanner />
       </div>
       <div className="sidebar-nav">
         {NAV_ITEMS.map((item) => {
