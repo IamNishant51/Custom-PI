@@ -101,13 +101,21 @@ const BANNER = [
   "  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝",
 ];
 
+const BANNER_COLORS = [
+  "#ff0087",
+  "#ff00ff",
+  "#af5fff",
+  "#5f00ff",
+  "#00ffff",
+  "#00d7ff",
+];
+
 export function AsciiBanner() {
   return (
     <pre style={{
       fontFamily: "monospace",
       fontSize: 7,
       lineHeight: 1.1,
-      color: "var(--accent)",
       margin: 0,
       padding: "4px 0",
       textAlign: "center",
@@ -115,7 +123,7 @@ export function AsciiBanner() {
       overflow: "hidden",
     }}>
       {BANNER.map((line, i) => (
-        <div key={i} style={{ color: `var(--banner-line-${i})` }}>{line}</div>
+        <div key={i} style={{ color: BANNER_COLORS[i] }}>{line}</div>
       ))}
     </pre>
   );
