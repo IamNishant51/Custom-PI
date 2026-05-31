@@ -15,8 +15,6 @@ import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex } from "./animations";
 import { TuiManager } from "./tui/tui-manager";
-import { TuiApp } from "./tui/tui-app";
-import { SPINNERS } from "./tui/types";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
 import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate as fileConsolidate, getMemoryStats } from "./memory-file-store";
@@ -36,7 +34,6 @@ import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMc
 import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext, type Team, type TeamAgent } from "./team-manager";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
-let globalTuiApp: TuiApp | null = null;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  UNICODE BOX DRAWING — Beautiful Rounded Borders
@@ -912,115 +909,88 @@ class SubAgentListCard implements Component {
  */
 class QuantumHUDWidget implements Component {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private theme: any = null;
 
   constructor(private ctx: any) {
-    // Live update telemetry every 2 seconds
     this.timer = setInterval(() => {
-      try {
-        this.ctx.invalidate();
-      } catch (e) {}
+      try { this.ctx.invalidate(); } catch {}
     }, 2000);
   }
 
+  setTheme(t: any) { this.theme = t; }
+
   dispose() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
   }
 
   invalidate() {}
 
+  private t(color: string, text: string): string {
+    return this.theme ? this.theme.fg(color, text) : text;
+  }
+  private bg(color: string, text: string): string {
+    return this.theme ? this.theme.bg(color, text) : text;
+  }
+  private bold(text: string): string {
+    return this.theme ? this.theme.bold(text) : text;
+  }
+
   render(width: number): string[] {
     const w = Math.min(width, 120);
-    const borderColor = (s: string) => chalk.hex(C.slate)(s);
     const lines: string[] = [];
 
-    // System Stats
+    const memPercent = Math.round((1 - os.freemem() / os.totalmem()) * 100);
+    const memUsed = (os.totalmem() / 1024 / 1024 / 1024 - os.freemem() / 1024 / 1024 / 1024).toFixed(1);
     const memTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
-    const memFree = (os.freemem() / 1024 / 1024 / 1024).toFixed(1);
-    const memUsed = ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(1);
-    const memPercent = (((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(0);
     const cpuLoad = os.loadavg()[0].toFixed(1);
 
-    // Active subagents list
     const running = Array.from(activeTrackers.values()).filter(
       t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
     );
-
-    // Dynamic responsive display elements based on terminal width w
-    let label = "❖ CUSTOM-PI QUANTUM HUD";
-    let cpu = `CPU: ${cpuLoad}L`;
-    let ram = `RAM: ${memPercent}% (${memUsed}G/${memTotal}G)`;
-    
     const memStats = memoryStats();
-    let rag = memStats.totalEntries > 0
-      ? chalk.hex(C.teal)(`[ Memory: ${memStats.totalEntries} ]`)
-      : chalk.hex(C.dusty)("[ Memory: Empty ]");
-    
-    let swarm = running.length > 0
-      ? chalk.hex(C.orange)(`[ Swarm: ${running.length} active ]`)
-      : chalk.hex(C.sage)("[ Swarm: Idle ]");
 
-    if (w < 90) {
-      label = "❖ CUSTOM-PI";
-      ram = `RAM: ${memPercent}%`;
-    }
-    if (w < 70) {
-      cpu = `${cpuLoad}L`;
-      rag = memStats.totalEntries > 0 ? chalk.hex(C.teal)(`M:${memStats.totalEntries}`) : "";
-      swarm = running.length > 0 ? chalk.hex(C.orange)(`Swarm:${running.length}`) : "";
-    }
-    if (w < 55) {
-      label = "❖ PI";
-      ram = `${memPercent}%`;
+    let label = "❖ CUSTOM-PI";
+    let cpu = `CPU ${cpuLoad}`;
+    let ram = `RAM ${memPercent}%`;
+    let rag = memStats.totalEntries > 0 ? `Mem:${memStats.totalEntries}` : "";
+    let swarm = running.length > 0 ? `Agents:${running.length}` : "";
+
+    if (w >= 90) {
+      label = "❖ CUSTOM-PI QUANTUM HUD";
+      ram = `RAM ${memPercent}% (${memUsed}G/${memTotal}G)`;
+      cpu = `CPU ${cpuLoad}L`;
+      rag = memStats.totalEntries > 0 ? `Memory: ${memStats.totalEntries}` : "";
+      swarm = running.length > 0 ? `Swarm: ${running.length} active` : "";
     }
 
-    const parts = [label, cpu, ram, rag, swarm].filter(Boolean);
-    const rawStatsLine = parts.join(chalk.hex(C.slate)(" │ "));
-    
-    // Truncate to w - 4 to guarantee no overflow
-    const statsLine = truncateToWidth(rawStatsLine, w - 4);
-    const padding = w - 4 - stripAnsi(statsLine).length;
-    const paddedStatsLine = statsLine + " ".repeat(Math.max(0, padding));
+    const parts = [this.t("accent", label), cpu, ram, rag, swarm].filter(Boolean);
+    const statsLine = parts.join(this.t("muted", " │ "));
 
-    lines.push(
-      borderColor("╔" + "═".repeat(w - 2) + "╗")
-    );
-    lines.push(
-      borderColor("║") + " " + paddedStatsLine + " " + borderColor("║")
-    );
+    // Top border
+    lines.push(this.t("border", `╔${"═".repeat(w - 2)}╗`));
+    // Stats line
+    const padded = statsLine + " ".repeat(Math.max(0, w - 2 - stripAnsi(statsLine).length));
+    lines.push(this.t("border", "║ ") + padded + this.t("border", " ║"));
 
-    // If there are running subagents, show their telemetry in a sub-section
+    // Active agents sub-section
     if (running.length > 0) {
-      lines.push(
-        borderColor("╠" + "═".repeat(w - 2) + "╣")
-      );
+      lines.push(this.t("border", `╠${"═".repeat(w - 2)}╣`));
       for (const agent of running) {
-        const spr = chalk.hex(C.orange)(getSpinner());
-        const name = chalk.hex(C.cream).bold(agent.name);
-        const turn = chalk.hex(C.amber)(`Turn ${agent.turn}/${agent.maxTurns}`);
-        const tool = agent.currentTool ? chalk.hex(C.lavender)(agent.currentTool) : chalk.hex(C.dusty)("thinking");
-        const time = chalk.hex(C.dusty)(`⏱ ${elapsed(agent.startTime)}`);
-
-        // Dynamically compress agent telemetry line on small screens
-        let rawLine = "";
-        if (w < 70) {
-          rawLine = `   ${spr} ${name} ⬡ ${turn} ⬡ ${time}`;
-        } else {
-          rawLine = `   ${spr} ${name} ⬡ ${turn} ⬡ ${tool} ⬡ ${time}`;
-        }
-
-        const agentLine = truncateToWidth(rawLine, w - 4);
-        const linePad = w - 4 - stripAnsi(agentLine).length;
-        lines.push(borderColor("║") + " " + agentLine + " ".repeat(Math.max(0, linePad)) + " " + borderColor("║"));
+        const dot = this.t("success", getSpinner());
+        const name = this.bold(agent.name);
+        const turn = `Turn ${agent.turn}/${agent.maxTurns}`;
+        const verb = agent.currentTool || "thinking";
+        const time = `⏱ ${elapsed(agent.startTime)}`;
+        const raw = w < 70
+          ? `   ${dot} ${name} ⬡ ${turn} ⬡ ${time}`
+          : `   ${dot} ${name} ⬡ ${turn} ⬡ ${this.t("accent", verb)} ⬡ ${time}`;
+        const agentLine = raw + " ".repeat(Math.max(0, w - 2 - stripAnsi(raw).length));
+        lines.push(this.t("border", "║ ") + agentLine + this.t("border", " ║"));
       }
     }
 
-    lines.push(
-      borderColor("╚" + "═".repeat(w - 2) + "╝")
-    );
-
+    // Bottom border
+    lines.push(this.t("border", `╚${"═".repeat(w - 2)}╝`));
     return lines;
   }
 }
@@ -1753,8 +1723,9 @@ function setupWidget(ctx: ExtensionContext) {
   };
   activeInvalidators.set(key, invalidator);
 
-  ctx.ui.setWidget("subagent-dashboard", (tui: any, _theme: any) => {
+  ctx.ui.setWidget("subagent-dashboard", (tui: any, theme: any) => {
     activeTuiInstance = tui;
+    widgetInstance!.setTheme(theme);
     return widgetInstance!;
   }, { placement: "aboveEditor" });
 }
@@ -3161,42 +3132,10 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help, /tui. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help." +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
-    },
-    execute(args, ctx) {
-      return (this as any).handler(args, ctx);
-    }
-  });
-
-  // Command: Toggle fullscreen TUI mode
-  pi.registerCommand("tui", {
-    description: "Toggle fullscreen TUI mode with animated rendering (/tui fullscreen, /tui default)",
-    handler(args, ctx) {
-      const mode = (args as string || "").trim().toLowerCase();
-      if (mode === "fullscreen" || mode === "fs") {
-        if (globalTuiApp?.isActive) {
-          ctx.ui.notify("Fullscreen TUI already active", "info");
-          return;
-        }
-        globalTuiApp = new TuiApp();
-        globalTuiApp.onSubmit = (text) => {
-          pi.sendMessage({ role: "user" as any, content: [{ type: "text", text }] });
-          globalTuiApp?.addMessage("user", text);
-        };
-        globalTuiApp.start();
-        ctx.ui.notify("Fullscreen TUI activated. Run /tui default to switch back.", "info");
-      } else {
-        if (globalTuiApp?.isActive) {
-          globalTuiApp.stop();
-          globalTuiApp = null;
-          ctx.ui.notify("Switched to default TUI", "info");
-        } else {
-          ctx.ui.notify("Usage: /tui fullscreen — switch to animated fullscreen TUI. /tui default — switch back.", "info");
-        }
-      }
     },
     execute(args, ctx) {
       return (this as any).handler(args, ctx);
@@ -3261,7 +3200,31 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         ctx.ui.setWorkingMessage(partial + "...");
       }, 200);
     }
+
+    // Set custom header with custom-pi branding
+    ctx.ui.setHeader((tui: any, theme: any) => {
+      const bannerText = `  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗
+  ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║
+  ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║
+  ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║
+  ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
+   ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝`;
+      const gradient = [C.orange, C.amber, C.coral, C.cream, C.teal, C.lavender];
+      const coloredLines = bannerText.split("\n").map((line: string, i: number) =>
+        line ? theme.fg(gradient[i % gradient.length] as any, line) : line
+      );
+      const versionLine = theme.bold(theme.fg("accent", ` custom-pi v1.1.1`)) +
+        theme.fg("muted", `  │  `) +
+        theme.fg("text", `${os.hostname()}  │  Node ${process.version}  │  ${process.platform}-${process.arch}`);
+
+      const allLines = [...coloredLines, "", versionLine, ""];
+      return {
+        render: (_w: number) => allLines,
+        invalidate: () => {}
+      } as Component;
+    });
     setupWidget(ctx);
+
     try {
       const result = await consolidateMemory();
       if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
@@ -3287,8 +3250,6 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         }
       });
     }
-
-    ctx.ui.notify("Fullscreen TUI available: /tui fullscreen", "info");
   });
 
   // Event Hook: Inject task memory into system prompt
