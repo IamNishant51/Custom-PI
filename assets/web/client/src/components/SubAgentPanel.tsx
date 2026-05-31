@@ -354,6 +354,12 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     };
   };
 
+  const getHexPoints = (cx: number, cy: number, r: number) => {
+    const h = r * Math.sin(Math.PI / 3); // r * 0.866
+    const w = r * Math.cos(Math.PI / 3); // r * 0.5
+    return `${cx + r},${cy} ${cx + w},${cy + h} ${cx - w},${cy + h} ${cx - r},${cy} ${cx - w},${cy - h} ${cx + w},${cy - h}`;
+  };
+
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
   return (
@@ -502,17 +508,55 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 <svg width="100%" height="220" viewBox="0 0 500 220" style={{ maxWidth: 600 }}>
                   <defs>
                     <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(168, 85, 247, 0.02)" strokeWidth="1" />
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(168, 85, 247, 0.03)" strokeWidth="1" />
                     </pattern>
+                    
+                    {/* Glowing Neon Line Gradients */}
+                    <linearGradient id="grad-running" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#a855f7" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.8" />
+                    </linearGradient>
+                    <linearGradient id="grad-done" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#a855f7" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity="0.8" />
+                    </linearGradient>
+                    <linearGradient id="grad-paused" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#a855f7" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#fb923c" stopOpacity="0.8" />
+                    </linearGradient>
+                    <linearGradient id="grad-error" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#a855f7" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#ef4444" stopOpacity="0.8" />
+                    </linearGradient>
+                    <linearGradient id="grad-idle" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity="0.3" />
+                      <stop offset="100%" stopColor="#475569" stopOpacity="0.3" />
+                    </linearGradient>
                   </defs>
                   
                   {/* Grid background */}
                   <rect width="100%" height="100%" fill="url(#grid)" />
                   
-                  {/* Concentric rings centered at CEO (250, 35) */}
+                  {/* Dotted Radar concentric ring guides */}
                   <circle cx="250" cy="35" r="70" fill="none" stroke="rgba(168, 85, 247, 0.05)" strokeWidth="1" strokeDasharray="2,8" />
-                  <circle cx="250" cy="35" r="130" fill="none" stroke="rgba(168, 85, 247, 0.1)" strokeWidth="1.5" strokeDasharray="4,4" />
-                  <circle cx="250" cy="35" r="190" fill="none" stroke="rgba(168, 85, 247, 0.04)" strokeWidth="1" strokeDasharray="3,12" />
+                  <circle cx="250" cy="35" r="130" fill="none" stroke="rgba(168, 85, 247, 0.08)" strokeWidth="1.5" strokeDasharray="4,4" />
+                  <circle cx="250" cy="35" r="190" fill="none" stroke="rgba(168, 85, 247, 0.03)" strokeWidth="1" strokeDasharray="3,12" />
+
+                  {/* Dynamic sweeping radar scanline */}
+                  <line x1="0" y1="0" x2="500" y2="0" stroke="rgba(168, 85, 247, 0.12)" strokeWidth="1.5" style={{ pointerEvents: "none" }}>
+                    <animate
+                      attributeName="y1"
+                      values="0;220;0"
+                      dur="8s"
+                      repeatCount="indefinite"
+                    />
+                    <animate
+                      attributeName="y2"
+                      values="0;220;0"
+                      dur="8s"
+                      repeatCount="indefinite"
+                    />
+                  </line>
 
                   {/* CEO to Agent connection lines */}
                   {agents.map((agent, i) => {
@@ -520,23 +564,23 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                     const isActive = agent.status === "running" || agent.status === "calling_tool";
                     const isFlowing = agent.status === "running" || agent.status === "calling_tool";
                     
-                    let strokeColor = "rgba(255, 255, 255, 0.15)";
+                    let strokeColor = "url(#grad-idle)";
                     let strokeDash = undefined;
                     
                     if (agent.status === "running") {
-                      strokeColor = "#7c3aed";
-                      strokeDash = "5,5";
+                      strokeColor = "url(#grad-running)";
+                      strokeDash = "6,4";
                     } else if (agent.status === "calling_tool") {
-                      strokeColor = "#06b6d4";
+                      strokeColor = "url(#grad-running)";
                       strokeDash = "4,4";
                     } else if (agent.status === "paused") {
-                      strokeColor = "#fb923c";
+                      strokeColor = "url(#grad-paused)";
                       strokeDash = "2,2";
                     } else if (agent.status === "done") {
-                      strokeColor = "#10b981";
+                      strokeColor = "url(#grad-done)";
                     } else if (agent.status === "error") {
-                      strokeColor = "#ef4444";
-                      strokeDash = "6,4";
+                      strokeColor = "url(#grad-error)";
+                      strokeDash = "5,3";
                     }
 
                     return (
@@ -547,7 +591,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                         x2={coords.x}
                         y2={coords.y}
                         stroke={strokeColor}
-                        strokeWidth={isActive ? 3 : 1.5}
+                        strokeWidth={isActive ? 2.5 : 1.5}
                         strokeDasharray={strokeDash}
                         className={isFlowing ? "flowing-line" : ""}
                         style={{ transition: "stroke 0.3s ease, stroke-width 0.3s ease" }}
@@ -557,18 +601,22 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
                   {/* CEO Node */}
                   <g>
+                    {/* Pulsing Outer Core Glow */}
                     <circle cx={250} cy={35} r={28} className="ceo-glow-ring" />
-                    <circle cx={250} cy={35} r={20} fill="#0e0f14" stroke="#7c3aed" strokeWidth="2" />
-                    <text x={250} y={39} textAnchor="middle" fill="#fff" fontSize="10" fontWeight="bold" fontFamily="var(--font-mono)">CEO</text>
+                    {/* Spinning High-Tech Reactor Outer Ring */}
+                    <circle cx={250} cy={35} r={23} fill="none" stroke="#a855f7" strokeWidth="1.5" strokeDasharray="6,4" className="spinning-ring" />
+                    {/* Inner Steel Core */}
+                    <circle cx={250} cy={35} r={17} fill="#0b0c10" stroke="#7c3aed" strokeWidth="2.5" />
+                    <text x={250} y={39} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold" fontFamily="var(--font-mono)" letterSpacing="0.05em">CEO</text>
                   </g>
 
-                  {/* Subagent Nodes */}
+                  {/* Subagent Hexagonal Nodes */}
                   {agents.map((agent, i) => {
                     const coords = getCoordinates(i, agents.length);
                     const isSelected = selectedAgentId === agent.id;
                     
                     let strokeColor = "var(--hairline)";
-                    if (agent.status === "running") strokeColor = "#7c3aed";
+                    if (agent.status === "running") strokeColor = "#a855f7";
                     else if (agent.status === "calling_tool") strokeColor = "#06b6d4";
                     else if (agent.status === "paused") strokeColor = "#fb923c";
                     else if (agent.status === "done") strokeColor = "#10b981";
@@ -576,25 +624,51 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
                     return (
                       <g key={i}>
+                        {/* Circular Sensor Glow Pulse */}
                         <circle cx={coords.x} cy={coords.y} r={24} className={`node-glow-ring ${agent.status}`} />
-                        <circle
-                          cx={coords.x}
-                          cy={coords.y}
-                          r={18}
-                          fill={isSelected ? "rgba(124, 58, 237, 0.15)" : "#0e0f14"}
+                        
+                        {/* Outer Tech Hexagon Contour */}
+                        <polygon
+                          points={getHexPoints(coords.x, coords.y, 21)}
+                          fill="none"
                           stroke={strokeColor}
-                          strokeWidth={isSelected ? 3 : 2}
+                          strokeWidth={isSelected ? 1.5 : 1}
+                          opacity="0.4"
+                        />
+                        
+                        {/* Inner Hexagon Core Body */}
+                        <polygon
+                          points={getHexPoints(coords.x, coords.y, 16)}
+                          fill={isSelected ? "rgba(168, 85, 247, 0.2)" : "#07080c"}
+                          stroke={strokeColor}
+                          strokeWidth={isSelected ? 2.5 : 1.5}
                           onClick={() => setSelectedAgentId(agent.id)}
                           onMouseEnter={() => setHoveredAgentId(agent.id)}
                           onMouseLeave={() => setHoveredAgentId(null)}
                           style={{ cursor: "pointer", transition: "all 0.2s ease" }}
                         />
+                        
+                        {/* Tech address label printout */}
+                        <text
+                          x={coords.x}
+                          y={coords.y - 23}
+                          textAnchor="middle"
+                          fill="var(--mute)"
+                          fontSize="7"
+                          fontWeight="600"
+                          fontFamily="var(--font-mono)"
+                          style={{ pointerEvents: "none", opacity: 0.7 }}
+                        >
+                          {`[SYS-0x0${i+1}]`}
+                        </text>
+
+                        {/* Abbreviated 3-letter node label */}
                         <text
                           x={coords.x}
                           y={coords.y + 3}
                           textAnchor="middle"
                           fill="#fff"
-                          fontSize="9"
+                          fontSize="8"
                           fontWeight="bold"
                           fontFamily="var(--font-mono)"
                           onClick={() => setSelectedAgentId(agent.id)}
@@ -604,9 +678,11 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                         >
                           {agent.id.slice(0, 3).toUpperCase()}
                         </text>
+
+                        {/* Readable Name Label */}
                         <text
                           x={coords.x}
-                          y={coords.y + 36}
+                          y={coords.y + 38}
                           textAnchor="middle"
                           fill={isSelected ? "#fff" : "var(--mute)"}
                           fontSize="11"
