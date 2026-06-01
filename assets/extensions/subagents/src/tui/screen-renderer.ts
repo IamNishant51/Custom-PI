@@ -29,6 +29,8 @@ export class ScreenRenderer {
   contentLeft: number = GUTTER;
   contentWidth: number = 80;
 
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
+
   styleCache = new Map<string, number>();
 
   constructor() {
@@ -40,6 +42,7 @@ export class ScreenRenderer {
     this.useTruecolor = this.detectTruecolor();
     this.pool.setTruecolor(this.useTruecolor);
     this.pool.clear();
+    this.pool.prewarm();
   }
 
   private detectTruecolor(): boolean {
@@ -130,11 +133,15 @@ export class ScreenRenderer {
   }
 
   private handleResize(): void {
-    const { columns, rows } = process.stdout as any;
-    if (columns && rows) {
-      this.screen.resize(columns, rows);
-      this.updateLayout();
-    }
+    if (this.resizeTimer) clearTimeout(this.resizeTimer);
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null;
+      const { columns, rows } = process.stdout as any;
+      if (columns && rows) {
+        this.screen.resize(columns, rows);
+        this.updateLayout();
+      }
+    }, 100);
   }
 
   render(): void {

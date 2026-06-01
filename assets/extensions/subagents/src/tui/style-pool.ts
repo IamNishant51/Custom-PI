@@ -119,6 +119,22 @@ export class StylePool {
     return this.toAnsi(id);
   }
 
+  /** Prewarm common style combinations to avoid runtime cache misses */
+  prewarm(): void {
+    const commonFg = ["#ffffff", "#7d8187", "#4e5257", "#ff7a17", "#30d158", "#ff3b30", "#5ac8fa", "#212327"];
+    const commonBg = ["#0a0a0a", "#1a1c20", "#191919", "#222222", "#1e1e1e"];
+    for (const fg of commonFg) {
+      this.getTruecolorStyle(fg);
+      this.getTruecolorStyle(fg, undefined, { bold: true });
+      this.getTruecolorStyle(fg, undefined, { dim: true });
+    }
+    for (const fg of commonFg) {
+      for (const bg of commonBg) {
+        this.getTruecolorStyle(fg, bg);
+      }
+    }
+  }
+
   clear(): void {
     this.styles = [{
       fg: -1, bg: -1,
