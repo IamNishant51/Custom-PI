@@ -1833,8 +1833,8 @@ function patchUserMessage(proto: any) {
       return (theme && typeof theme.fg === "function") ? theme.fg("userMessageText", str) : str;
     };
 
-    const topBorder = borderStyle("╭" + "─".repeat(maxLineW + 2) + "╮");
-    const bottomBorder = borderStyle("╰" + "─".repeat(maxLineW + 2) + "╯");
+    const topBorder = borderStyle("\u256d" + "\u2500".repeat(maxLineW + 2) + "\u256e");
+    const bottomBorder = borderStyle("\u2570" + "\u2500".repeat(maxLineW + 2) + "\u256f");
 
     const bubbleLines: string[] = [];
     bubbleLines.push(topBorder);
@@ -1843,12 +1843,11 @@ function patchUserMessage(proto: any) {
       const w = visibleWidth(line);
       const pad = " ".repeat(Math.max(0, maxLineW - w));
       const content = textStyle(line) + pad;
-      bubbleLines.push(borderStyle("│ ") + content + borderStyle(" │"));
+      bubbleLines.push(borderStyle("\u2502 ") + content + borderStyle(" \u2502"));
     }
 
     bubbleLines.push(bottomBorder);
 
-    // LEFT-align by adding a small left padding/margin (e.g. 2 spaces) to align with other chat messages
     const leftPad = "  ";
     const lines = bubbleLines.map((line: string) => leftPad + line);
 
@@ -1926,16 +1925,16 @@ function patchToolExecution(proto: any) {
       }
     }
 
-    const titleText = `${statusSymbol} ${this.toolName} (${statusLabel})`;
+    const titleText = `${statusSymbol} ${this.toolName}  ${statusLabel}`;
     const titleW = visibleWidth(titleText);
     const rightDashes = Math.max(2, maxLineW - titleW - 3);
-    const topBorder = statusColorFn("╭─ " + titleText + " " + "─".repeat(rightDashes) + "╮");
-    const bottomBorder = statusColorFn("╰" + "─".repeat(maxLineW + 2) + "╯");
+    const topBorder = statusColorFn("\u256d\u2500 " + titleText + " " + "\u2500".repeat(rightDashes) + "\u256e");
+    const bottomBorder = statusColorFn("\u2570" + "\u2500".repeat(maxLineW + 2) + "\u256f");
 
     const middleLines = rawLines.map((line: string) => {
       const w = visibleWidth(line);
       const pad = " ".repeat(Math.max(0, maxLineW - w));
-      return statusColorFn("│ ") + line + pad + statusColorFn(" │");
+      return statusColorFn("\u2502 ") + line + pad + statusColorFn(" \u2502");
     });
 
     const finalLines = [topBorder, ...middleLines, bottomBorder];
