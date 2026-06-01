@@ -86,6 +86,12 @@ const filesToCopy = [
   { src: 'extensions/subagents/package.json', dest: 'extensions/subagents/package.json' },
   { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' },
   { src: 'extensions/subagents/src/types.d.ts', dest: 'extensions/subagents/src/types.d.ts' },
+  { src: 'extensions/subagents/src/logger.ts', dest: 'extensions/subagents/src/logger.ts' },
+  { src: 'extensions/subagents/src/acp-types.ts', dest: 'extensions/subagents/src/acp-types.ts' },
+  { src: 'extensions/subagents/src/gateguard.ts', dest: 'extensions/subagents/src/gateguard.ts' },
+  { src: 'extensions/subagents/src/model-router.ts', dest: 'extensions/subagents/src/model-router.ts' },
+  { src: 'extensions/subagents/src/context-monitor.ts', dest: 'extensions/subagents/src/context-monitor.ts' },
+  { src: 'extensions/subagents/src/stack-detector.ts', dest: 'extensions/subagents/src/stack-detector.ts' },
   { src: 'extensions/subagents/src/memory-types.ts', dest: 'extensions/subagents/src/memory-types.ts' },
   { src: 'extensions/subagents/src/memory-embedding.ts', dest: 'extensions/subagents/src/memory-embedding.ts' },
   { src: 'extensions/subagents/src/memory-store.ts', dest: 'extensions/subagents/src/memory-store.ts' },
@@ -114,9 +120,15 @@ const filesToCopy = [
   { src: 'extensions/subagents/src/tui/ansi-writer.ts', dest: 'extensions/subagents/src/tui/ansi-writer.ts' },
   { src: 'extensions/subagents/src/tui/screen-renderer.ts', dest: 'extensions/subagents/src/tui/screen-renderer.ts' },
   { src: 'extensions/subagents/src/tui/tui-manager.ts', dest: 'extensions/subagents/src/tui/tui-manager.ts' },
+  { src: 'extensions/subagents/src/tui/tui-app.ts', dest: 'extensions/subagents/src/tui/tui-app.ts' },
+  { src: 'extensions/subagents/src/tui/config/pulse-config.json', dest: 'extensions/subagents/src/tui/config/pulse-config.json' },
   { src: 'extensions/subagents/src/tui/input/vim-input.ts', dest: 'extensions/subagents/src/tui/input/vim-input.ts' },
   { src: 'extensions/subagents/src/tui/utils/measure-text.ts', dest: 'extensions/subagents/src/tui/utils/measure-text.ts' },
   { src: 'extensions/subagents/src/tui/components/animation.ts', dest: 'extensions/subagents/src/tui/components/animation.ts' },
+  { src: 'extensions/subagents/src/tui/components/anim-engine.ts', dest: 'extensions/subagents/src/tui/components/anim-engine.ts' },
+  { src: 'extensions/subagents/src/tui/components/question-modal.ts', dest: 'extensions/subagents/src/tui/components/question-modal.ts' },
+  { src: 'extensions/subagents/src/tui/components/toast.ts', dest: 'extensions/subagents/src/tui/components/toast.ts' },
+  { src: 'extensions/subagents/src/tui/app/pulse-controller.ts', dest: 'extensions/subagents/src/tui/app/pulse-controller.ts' },
 ];
 
 for (const f of filesToCopy) {
