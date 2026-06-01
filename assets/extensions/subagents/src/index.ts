@@ -17,7 +17,7 @@ import os from "node:os";
 import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted, getSkills, flush as flushMemory } from "./memory-store";
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { detectStack, formatStackSummary } from "./stack-detector";
-import { gateguard } from "./gateguard";
+import { gateguard, policyValidator } from "./gateguard";
 import { contextMonitor } from "./context-monitor";
 import { coalesceMessages, strictifySchema } from "./swarm-router";
 import { C } from "./tui-colors";
@@ -1309,6 +1309,8 @@ class SubAgentRuntime {
         case "read": {
           const filePath = args.path;
           if (!filePath) return "Error: Missing path argument.";
+          const pathCheck = policyValidator.validate({ type: "read_file", path: filePath, workdir: this.ctx.cwd });
+          if (!pathCheck.allowed) return `Error: ${pathCheck.reason}`;
           const result = await this.storage.readFile(filePath);
           try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch {}
           return result;
@@ -1317,6 +1319,10 @@ class SubAgentRuntime {
           const filePath = args.path;
           const content = args.content;
           if (!filePath || content === undefined) return "Error: Missing path or content argument.";
+
+          // Policy-as-Code filesystem boundary check
+          const pathCheck = policyValidator.validate({ type: "write_file", path: filePath, workdir: this.ctx.cwd });
+          if (!pathCheck.allowed) return `Error: ${pathCheck.reason}`;
 
           // GateGuard: block first write per file, demand investigation
           const gateCheck = gateguard.check(filePath);
@@ -1349,6 +1355,10 @@ class SubAgentRuntime {
           if (!filePath || findText === undefined || replaceText === undefined) {
             return "Error: Missing path, find, or replace argument.";
           }
+
+          // Policy-as-Code filesystem boundary check
+          const editPathCheck = policyValidator.validate({ type: "edit_file", path: filePath, workdir: this.ctx.cwd });
+          if (!editPathCheck.allowed) return `Error: ${editPathCheck.reason}`;
 
           // GateGuard: block first edit per file, demand investigation
           const gateCheck = gateguard.check(filePath);
@@ -1383,6 +1393,8 @@ class SubAgentRuntime {
         }
         case "ls": {
           const dirPath = args.path || ".";
+          const lsPathCheck = policyValidator.validate({ type: "read_file", path: dirPath, workdir: this.ctx.cwd });
+          if (!lsPathCheck.allowed) return `Error: ${lsPathCheck.reason}`;
           const list = await this.storage.listDirectory(dirPath);
           return list.map(f => `${f.name}${f.isDir ? "/" : ""}`).join("\n");
         }
@@ -1402,6 +1414,11 @@ class SubAgentRuntime {
               return `Error: Command blocked by security regex: ${blockedRegex}`;
             }
           }
+          // Policy-as-Code check
+          const policyResult = policyValidator.validate({ type: "run_command", command, workdir: this.ctx.cwd });
+          if (!policyResult.allowed) {
+            return `Error: ${policyResult.reason}`;
+          }
           const result = execSync(command, { cwd: this.ctx.cwd, encoding: "utf8", timeout: 45000 });
           return result.length > MAX_OUT ? result.slice(0, MAX_OUT) + `\n...[Output truncated to ${Math.round(MAX_OUT / 1000)}KB]` : result;
         }
@@ -1409,6 +1426,8 @@ class SubAgentRuntime {
           const pattern = args.pattern;
           const pathArg = args.path || ".";
           if (!pattern) return "Error: Missing pattern argument.";
+          const grepPathCheck = policyValidator.validate({ type: "read_file", path: pathArg, workdir: this.ctx.cwd });
+          if (!grepPathCheck.allowed) return `Error: ${grepPathCheck.reason}`;
           const safePath = this.safeResolve(pathArg);
           try {
             const grepResult = spawnSync('rg', ['--no-filename', '--color', 'never', pattern, safePath], {
@@ -3970,7 +3989,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /resume, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
@@ -3981,7 +4000,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
   });
 
   // ── Resume Command ──────────────────────────────────────────────────────────
-  pi.registerCommand("resume", {
+  pi.registerCommand("checkpoint", {
     description: "Resume from the latest checkpoint. Restores goal, subtasks, and context.",
     handler(args, ctx) {
       const cp = getLatestCheckpoint();
@@ -4049,7 +4068,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       if (latest && Date.now() - latest.timestamp < 3600_000) {
         const age = Math.round((Date.now() - latest.timestamp) / 1000);
         ctx.ui.notify(
-          `Recovery checkpoint found from ${age}s ago (task: "${latest.goal.slice(0, 60)}"). Resume? Use /resume to continue.`,
+          `Recovery checkpoint found from ${age}s ago (task: "${latest.goal.slice(0, 60)}"). Resume? Use /checkpoint to continue.`,
           "info"
         );
       }
