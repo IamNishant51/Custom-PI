@@ -1,4 +1,5 @@
 import { trackCost } from "./cost-tracker";
+import { isProviderHealthy } from "./mcp-catalog";
 
 export interface ModelRoute {
   tier: "cheap" | "balanced" | "capable" | "reasoning";
@@ -6,14 +7,23 @@ export interface ModelRoute {
   model: string;
 }
 
+export interface ProviderHealth {
+  provider: string;
+  healthy: boolean;
+  fallback?: string;
+}
+
+const FALLBACK_CHAIN: Record<string, string[]> = {
+  anthropic: ["openai", "google"],
+  openai: ["anthropic", "google"],
+  google: ["openai", "anthropic"],
+};
+
 const MODELS: Record<string, ModelRoute> = {
-  // Sonnet — default capable
   "claude-sonnet-4": { tier: "capable", provider: "anthropic", model: "claude-sonnet-4" },
   "claude-haiku-3.5": { tier: "cheap", provider: "anthropic", model: "claude-haiku-3.5" },
-  // OpenAI
   "gpt-4o": { tier: "capable", provider: "openai", model: "gpt-4o" },
   "gpt-4o-mini": { tier: "cheap", provider: "openai", model: "gpt-4o-mini" },
-  // Gemini
   "gemini-2.5-flash": { tier: "balanced", provider: "google", model: "gemini-2.5-flash" },
   "gemini-2.5-pro": { tier: "capable", provider: "google", model: "gemini-2.5-pro" },
 };
@@ -40,7 +50,30 @@ export function resolveModelForTask(task: {
 
   const tier = tierMap[task.complexity] || "balanced";
   const modelId = currentRoutes[tier];
-  return MODELS[modelId] || MODELS["claude-sonnet-4"];
+  return resolveWithFallback(modelId);
+}
+
+function resolveWithFallback(modelId: string): ModelRoute {
+  const primary = MODELS[modelId];
+  if (!primary) return MODELS["claude-sonnet-4"];
+
+  if (isProviderHealthy(primary.provider)) return primary;
+
+  const fallbacks = FALLBACK_CHAIN[primary.provider] || [];
+  for (const fbProvider of fallbacks) {
+    if (!isProviderHealthy(fbProvider)) continue;
+    const fbModel = findModelForTier(primary.tier, fbProvider);
+    if (fbModel) return fbModel;
+  }
+
+  return primary;
+}
+
+function findModelForTier(tier: string, provider: string): ModelRoute | null {
+  for (const m of Object.values(MODELS)) {
+    if (m.tier === tier && m.provider === provider) return m;
+  }
+  return null;
 }
 
 export function getModelRouteForTier(tier: string): string {
@@ -89,5 +122,5 @@ export function trackCostWithRetry(
 export function getModelCostProfile(modelId: string): { input: number; output: number } | null {
   const route = MODELS[modelId];
   if (!route) return null;
-  return null; // cost-tracker manages rates
+  return null;
 }

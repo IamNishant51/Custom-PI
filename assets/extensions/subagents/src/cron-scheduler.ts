@@ -1,6 +1,7 @@
 import { runCurator, CuratorReport } from "./curator";
 import { closeDb } from "./state-db";
 import { memoryConsolidate as fileConsolidate } from "./memory-file-store";
+import { loadMcpServers, probeMcpServer, probeProvider } from "./mcp-catalog";
 
 // ── Cron Parser (zero-dependency) ──────────────────────────────────────────
 
@@ -119,6 +120,7 @@ export interface CronConfig {
   curatorIntervalMs: number;
   consolidationIntervalMs: number;
   dbCleanupIntervalMs: number;
+  healthCheckIntervalMs: number;
   customJobs: CronJob[];
 }
 
@@ -126,6 +128,7 @@ const DEFAULT_CONFIG: CronConfig = {
   curatorIntervalMs: 6 * 60 * 60 * 1000,
   consolidationIntervalMs: 1 * 60 * 60 * 1000,
   dbCleanupIntervalMs: 24 * 60 * 60 * 1000,
+  healthCheckIntervalMs: 5 * 60 * 1000,
   customJobs: [],
 };
 
@@ -170,7 +173,20 @@ export function startCronJobs(
     try { closeDb(); } catch { /* silent */ }
   }, cfg.dbCleanupIntervalMs);
 
-  timers = [curatorTimer, consolidationTimer, dbTimer];
+  // Health check job — probe enabled MCP servers and known providers
+  const healthTimer = setInterval(async () => {
+    try {
+      const servers = loadMcpServers().filter(s => s.enabled);
+      await Promise.allSettled(servers.map(s => probeMcpServer(s.id)));
+      await Promise.allSettled([
+        probeProvider("anthropic", process.env.ANTHROPIC_API_KEY),
+        probeProvider("openai", process.env.OPENAI_API_KEY),
+        probeProvider("google", process.env.GEMINI_API_KEY),
+      ]);
+    } catch { /* silent */ }
+  }, cfg.healthCheckIntervalMs);
+
+  timers = [curatorTimer, consolidationTimer, dbTimer, healthTimer];
 }
 
 export function stopCronJobs(): void {

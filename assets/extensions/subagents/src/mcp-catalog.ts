@@ -6,8 +6,156 @@ import type { McpServerConfig, McpToolDefinition } from "./acp-types";
 
 const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
 const MCP_CONFIG_PATH = path.join(CONFIG_DIR, "mcp-servers.json");
+const HEALTH_CACHE_TTL = 300_000; // 5 min
 
 let cachedServers: McpServerConfig[] | null = null;
+
+// ── Health Registry ─────────────────────────────────────────────────────────
+
+export interface HealthEntry {
+  id: string;
+  label: string;
+  type: "mcp" | "provider";
+  healthy: boolean;
+  lastChecked: number;
+  latencyMs: number;
+  error?: string;
+}
+
+const healthCache = new Map<string, HealthEntry>();
+
+export async function probeMcpServer(serverId: string): Promise<HealthEntry> {
+  const servers = loadMcpServers();
+  const server = servers.find(s => s.id === serverId);
+  const label = server?.name || serverId;
+  const start = Date.now();
+
+  if (!server || !server.enabled || server.transport !== "stdio" || !server.command) {
+    const entry: HealthEntry = {
+      id: serverId, label, type: "mcp",
+      healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
+      error: server ? "Server disabled or invalid transport" : "Server not found",
+    };
+    healthCache.set(serverId, entry);
+    return entry;
+  }
+
+  try {
+    const result = spawnSync(server.command, [...(server.args || []), "--list-tools"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10_000,
+      encoding: "utf8",
+      env: { ...process.env, ...server.env },
+    });
+    const ok = result.status === 0 && !!result.stdout;
+    const entry: HealthEntry = {
+      id: serverId, label, type: "mcp",
+      healthy: ok,
+      lastChecked: Date.now(),
+      latencyMs: Date.now() - start,
+      error: ok ? undefined : `exit ${result.status}: ${(result.stderr || "").slice(0, 200)}`,
+    };
+    healthCache.set(serverId, entry);
+    return entry;
+  } catch (e: any) {
+    const entry: HealthEntry = {
+      id: serverId, label, type: "mcp",
+      healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
+      error: e.message?.slice(0, 200) || String(e),
+    };
+    healthCache.set(serverId, entry);
+    return entry;
+  }
+}
+
+export async function probeProvider(provider: string, apiKey?: string): Promise<HealthEntry> {
+  const start = Date.now();
+  const label = provider;
+
+  if (!apiKey) {
+    const entry: HealthEntry = {
+      id: `provider:${provider}`, label, type: "provider",
+      healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
+      error: "No API key configured",
+    };
+    healthCache.set(`provider:${provider}`, entry);
+    return entry;
+  }
+
+  try {
+    let healthy = false;
+    let error: string | undefined;
+
+    switch (provider) {
+      case "anthropic": {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "claude-haiku-3-5-20241022", max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        healthy = r.ok || r.status === 400; // 400 = auth OK but bad request
+        if (!healthy) error = `HTTP ${r.status}`;
+        break;
+      }
+      case "openai": {
+        const r = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        healthy = r.ok;
+        if (!healthy) error = `HTTP ${r.status}`;
+        break;
+      }
+      case "google": {
+        const r = await fetch("https://generativelanguage.googleapis.com/v1/models?key=" + apiKey, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        healthy = r.ok;
+        if (!healthy) error = `HTTP ${r.status}`;
+        break;
+      }
+      default:
+        healthy = true; // unknown provider, assume healthy
+    }
+
+    const entry: HealthEntry = {
+      id: `provider:${provider}`, label, type: "provider",
+      healthy, lastChecked: Date.now(), latencyMs: Date.now() - start,
+      error,
+    };
+    healthCache.set(`provider:${provider}`, entry);
+    return entry;
+  } catch (e: any) {
+    const entry: HealthEntry = {
+      id: `provider:${provider}`, label, type: "provider",
+      healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
+      error: e.message?.slice(0, 200) || String(e),
+    };
+    healthCache.set(`provider:${provider}`, entry);
+    return entry;
+  }
+}
+
+export function getCachedHealth(id: string): HealthEntry | undefined {
+  const entry = healthCache.get(id);
+  if (!entry) return undefined;
+  if (Date.now() - entry.lastChecked > HEALTH_CACHE_TTL) return undefined;
+  return entry;
+}
+
+export function getAllHealth(): HealthEntry[] {
+  return Array.from(healthCache.values());
+}
+
+export function isProviderHealthy(provider: string): boolean {
+  const entry = healthCache.get(`provider:${provider}`);
+  if (!entry) return true; // no data = assume healthy
+  if (Date.now() - entry.lastChecked > HEALTH_CACHE_TTL) return true;
+  return entry.healthy;
+}
+
+// ── Original MCP Catalog ───────────────────────────────────────────────────
 
 const BUILTIN_MCP_SERVERS: McpServerConfig[] = [
   {
