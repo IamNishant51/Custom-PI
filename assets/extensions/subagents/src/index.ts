@@ -1846,6 +1846,14 @@ function treeConnectorFirst(total: number): string {
   return "\u250c\u2500"; // ┌─
 }
 
+// Safety: truncate all lines in a render result to stay within terminal width
+function truncateLines(lines: string[], maxWidth: number): string[] {
+  return lines.map(line => {
+    const vw = visibleWidth(line);
+    return vw > maxWidth ? truncateToWidth(line, maxWidth) : line;
+  });
+}
+
 function patchUserMessage(proto: any) {
   if (userMessagePatched) return;
   userMessagePatched = true;
@@ -1857,7 +1865,7 @@ function patchUserMessage(proto: any) {
       return [];
     }
 
-    const contentWidth = Math.max(20, width - 6);
+    const contentWidth = Math.max(20, width - 8);
     const mdLines = markdownComponent.render(contentWidth);
 
     // OpenClaude Professional Blue: rgb(106,155,204)
@@ -1885,7 +1893,7 @@ function patchUserMessage(proto: any) {
     lines[0] = OSC133_ZONE_START + lines[0];
     lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
 
-    return lines;
+    return truncateLines(lines, width);
   };
 }
 
@@ -1985,13 +1993,15 @@ function patchToolExecution(proto: any) {
           contentLines.push(indent + dimFn2(line));
         } else if (trimmed.startsWith("+") && !trimmed.startsWith("+++")) {
           if (!diffBlockOpen) {
-            contentLines.push(indent + dimFn2("\u2501").repeat(3) + " diff " + dimFn2("\u2501").repeat(3));
+            const sepLen = Math.max(3, Math.floor((width - 10) / 2));
+            contentLines.push(indent + dimFn2("\u2501").repeat(sepLen) + " diff " + dimFn2("\u2501").repeat(sepLen));
             diffBlockOpen = true;
           }
           contentLines.push(indent + diffAdded(line));
         } else if (trimmed.startsWith("-") && !trimmed.startsWith("---")) {
           if (!diffBlockOpen) {
-            contentLines.push(indent + dimFn2("\u2501").repeat(3) + " diff " + dimFn2("\u2501").repeat(3));
+            const sepLen = Math.max(3, Math.floor((width - 10) / 2));
+            contentLines.push(indent + dimFn2("\u2501").repeat(sepLen) + " diff " + dimFn2("\u2501").repeat(sepLen));
             diffBlockOpen = true;
           }
           contentLines.push(indent + diffRemoved(line));
@@ -2003,7 +2013,7 @@ function patchToolExecution(proto: any) {
       contentLines = rawLines.map((line: string) => indent + line);
     }
 
-    return [headerLine, ...contentLines];
+    return truncateLines([headerLine, ...contentLines], width);
   };
 }
 
@@ -2031,7 +2041,7 @@ function patchAssistantMessage(proto: any) {
 
     // OpenClaude style: model name left-aligned above markdown
     const result: string[] = [];
-    result.push(brandOrange(modelStr));
+    result.push(brandOrange(truncateToWidth(modelStr, width - 4)));
     for (const line of lines) {
       result.push(line);
     }
