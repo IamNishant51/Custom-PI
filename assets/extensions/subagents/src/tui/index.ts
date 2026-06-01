@@ -17,3 +17,8 @@ export { SPINNERS, THEME, BOX, SPACING, hexToAnsi, getResponsiveBreakpoint } fro
 export type { ThemeColors, SpinnerConfig, Message, AgentState, VimMode, PulseConfig, TruecolorStyle, ConversationHeader, ScrollIndicator, ResponsiveBreakpoint, SurfaceLevel, LayoutRegion } from "./types";
 export { PulseController, hexToRgb, rgbToHex } from "./app/pulse-controller";
 export type { PulseConfig as PulseControllerConfig } from "./app/pulse-controller";
+export {
+  registerPlugin, deregisterPlugin, getCardRenderer, getCommand,
+  getEventHandlers, emitEvent, listPlugins, listCardRenderers, listCommands,
+} from "./plugin-registry";
+export type { TuiPlugin, CardRenderer, PluginCommand, PluginEventHook } from "./plugin-registry";

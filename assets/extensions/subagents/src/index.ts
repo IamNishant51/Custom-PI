@@ -18,6 +18,7 @@ import { store as storeMemory, search as searchMemory, remove as deleteMemory, s
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { detectStack, formatStackSummary } from "./stack-detector";
 import { gateguard, policyValidator } from "./gateguard";
+import { registerPlugin, listPlugins, listCardRenderers, listCommands } from "./tui";
 import { contextMonitor } from "./context-monitor";
 import { coalesceMessages, strictifySchema } from "./swarm-router";
 import { C } from "./tui-colors";
@@ -3984,12 +3985,30 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // ── Plugins Command ─────────────────────────────────────────────────────────
+  pi.registerCommand("plugins", {
+    description: "List registered TUI plugins and components.",
+    handler(args, ctx) {
+      const all = listPlugins();
+      const cards = listCardRenderers();
+      const cmds = listCommands();
+      ctx.ui.notify(
+        `Plugins (${all.length}): ${all.map(p => `${p.name}@${p.version}`).join(", ") || "none"}. ` +
+        `Cards: ${cards.join(", ") || "none"}. Commands: ${cmds.join(", ") || "none"}.`,
+        "info"
+      );
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // Command: Show keybindings and commands
   pi.registerCommand("help", {
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /plugins, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
@@ -4596,5 +4615,11 @@ If nothing to report, return: {}`;
     activeTrackers.clear();
     activeInvalidators.clear();
     teardownWidget(ctx);
+  });
+
+  // Register core TUI plugin in the plugin registry
+  registerPlugin({
+    name: "pi-subagent-core",
+    version: "1.5.0",
   });
 }
