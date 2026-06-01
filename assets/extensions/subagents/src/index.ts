@@ -1963,15 +1963,8 @@ function patchToolExecution(proto: any) {
       ? truncateToWidth(fullHeader, maxSummaryW) + "\u2026"
       : fullHeader;
 
-    // Build header: ● ToolName(params) with optional (ctrl+o to expand)
+    // Build header: ● ToolName (params)
     let headerLine = `${statusDot} ${yellow(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
-    // Check if output is collapsed (first content line has "earlier lines" or similar)
-    const contentStartIndex = rawLines.length > 0 ? 1 : 0;
-    const firstContentLine = contentStartIndex < rawLines.length ? rawLines[contentStartIndex] : "";
-    const isCollapsed = firstContentLine.includes("earlier lines") || firstContentLine.includes("ctrl+o");
-    if (isCollapsed) {
-      headerLine += dimFn(" (ctrl+o to expand)");
-    }
 
     // Detect diff output for edit-type tools
     const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
