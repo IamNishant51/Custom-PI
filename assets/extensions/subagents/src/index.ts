@@ -18,6 +18,7 @@ import { buildMemoryContextBlock } from "./memory-retrieval";
 import { detectStack, formatStackSummary } from "./stack-detector";
 import { gateguard } from "./gateguard";
 import { contextMonitor } from "./context-monitor";
+import { coalesceMessages, strictifySchema } from "./swarm-router";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
 import { TuiManager, SPACING as TUI_SPACING } from "./tui";
@@ -1109,7 +1110,7 @@ const SUBAGENT_TOOLS = {
     description: "Read the contents of a file from the local filesystem.",
     parameters: Type.Object({
       path: Type.String({ description: "Relative or absolute path to the file to read" })
-    })
+    }, { additionalProperties: false })
   },
   write: {
     name: "write",
@@ -1117,7 +1118,7 @@ const SUBAGENT_TOOLS = {
     parameters: Type.Object({
       path: Type.String({ description: "Relative or absolute path to the file to write" }),
       content: Type.String({ description: "The complete content to write to the file" })
-    })
+    }, { additionalProperties: false })
   },
   edit: {
     name: "edit",
@@ -1126,14 +1127,14 @@ const SUBAGENT_TOOLS = {
       path: Type.String({ description: "Relative or absolute path to the file to edit" }),
       find: Type.String({ description: "The exact block of text in the file to find" }),
       replace: Type.String({ description: "The replacement block of text" })
-    })
+    }, { additionalProperties: false })
   },
   ls: {
     name: "ls",
     description: "List the files and folders in a directory.",
     parameters: Type.Object({
       path: Type.Optional(Type.String({ description: "Relative or absolute path to the directory (defaults to current directory)" }))
-    })
+    }, { additionalProperties: false })
   },
   grep: {
     name: "grep",
@@ -1141,28 +1142,28 @@ const SUBAGENT_TOOLS = {
     parameters: Type.Object({
       pattern: Type.String({ description: "The pattern/substring to search for" }),
       path: Type.Optional(Type.String({ description: "Optional relative/absolute path to search inside (defaults to current directory)" }))
-    })
+    }, { additionalProperties: false })
   },
   bash: {
     name: "bash",
     description: "Run a bash shell command on the host system. Use this only for building, testing, or running projects.",
     parameters: Type.Object({
       command: Type.String({ description: "The shell command to execute" })
-    })
+    }, { additionalProperties: false })
   },
   web_search: {
     name: "web_search",
-    description: "Perform a web search using Tavily or Serper API to get up-to-date information.",
+    description: "Perform a web search to get up-to-date information.",
     parameters: Type.Object({
       query: Type.String({ description: "The search query to lookup on the web" })
-    })
+    }, { additionalProperties: false })
   },
   web_fetch: {
     name: "web_fetch",
     description: "Fetch and extract text content from a web page/URL.",
     parameters: Type.Object({
       url: Type.String({ description: "The absolute URL of the web page to fetch" })
-    })
+    }, { additionalProperties: false })
   },
   request_tool: {
     name: "request_tool",
@@ -4274,6 +4275,20 @@ If nothing to report, return: {}`;
     } finally {
       isProcessingBackground = false;
     }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Swarm Routing — coalesce same-role messages for strict runners (Ollama)
+  // ─────────────────────────────────────────────────────────────────────────
+  pi.on("context", async (event, _ctx) => {
+    try {
+      if (event.messages && event.messages.length > 1) {
+        event.messages = coalesceMessages(event.messages);
+      }
+    } catch {
+      // must never crash
+    }
+    return { messages: event.messages };
   });
 
   // ─────────────────────────────────────────────────────────────────────────
