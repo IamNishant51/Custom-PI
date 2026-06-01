@@ -1956,8 +1956,52 @@ function patchToolExecution(proto: any) {
 
     // OpenClaude style: tool name bold with spinner + params inline
     const headerLine = toolColor(statusSymbol + " " + truncatedHeader);
+
+    // Phase 4: Detect diff output for edit-type tools
+    const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
+    const hasDiff = rawLines.some((l: string) => /^[+-]{1,3}/.test(l.trim()));
+
     const indent = "  ";
-    const contentLines = rawLines.map((line: string) => indent + line);
+    let contentLines: string[];
+
+    if ((isEditTool || hasDiff) && !isRunning) {
+      // Render diff with green/red highlighting
+      const diffAdded = (theme && typeof theme.fg === "function")
+        ? (s: string) => theme.fg("success", s)
+        : (s: string) => `\x1b[32m${s}\x1b[0m`;
+      const diffRemoved = (theme && typeof theme.fg === "function")
+        ? (s: string) => theme.fg("error", s)
+        : (s: string) => `\x1b[31m${s}\x1b[0m`;
+      const dimFn2 = (theme && typeof theme.fg === "function")
+        ? (s: string) => theme.fg("muted", s)
+        : (s: string) => `\x1b[90m${s}\x1b[0m`;
+
+      contentLines = [];
+      let diffBlockOpen = false;
+      for (const line of rawLines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
+          contentLines.push(indent + dimFn2(line));
+        } else if (trimmed.startsWith("+") && !trimmed.startsWith("+++")) {
+          if (!diffBlockOpen) {
+            contentLines.push(indent + dimFn2("\u2501").repeat(3) + " diff " + dimFn2("\u2501").repeat(3));
+            diffBlockOpen = true;
+          }
+          contentLines.push(indent + diffAdded(line));
+        } else if (trimmed.startsWith("-") && !trimmed.startsWith("---")) {
+          if (!diffBlockOpen) {
+            contentLines.push(indent + dimFn2("\u2501").repeat(3) + " diff " + dimFn2("\u2501").repeat(3));
+            diffBlockOpen = true;
+          }
+          contentLines.push(indent + diffRemoved(line));
+        } else {
+          contentLines.push(indent + line);
+        }
+      }
+    } else {
+      contentLines = rawLines.map((line: string) => indent + line);
+    }
+
     return [headerLine, ...contentLines];
   };
 }
