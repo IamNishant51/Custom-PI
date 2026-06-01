@@ -1685,6 +1685,7 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
           systemPrompt: this.systemPrompt,
           messages,
           tools: tools.length > 0 ? tools : undefined,
+          signal: this.signal,
         }, {
           apiKey: auth.apiKey,
           headers: auth.headers,
@@ -2944,6 +2945,16 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
       });
       context.ui.setWorkingMessage(`Running ${tasks.length} sub-agents in parallel...`);
 
+      // Stop animation and clean up if abort signal fires
+      if (signal) {
+        signal.addEventListener("abort", () => {
+          stopGlobalAnimation();
+          context.ui.setWorkingIndicator();
+          context.ui.setWorkingMessage();
+          context.ui.setStatus("subagents", undefined);
+        }, { once: true });
+      }
+
       // Set up widget
       setupWidget(context);
 
@@ -2973,7 +2984,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
 
         try {
           const trackerId = `${id}:${index}`;
-          const runtime = new SubAgentRuntime(context, config, trackerId);
+          const runtime = new SubAgentRuntime(context, config, trackerId, signal);
           const result = await runtime.execute(t.task);
           const tracker = activeTrackers.get(trackerId);
           if (tracker) tracker.result = result;
