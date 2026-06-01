@@ -1,11 +1,11 @@
-```
-  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗
+<p align="center">
+  <img src="assets/Custom-pi-logo.png" alt="  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗
  ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║
  ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║
  ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║
  ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
-  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝
-```
+  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝" width="80%" />
+</p>
 
 <p align="center">
   <b>HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.</b><br/>
@@ -19,10 +19,6 @@
   <img src="https://img.shields.io/badge/TF--IDF-Memory-00ff88.svg?style=for-the-badge" alt="TF-IDF Memory" />
   <img src="https://img.shields.io/badge/DAG-Swarm-af00ff.svg?style=for-the-badge" alt="DAG Swarm" />
   <img src="https://img.shields.io/badge/Tests-142%20Passed-00f0ff.svg?style=for-the-badge" alt="142 Tests" />
-</p>
-
-<p align="center">
-  <img src="assets/Custom-pi-logo.png" alt="Custom-PI Logo" width="80%" />
 </p>
 
 ---
