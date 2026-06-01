@@ -183,3 +183,155 @@ export async function webSearchCascade(query: string): Promise<WebResult[]> {
 
   return results;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Dynamic Tiered Context Recall
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type IntentCategory = "conversational" | "knowledge_graph" | "system_state" | "unknown";
+
+const CONVERSATIONAL_PATTERNS = [
+  /^(what|who|when|where|why|how) (did|was|were|have|has|had) /i,
+  /^(can you|could you|would you|will you) /i,
+  /^(i think|i feel|i remember|i recall) /i,
+  /^(tell me about|show me|explain) /i,
+  /^(do you|did you|have you) /i,
+  /^remember /i,
+  /^recall /i,
+];
+
+const KNOWLEDGE_PATTERNS = [
+  /^(what is|what are|what does|what do|how does|how do) /i,
+  /^(find|locate|search for|look up) /i,
+  /^(list|show|get|fetch) .* (depend|relation|connect|associate)/i,
+  /^(which|what) .* (use|depend|implement|extend|calls?)/i,
+  /^(relation|connection|link|edge) (between|among) /i,
+  /dependenc/i,
+  /triplet/i,
+];
+
+const SYSTEM_PATTERNS = [
+  /^(check|show|get|display|what is the) (status|state|health|budget|cost|context)/i,
+  /^(how many|how much|count) /i,
+  /^(list|show) (session|task|file|memory)/i,
+  /^(running|active|current) (process|task|job)/i,
+  /^system /i,
+];
+
+export function classifyIntent(query: string): IntentCategory {
+  const q = query.trim();
+
+  for (const p of SYSTEM_PATTERNS) {
+    if (p.test(q)) return "system_state";
+  }
+  for (const p of KNOWLEDGE_PATTERNS) {
+    if (p.test(q)) return "knowledge_graph";
+  }
+  for (const p of CONVERSATIONAL_PATTERNS) {
+    if (p.test(q)) return "conversational";
+  }
+
+  return "unknown";
+}
+
+export interface TieredRetrievalOptions {
+  sessionId?: string;
+  minConfidence?: number;
+}
+
+export interface TieredRetrievalResult {
+  primarySource: IntentCategory;
+  content: string;
+  confidence: number;
+  fallbackUsed: boolean;
+  sources: string[];
+}
+
+export async function tieredRetrieve(
+  query: string,
+  searchSession: (sessionId: string, query: string) => any[],
+  queryTripletsFn: (filter: {
+    subjectId?: string; subjectType?: string; predicateType?: string;
+    objectId?: string; objectType?: string; minConfidence?: number;
+  }) => any[],
+  findConnectedFn: (entityId: string) => any[],
+  opts?: TieredRetrievalOptions,
+): Promise<TieredRetrievalResult> {
+  const intent = classifyIntent(query);
+  const minConf = opts?.minConfidence ?? 0.6;
+  const sources: string[] = [];
+  let content = "";
+  let confidence = 0;
+  let fallbackUsed = false;
+
+  if (intent === "conversational") {
+    // Tier A: FTS5 full-text search (fast)
+    if (opts?.sessionId) {
+      const ftsResults = searchSession(opts.sessionId, query);
+      if (ftsResults.length > 0) {
+        content = ftsResults.slice(0, 3).map((r: any) => r.content || r.text).join("\n\n");
+        confidence = 0.85;
+        sources.push("fts5");
+        return { primarySource: "conversational", content, confidence, fallbackUsed: false, sources };
+      }
+    }
+    // Fallback to knowledge graph
+    fallbackUsed = true;
+    const triplets = queryTripletsFn({ minConfidence: minConf });
+    if (triplets.length > 0) {
+      content = triplets.slice(0, 3).map(t => `${t.subjectLabel} ${t.predicateLabel} ${t.objectLabel}`).join("\n");
+      confidence = 0.6;
+      sources.push("triplets");
+    }
+  } else if (intent === "knowledge_graph") {
+    // Tier B: Knowledge graph triplets
+    const triplets = queryTripletsFn({ minConfidence: minConf });
+    if (triplets.length > 0) {
+      content = triplets.slice(0, 5).map(t => `${t.subjectLabel} ${t.predicateLabel} ${t.objectLabel} (${(t.confidenceScore * 100).toFixed(0)}%)`).join("\n");
+      confidence = 0.8;
+      sources.push("triplets");
+      return { primarySource: "knowledge_graph", content, confidence, fallbackUsed: false, sources };
+    }
+    // Fallback to FTS5
+    if (opts?.sessionId) {
+      const ftsResults = searchSession(opts.sessionId, query);
+      if (ftsResults.length > 0) {
+        content = ftsResults.slice(0, 3).map((r: any) => r.content || r.text).join("\n\n");
+        confidence = 0.6;
+        sources.push("fts5");
+        fallbackUsed = true;
+      }
+    }
+  } else if (intent === "system_state") {
+    // Tier C: system state — just return indication
+    sources.push("system_state");
+    return { primarySource: "system_state", content: "[System state query — use / commands for details]", confidence: 1.0, fallbackUsed: false, sources };
+  } else {
+    // Unknown intent — try FTS5 first, then triplets
+    if (opts?.sessionId) {
+      const ftsResults = searchSession(opts.sessionId, query);
+      if (ftsResults.length > 0) {
+        content = ftsResults.slice(0, 3).map((r: any) => r.content || r.text).join("\n\n");
+        confidence = 0.7;
+        sources.push("fts5");
+      }
+    }
+    if (!content) {
+      const triplets = queryTripletsFn({ minConfidence: minConf });
+      if (triplets.length > 0) {
+        content = triplets.slice(0, 3).map(t => `${t.subjectLabel} ${t.predicateLabel} ${t.objectLabel}`).join("\n");
+        confidence = 0.5;
+        sources.push("triplets");
+        fallbackUsed = true;
+      }
+    }
+  }
+
+  return {
+    primarySource: content ? intent : "unknown",
+    content: content || "No relevant context found.",
+    confidence,
+    fallbackUsed,
+    sources,
+  };
+}
