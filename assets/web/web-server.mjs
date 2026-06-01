@@ -4950,7 +4950,7 @@ async function main() {
   app.get("/api/memory/stats", async () => memoryStats());
 
   // ── Knowledge Graph API ──────────────────────────────────────────────────
-  const STATE_DB_PATH = path.join(PI_DIR, "extensions", "subagents", "data", "state.db");
+  const STATE_DB_PATH = path.join(PI_DIR, "session-state.db");
 
   app.get("/api/knowledge/triplets", async (req) => {
     try {
