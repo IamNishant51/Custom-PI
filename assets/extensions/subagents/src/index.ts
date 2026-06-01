@@ -16,6 +16,8 @@ import os from "node:os";
 import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted, getSkills, flush as flushMemory } from "./memory-store";
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { detectStack, formatStackSummary } from "./stack-detector";
+import { gateguard } from "./gateguard";
+import { contextMonitor } from "./context-monitor";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
 import { TuiManager, SPACING as TUI_SPACING } from "./tui";
@@ -1352,6 +1354,9 @@ class SubAgentRuntime {
     this.tracker.currentToolArgs = JSON.stringify(args).slice(0, 100);
     this.tracker.toolCallCount++;
 
+    // Context monitor: track every tool call for loop detection
+    contextMonitor.recordToolCall(name, args);
+
     try {
       const MAX_OUT = SubAgentRuntime.MAX_TOOL_OUTPUT;
 
@@ -1367,7 +1372,17 @@ class SubAgentRuntime {
           const filePath = args.path;
           const content = args.content;
           if (!filePath || content === undefined) return "Error: Missing path or content argument.";
-          
+
+          // GateGuard: block first write per file, demand investigation
+          const gateCheck = gateguard.check(filePath);
+          if (gateCheck.blocked) {
+            gateguard.approve(filePath);
+            return gateCheck.message || "Investigate before writing.";
+          }
+
+          // Track file modification
+          contextMonitor.recordFileModification(filePath);
+
           // Formal Verification check
           const verify = await runVerification(content, "");
           if (!verify.passed) {
@@ -1389,6 +1404,14 @@ class SubAgentRuntime {
           if (!filePath || findText === undefined || replaceText === undefined) {
             return "Error: Missing path, find, or replace argument.";
           }
+
+          // GateGuard: block first edit per file, demand investigation
+          const gateCheck = gateguard.check(filePath);
+          if (gateCheck.blocked) {
+            gateguard.approve(filePath);
+            return gateCheck.message || "Investigate before editing.";
+          }
+
           const exists = await this.storage.exists(filePath);
           if (!exists) {
             return `Error: File not found: ${filePath}`;
@@ -3621,12 +3644,53 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // Command: Context Monitor status
+  pi.registerCommand("context", {
+    description: "Show context usage, warnings, and recent tool activity.",
+    handler(_args, ctx) {
+      const percent = contextMonitor.getContextPercent();
+      const files = contextMonitor.getFilesModified();
+      const loopWarnings = contextMonitor.getToolLoopWarnings();
+      const thresholdWarnings = contextMonitor.getThresholdWarnings();
+      const summary = contextMonitor.getSummary();
+
+      const lines = ["── Context Monitor ──", `  Usage: ${Math.round(percent)}%`];
+      if (files.length > 0) lines.push(`  Files modified: ${files.length}`);
+      if (loopWarnings.length > 0) loopWarnings.forEach(w => lines.push(`  ⚠ ${w}`));
+      if (thresholdWarnings.length > 0) thresholdWarnings.forEach(w => lines.push(`  ⚠ ${w}`));
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // Command: GateGuard status
+  pi.registerCommand("gateguard", {
+    description: "Show GateGuard status or reset tracking for files.",
+    handler(args, ctx) {
+      const mode = (args as string || "").trim().toLowerCase();
+      if (mode === "reset") {
+        gateguard.reset();
+        ctx.ui.notify("GateGuard tracking reset for all files.", "info");
+      } else if (mode === "stats" || mode === "status") {
+        const stats = gateguard.getStats();
+        ctx.ui.notify(`GateGuard: ${stats.total} files tracked, ${stats.blocked} pending, ${stats.approved} approved.`, "info");
+      } else {
+        ctx.ui.notify(`Usage: /gateguard status — show tracked files. /gateguard reset — clear all tracking.`, "info");
+      }
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // Command: Show keybindings and commands
   pi.registerCommand("help", {
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /help, /tui. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
@@ -4076,6 +4140,30 @@ If nothing to report, return: {}`;
       } catch {}
     } finally {
       isProcessingBackground = false;
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Context Monitor — track context % on each turn end, emit warnings
+  // ─────────────────────────────────────────────────────────────────────────
+  pi.on("turn_end", async (_event, ctx) => {
+    try {
+      const usage = ctx.getContextUsage();
+      if (usage && usage.percent !== null) {
+        contextMonitor.updateContext(usage.percent);
+
+        const thresholdWarnings = contextMonitor.getThresholdWarnings();
+        for (const warn of thresholdWarnings) {
+          ctx.ui.notify(warn, "warning");
+        }
+
+        const loopWarnings = contextMonitor.getToolLoopWarnings();
+        for (const warn of loopWarnings) {
+          ctx.ui.notify(warn, "warning");
+        }
+      }
+    } catch {
+      // context monitor must never crash
     }
   });
 
