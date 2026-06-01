@@ -1912,7 +1912,21 @@ function patchToolExecution(proto: any) {
     }
 
     const contentWidth = Math.max(10, width - 8);
-    const rawLines = originalToolRender.call(this, contentWidth);
+    let rawLines = originalToolRender.call(this, contentWidth);
+    // Strip theme background ANSI codes — keep foreground colors and content intact
+    rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
+    // Remove leading/trailing blank lines and collapse runs of blanks into one
+    let prevBlank = false;
+    rawLines = rawLines.filter((l: string) => {
+      const isBlank = l.trim() === "";
+      if (isBlank && prevBlank) return false;
+      prevBlank = isBlank;
+      return true;
+    });
+    // Trim leading blank lines
+    while (rawLines.length > 0 && rawLines[0].trim() === "") rawLines.shift();
+    // Trim trailing blank lines
+    while (rawLines.length > 0 && rawLines[rawLines.length - 1].trim() === "") rawLines.pop();
 
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
