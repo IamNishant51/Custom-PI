@@ -30,7 +30,7 @@ import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate a
 import { initNudgeState, incrementTurn, shouldNudgeMemory, shouldNudgeSkill, resetMemoryNudge, resetSkillNudge, getNudgeState } from "./memory-nudge";
 import { runMemoryReview, runSkillReview, runPreCompressionFlush } from "./background-review";
 import { startCronJobs, stopCronJobs, isCronRunning } from "./cron-scheduler";
-import { ensureSession, insertMessage, searchSession, closeDb, saveCheckpoint, getLatestCheckpoint } from "./state-db";
+import { ensureSession, insertMessage, searchSession, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities } from "./state-db";
 import {
   vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
 } from "./secret-vault";
@@ -1230,7 +1230,20 @@ class SubAgentRuntime {
 2. Auditing = findings only. Never execute code in target files.
 3. **Need a tool?** Call \`request_tool(toolName="X", reason="why", requestingAgent="${config.name}")\`. CEO will add it if safe. Always try this before giving up.`;
 
-    this.systemPrompt = (config.systemPrompt || "") + guardrails;
+    // Inject triplet knowledge graph context into system prompt
+    let tripletContext = "";
+    try {
+      const { queryTriplets } = require("./state-db");
+      const knowledge = queryTriplets({ minConfidence: 0.6 });
+      if (knowledge.length > 0) {
+        const lines = knowledge.slice(0, 10).map(t =>
+          `  - ${t.subjectLabel} → ${t.predicateLabel} → ${t.objectLabel} (${(t.confidenceScore * 100).toFixed(0)}%)`
+        );
+        tripletContext = `\n## KNOWLEDGE GRAPH\nRelevant facts from memory:\n${lines.join("\n")}\n`;
+      }
+    } catch { /* triplet context is optional */ }
+
+    this.systemPrompt = (config.systemPrompt || "") + guardrails + tripletContext;
     activeTrackers.set(trackerId, this.tracker);
     startGlobalAnimation();
   }
@@ -4020,6 +4033,45 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // ── Triplets Command ────────────────────────────────────────────────────────
+  pi.registerCommand("triplets", {
+    description: "Query the knowledge graph (triplets). Usage: /triplets [entityId]",
+    handler(args, ctx) {
+      try {
+        const entityId = (args as string || "").trim();
+        if (entityId) {
+          const entity = aggregateByEntity(entityId);
+          if (!entity) {
+            ctx.ui.notify(`Entity '${entityId}' not found in knowledge graph.`, "error");
+            return;
+          }
+          const lines = entity.triplets.map(t =>
+            `  ${t.subjectLabel} → ${t.predicateLabel} → ${t.objectLabel} (${(t.confidenceScore * 100).toFixed(0)}%)`
+          ).join("\n");
+          // Also show connections
+          const connections = findConnectedEntities(entityId);
+          const connLines = connections.map(c =>
+            `  ${c.direction === "outgoing" ? "→" : "←"} ${c.entityLabel} (${c.relationship})`
+          ).join("\n");
+          const msg = `**Entity: ${entity.entityLabel}**\nTriplets (${entity.triplets.length}):\n${lines}\nConnections (${connections.length}):\n${connLines}`;
+          pi.sendMessage({ role: "system" as any, content: [{ type: "text", text: msg }] });
+        } else {
+          const all = queryTriplets({ minConfidence: 0.5 });
+          const summary = all.slice(0, 20).map(t =>
+            `${t.subjectLabel} → ${t.predicateLabel} → ${t.objectLabel}`
+          ).join("\n");
+          const msg = `**Knowledge Graph** (${all.length} triplets, showing top 20)\n${summary}`;
+          pi.sendMessage({ role: "system" as any, content: [{ type: "text", text: msg }] });
+        }
+      } catch (e: any) {
+        ctx.ui.notify(`Triplet query failed: ${e.message}`, "error");
+      }
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // ── Workflows Command ───────────────────────────────────────────────────────
   pi.registerCommand("workflows", {
     description: "Show suggested workflows based on project context.",
@@ -4070,7 +4122,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /workflows, /telemetry, /plugins, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /triplets, /workflows, /telemetry, /plugins, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );

@@ -4946,6 +4946,60 @@ async function main() {
   });
   app.get("/api/memory/stats", async () => memoryStats());
 
+  // ── Knowledge Graph API ──────────────────────────────────────────────────
+  const STATE_DB_PATH = path.join(PI_DIR, "extensions", "subagents", "data", "state.db");
+
+  app.get("/api/knowledge/triplets", async (req) => {
+    try {
+      const Database = require("better-sqlite3");
+      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const minConf = req.query?.minConfidence ?? 0.5;
+      const limit = Math.min(parseInt(req.query?.limit ?? "50"), 200);
+      const rows = db.prepare(`
+        SELECT t.id, t.subject_id, s.label AS subject_label, s.type AS subject_type,
+               t.predicate_type, t.object_id, o.label AS object_label, o.type AS object_type,
+               t.confidence_score, t.created_at, t.last_updated
+        FROM triplets t
+        JOIN entities s ON t.subject_id = s.id
+        JOIN entities o ON t.object_id = o.id
+        WHERE t.confidence_score >= ?
+        ORDER BY t.confidence_score DESC, t.last_updated DESC
+        LIMIT ?
+      `).all(minConf, limit);
+      db.close();
+      return { triplets: rows, count: rows.length };
+    } catch (e) {
+      return { error: e.message, triplets: [], count: 0 };
+    }
+  });
+
+  app.get("/api/knowledge/entity", async (req) => {
+    try {
+      const id = req.query?.id;
+      if (!id) return { error: "id parameter required" };
+      const Database = require("better-sqlite3");
+      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const entity = db.prepare("SELECT * FROM entities WHERE id = ?").get(id);
+      if (!entity) { db.close(); return { error: "Entity not found" }; }
+      const outgoing = db.prepare(`
+        SELECT t.*, o.label AS object_label, o.type AS object_type
+        FROM triplets t JOIN entities o ON t.object_id = o.id
+        WHERE t.subject_id = ?
+        ORDER BY t.confidence_score DESC
+      `).all(id);
+      const incoming = db.prepare(`
+        SELECT t.*, s.label AS subject_label, s.type AS subject_type
+        FROM triplets t JOIN entities s ON t.subject_id = s.id
+        WHERE t.object_id = ?
+        ORDER BY t.confidence_score DESC
+      `).all(id);
+      db.close();
+      return { entity, outgoing, incoming };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
   // ── WebSocket ──────────────────────────────────────────────────────────
 
   app.get("/ws", { websocket: true }, (socket, req) => {
