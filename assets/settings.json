@@ -2,6 +2,7 @@
   "defaultModel": "google/gemma-4-e4b",
   "defaultProvider": "lmstudio",
   "defaultThinkingLevel": "high",
+  "quietStartup": true,
   "editorPaddingX": 6,
   "hideThinkingBlock": false,
   "collapseChangelog": true,

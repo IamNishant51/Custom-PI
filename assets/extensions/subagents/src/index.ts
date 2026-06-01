@@ -3168,20 +3168,20 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     ensureMemoryFiles();
     initNudgeState();
     // Validate required environment
-    if (!process.env.OLLAMA_HOST && !process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
-      ctx.ui.notify("No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OLLAMA_HOST.", "warning");
-    }
+    // if (!process.env.OLLAMA_HOST && !process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
+    //   ctx.ui.notify("No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OLLAMA_HOST.", "warning");
+    // }
     const embedOk = await checkEmbeddingReachable();
-    if (!embedOk) {
-      ctx.ui.notify("Ollama embedding endpoint not reachable. Install ollama and pull nomic-embed-text.", "warning");
-    }
+    // if (!embedOk) {
+    //   ctx.ui.notify("Ollama embedding endpoint not reachable. Install ollama and pull nomic-embed-text.", "warning");
+    // }
     // Initialize secrets vault from environment
     try {
       const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN"];
       const imported = await vaultImportFromEnv(vaultKeys);
-      if (imported.length > 0) {
-        ctx.ui.notify(`Vault: imported ${imported.length} secrets from environment`, "info");
-      }
+      // if (imported.length > 0) {
+      //   ctx.ui.notify(`Vault: imported ${imported.length} secrets from environment`, "info");
+      // }
     } catch {}
 
     // Set playful geometric thinking indicator
@@ -3223,12 +3223,12 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
     try {
       const result = await consolidateMemory();
-      if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
-        ctx.ui.notify(
-          `Startup consolidation: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed`,
-          "info"
-        );
-      }
+      // if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
+      //   ctx.ui.notify(
+      //     `Startup consolidation: ${result.merged} merged, ${result.pruned} pruned, ${result.refreshed} refreshed`,
+      //     "info"
+      //   );
+      // }
     } catch (e) {
       // silent — consolidation should never crash startup
     }
@@ -3238,12 +3238,12 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     const cronAuth = await ctx.modelRegistry.getApiKeyAndHeaders(cronModel);
     if (cronAuth.ok) {
       startCronJobs(cronModel, { apiKey: cronAuth.apiKey, headers: cronAuth.headers }, {}, (report) => {
-        if (report.deleted.length > 0 || report.archived.length > 0) {
-          ctx.ui.notify(
-            `Curator: archived ${report.archived.length}, deleted ${report.deleted.length} skills`,
-            "info"
-          );
-        }
+        // if (report.deleted.length > 0 || report.archived.length > 0) {
+        //   ctx.ui.notify(
+        //     `Curator: archived ${report.archived.length}, deleted ${report.deleted.length} skills`,
+        //     "info"
+        //   );
+        // }
       });
     }
   });
