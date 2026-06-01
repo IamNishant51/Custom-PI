@@ -3763,6 +3763,23 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
     setupWidget(ctx);
 
+    // Install bundled skills (verification-loop, etc.)
+    const skillsSrc = path.join(__dirname, "..", "skills");
+    if (fs.existsSync(skillsSrc)) {
+      const skillDirs = fs.readdirSync(skillsSrc, { withFileTypes: true }).filter(d => d.isDirectory());
+      for (const dir of skillDirs) {
+        const skillFile = path.join(skillsSrc, dir.name, "SKILL.md");
+        if (fs.existsSync(skillFile)) {
+          const targetDir = path.join(os.homedir(), ".pi", "skills", "agent", dir.name);
+          const targetFile = path.join(targetDir, "SKILL.md");
+          try {
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            fs.copyFileSync(skillFile, targetFile);
+          } catch { /* silent — skill install must never crash startup */ }
+        }
+      }
+    }
+
     try {
       const result = await consolidateMemory();
       // if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
