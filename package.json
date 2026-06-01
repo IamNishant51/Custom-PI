@@ -10,6 +10,8 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "update-and-publish": "node scripts/update-and-publish.js",
+    "release": "node scripts/create-release.js",
+    "deploy-wiki": "node scripts/deploy-wiki.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "build:web": "cd assets/web/client && npm install && npm run build",
