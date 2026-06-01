@@ -1920,13 +1920,14 @@ function patchToolExecution(proto: any) {
     const isRunning = this.isPartial;
     const isError = this.result?.isError;
 
-    // Status dot: ● green (success), ● red (error), ● orange (running)
+    // Status dot: blinking ○/● while running, solid on completion
+    const dotChar = isRunning && (getGlobalFrame() % 6) < 3 ? "\u25cb" : "\u25cf"; // ○ / ●
     const dotColor = isRunning
       ? `\x1b[38;2;255;165;0m`    // orange
       : isError
         ? `\x1b[38;2;255;80;80m`    // red
         : `\x1b[38;2;80;200;120m`;  // green
-    const statusDot = `${dotColor}\u25cf\x1b[0m`; // ●
+    const statusDot = `${dotColor}${dotChar}\x1b[0m`;
     const yellow = (s: string) => `\x1b[38;2;220;180;60m${s}\x1b[0m`;
 
     // Build param summary from tool arguments
