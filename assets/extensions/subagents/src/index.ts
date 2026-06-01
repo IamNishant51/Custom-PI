@@ -1,4 +1,5 @@
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
+import { theme } from "@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Container, TUI, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
@@ -1733,6 +1734,14 @@ let renderedComponents: Array<{
   startLine: number;
   endLine: number;
 }> = [];
+let activeTuiInstance: any = null;
+
+// Write debug log to ~/.pi/agent/tui-click.log
+const debugLog = (msg: string) => {
+  try {
+    fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "tui-click.log"), `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {}
+};
 
 // Hook Container.prototype.render to capture chatContainer rendering details
 const originalContainerRender = Container.prototype.render;
@@ -1789,8 +1798,9 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
-// Hook UserMessageComponent.prototype.render for right-aligned shrink-to-fit bubble
+// Hook UserMessageComponent.prototype.render for right-aligned shrink-to-fit bubble with thin border
 UserMessageComponent.prototype.render = function (this: any, width: number) {
+  // Max width of the user bubble is 75% of terminal width
   const maxBubbleWidth = Math.max(20, Math.min(width - 6, Math.max(40, Math.floor(width * 0.75))));
 
   const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
@@ -1798,9 +1808,11 @@ UserMessageComponent.prototype.render = function (this: any, width: number) {
     return [];
   }
 
-  const markdownContentWidth = Math.max(1, maxBubbleWidth - 2);
+  // Render markdown content to determine text line wrapping
+  const markdownContentWidth = Math.max(1, maxBubbleWidth - 4); // 4 columns for border: `│ ` and ` │`
   const mdLines = markdownComponent.render(markdownContentWidth);
 
+  // Find the maximum visible width across all wrapped lines
   let maxLineW = 1;
   for (const line of mdLines) {
     const w = visibleWidth(line);
@@ -1809,16 +1821,32 @@ UserMessageComponent.prototype.render = function (this: any, width: number) {
     }
   }
 
-  const bubbleWidth = maxLineW + 2;
-  const bubbleLines = this.contentBox.render(bubbleWidth);
-  if (bubbleLines.length === 0) {
-    return [];
+  // Draw thin border lines using the theme colors (accent for borders, userMessageText for text)
+  const borderStyle = (str: string) => theme.fg("accent", str);
+  const textStyle = (str: string) => theme.fg("userMessageText", str);
+
+  const topBorder = borderStyle("╭" + "─".repeat(maxLineW + 2) + "╮");
+  const bottomBorder = borderStyle("╰" + "─".repeat(maxLineW + 2) + "╯");
+
+  const bubbleLines: string[] = [];
+  bubbleLines.push(topBorder);
+
+  for (const line of mdLines) {
+    const w = visibleWidth(line);
+    const pad = " ".repeat(Math.max(0, maxLineW - w));
+    const content = textStyle(line) + pad;
+    bubbleLines.push(borderStyle("│ ") + content + borderStyle(" │"));
   }
 
+  bubbleLines.push(bottomBorder);
+
+  // Right-align by adding leading spaces
+  const bubbleWidth = maxLineW + 4;
   const padCount = Math.max(0, width - bubbleWidth);
   const leftPad = " ".repeat(padCount);
   const lines = bubbleLines.map((line: string) => leftPad + line);
 
+  // Apply OSC 133 sequences for shell integration
   lines[0] = OSC133_ZONE_START + lines[0];
   lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
 
@@ -1827,12 +1855,23 @@ UserMessageComponent.prototype.render = function (this: any, width: number) {
 
 // Handle mouse clicks on the scrolling TUI messages
 function handleTerminalMouseClick(col: number, row: number) {
-  if (!activeTuiInstance) return;
+  debugLog(`CLICK AT col=${col}, row=${row}`);
+  if (!activeTuiInstance) {
+    debugLog(`activeTuiInstance is null`);
+    return;
+  }
   
   const linesCount = activeTuiInstance.previousLines.length;
   const terminalRows = activeTuiInstance.terminal.rows;
-  const viewportTop = Math.max(0, linesCount - terminalRows);
+  const viewportTop = activeTuiInstance.previousViewportTop || 0;
   const lineIndex = viewportTop + row - 1;
+  
+  debugLog(`viewportTop=${viewportTop}, lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
+  debugLog(`renderedComponents: ${JSON.stringify(renderedComponents.map(rc => ({
+    role: rc.component instanceof UserMessageComponent ? 'user' : 'assistant',
+    start: chatContainerStartLine + rc.startLine,
+    end: chatContainerStartLine + rc.endLine
+  })))}`);
   
   const clicked = renderedComponents.find(rc => {
     const absStart = chatContainerStartLine + rc.startLine;
@@ -1840,18 +1879,27 @@ function handleTerminalMouseClick(col: number, row: number) {
     return lineIndex >= absStart && lineIndex < absEnd;
   });
   
-  if (!clicked) return;
+  if (!clicked) {
+    debugLog(`No component clicked`);
+    return;
+  }
+  
+  debugLog(`Clicked component role: ${clicked.component instanceof UserMessageComponent ? 'user' : 'assistant'}`);
   
   if (clicked.component instanceof UserMessageComponent) {
     const idx = renderedComponents.indexOf(clicked);
     const nextRc = renderedComponents.slice(idx + 1).find(rc => rc.component instanceof AssistantMessageComponent);
     if (nextRc) {
       const assistant = nextRc.component;
+      debugLog(`Toggling reasoning for Assistant message, currently hidden=${assistant.hideThinkingBlock}`);
       assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
       activeTuiInstance.requestRender();
+    } else {
+      debugLog(`No Assistant message found after clicked UserMessage`);
     }
   } else if (clicked.component instanceof AssistantMessageComponent) {
     const assistant = clicked.component;
+    debugLog(`Toggling reasoning for clicked Assistant message, currently hidden=${assistant.hideThinkingBlock}`);
     assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
     activeTuiInstance.requestRender();
   }
@@ -1872,12 +1920,14 @@ TUI.prototype.start = function (this: any) {
   process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
     if (event === "data" && Buffer.isBuffer(data)) {
       const str = data.toString("utf8");
+      debugLog(`STDIN DATA: ${JSON.stringify(str)}`);
       const mouseMatch = str.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
       if (mouseMatch) {
         const button = parseInt(mouseMatch[1], 10);
         const col = parseInt(mouseMatch[2], 10);
         const row = parseInt(mouseMatch[3], 10);
         const isRelease = mouseMatch[4] === "m";
+        debugLog(`MATCHED MOUSE: button=${button}, col=${col}, row=${row}, isRelease=${isRelease}`);
         if (!isRelease && button === 0) {
           handleTerminalMouseClick(col, row);
         }
@@ -1908,7 +1958,6 @@ TUI.prototype.stop = function (this: any) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let widgetInstance: QuantumHUDWidget | null = null;
-let activeTuiInstance: any = null;
 
 function setupWidget(ctx: ExtensionContext) {
   if (widgetInstance) return;
