@@ -4,6 +4,8 @@
   --canvas: #0a0a0a;
   --surface-soft: #1a1c20;
   --surface-card: #191919;
+  --surface-elevated: #222222;
+  --surface-overlay: #1e1e1e;
   --surface-dark: #0a0a0a;
   --surface-dark-elevated: #191919;
   --ink: #ffffff;
@@ -11,18 +13,30 @@
   --charcoal: #dedede;
   --body: #dadbdf;
   --mute: #7d8187;
+  --text-secondary: #9ea2a8;
+  --text-tertiary: #6a6e74;
   --stone: #4e5257;
   --ash: #2c2f34;
   --hairline: #212327;
   --hairline-strong: rgba(255, 255, 255, 0.25);
   
-  --accent: #ff7a17; /* Sunset Orange */
+  --accent: #ff7a17;
   --accent-sunset: #ff7a17;
   --accent-sunset-soft: #ffc285;
   --accent-dusk: #7c3aed;
   --accent-twilight: #c4b5fd;
   --accent-breeze: #a0c3ec;
   --accent-midnight: #0d1726;
+  --accent-teal: #00d7ff;
+  --accent-lavender: #8f7af4;
+  --accent-sage: #7ab87a;
+  --accent-coral: #c97a7a;
+
+  --border-focus: #ff7a17;
+  --border-active: #5ac8fa;
+
+  --gradient-start: #ff7a17;
+  --gradient-end: #7c3aed;
 
   --banner-line-0: #ff0087;
   --banner-line-1: #ff00ff;
