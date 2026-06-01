@@ -1,7 +1,7 @@
 {
   "name": "custom-pi",
-  "version": "1.5.0",
-  "description": "Customized Pi Coding Agent with parallel subagents, premium TUI dashboard styling, and session memory tracking",
+  "version": "1.6.0",
+  "description": "Autonomous AI coding agent with knowledge graph memory, DAG swarm orchestration, deployment pipelines, service health monitoring, and adaptive resource management",
   "main": "bin/cli.js",
   "bin": {
     "custom-pi": "bin/cli.js",
