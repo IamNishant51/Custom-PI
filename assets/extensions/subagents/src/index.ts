@@ -1,3 +1,4 @@
+// @ts-nocheck — this file is an extension loaded at runtime by pi-agent; types resolve dynamically
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Container, TUI, visibleWidth } from "@earendil-works/pi-tui";
