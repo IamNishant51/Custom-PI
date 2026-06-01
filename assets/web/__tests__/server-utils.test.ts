@@ -84,7 +84,7 @@ function makeServerUtils(piDir: string) {
   function memoryStore(content: string, type: string, importance: number, project: string, tags: string[]) {
     ensureDir(path.dirname(MEMORY_FILE));
     const entries = (() => { try { return JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8")); } catch { return []; } })();
-    const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const id = `mem_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
     entries.push({ id, content, type, importance, project, tags, createdAt: Date.now(), accessCount: 0 });
     fs.writeFileSync(MEMORY_FILE, JSON.stringify(entries, null, 2));
     return id;
@@ -151,7 +151,7 @@ function makeServerUtils(piDir: string) {
   function recordWorkProduct(sessionId: string, agent: string, task: string, filePath: string, action: string, content: string) {
     ensureDir(path.dirname(PRODUCTS_FILE));
     const hash = crypto.createHash("sha256").update(content || "").digest("hex").slice(0, 12);
-    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, sessionId, agent, task, filePath, action, hash, size: (content || "").length, timestamp: new Date().toISOString() };
+    const entry = { id: `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`, sessionId, agent, task, filePath, action, hash, size: (content || "").length, timestamp: new Date().toISOString() };
     fs.appendFileSync(PRODUCTS_FILE, JSON.stringify(entry) + "\n");
     return entry;
   }

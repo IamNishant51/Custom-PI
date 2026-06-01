@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 export type ToastType = "info" | "success" | "warning" | "error";
 
 export interface Toast {
@@ -14,7 +16,7 @@ export class ToastManager {
   private defaultDuration = 4000;
 
   show(message: string, type: ToastType = "info", duration?: number): string {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = `toast-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
     this.toasts.push({
       id,
       message,

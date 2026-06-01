@@ -137,6 +137,19 @@ function broadcast(data) {
   }
 }
 
+function redactToolInput(input) {
+  const s = JSON.stringify(input);
+  if (s.length <= 300) return s;
+  const redacted = Object.fromEntries(
+    Object.entries(input).map(([k, v]) => {
+      if (typeof v === "string" && v.length > 100) return [k, `[REDACTED (${v.length} chars)]`];
+      return [k, v];
+    })
+  );
+  let out = JSON.stringify(redacted);
+  return out.length > 300 ? out.slice(0, 300) + "...[truncated]" : out;
+}
+
 // broadcast + track state for persistence across refresh
 function bcast(data) {
   broadcast(data);
@@ -474,7 +487,7 @@ function recordWorkProduct(sessionId, agent, task, filePath, action, content) {
   ensureProductsDir();
   const hash = crypto.createHash("sha256").update(content || "").digest("hex").slice(0, 12);
   const entry = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    id: `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
     sessionId, agent, task, filePath, action, hash,
     size: (content || "").length,
     timestamp: new Date().toISOString(),
@@ -574,7 +587,7 @@ function saveVector(id, vec) {
 
 function memoryStore(content, type, importance, project, tags) {
   const entries = readMemory();
-  const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const id = `mem_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const entry = { id, content, type, importance, project, tags: tags || [], createdAt: Date.now(), updatedAt: Date.now(), accessCount: 0 };
   entries.push(entry);
   writeMemory(entries);
@@ -4058,7 +4071,7 @@ Perform your task using your tools, think step-by-step, and report back with a c
         const tInput = tc.input || tc.arguments || {};
 
         bcast({ type: "agent_status", agentId, status: "calling_tool", currentTool: tName });
-        bcast({ type: "agent_log", agentId, message: `Calling tool: ${tName} with ${JSON.stringify(tInput)}` });
+        bcast({ type: "agent_log", agentId, message: `Calling tool: ${tName} with ${redactToolInput(tInput)}` });
 
         let toolOutput = "";
         try {
@@ -4422,7 +4435,7 @@ process.exit(0);
           const tInput = tc.input || tc.arguments || {};
           
           bcast({ type: "agent_status", agentId: agent.id, status: "calling_tool", currentTool: tName });
-          bcast({ type: "agent_log", agentId: agent.id, message: `Calling tool: ${tName} with ${JSON.stringify(tInput)}` });
+          bcast({ type: "agent_log", agentId: agent.id, message: `Calling tool: ${tName} with ${redactToolInput(tInput)}` });
 
           let toolOutput = "";
           try {
@@ -4827,7 +4840,7 @@ async function main() {
     const { name, workspace, leaderAgentId } = req.body;
     if (!name || !workspace || !leaderAgentId) throw new Error("name, workspace, leaderAgentId required");
     const team = {
-      id: `team_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `team_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
       name, workspace, workspaceMode: "shared", leaderAgentId,
       agents: [{ slotId: `slot_${Date.now()}`, agentId: leaderAgentId, agentName: leaderAgentId, role: "leader", status: "idle" }],
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import { spawnAgentSession, closeSession, discoverAgents, getAgentLabel } from "./agent-manager";
 import { buildMcpContextForPrompt, getEnabledMcpServers } from "./mcp-catalog";
 import type { AgentMode, AcpSessionConfig, McpServerConfig } from "./acp-types";
@@ -58,7 +59,7 @@ function saveTeamsStore(store: TeamStore): void {
 }
 
 function generateId(): string {
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 }
 
 export function createTeam(name: string, workspace: string, leaderAgentId: string): Team {

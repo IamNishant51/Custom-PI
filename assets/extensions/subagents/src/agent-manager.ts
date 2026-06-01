@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import readline from "node:readline";
 import type {
   AgentMetadata,
@@ -143,7 +144,7 @@ interface AcpSessionState {
 const activeSessions = new Map<string, AcpSessionState>();
 
 function generateSessionId(): string {
-  return `acp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return `acp_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 }
 
 export async function spawnAgentSession(
