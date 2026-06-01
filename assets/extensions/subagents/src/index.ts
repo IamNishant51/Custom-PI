@@ -408,48 +408,32 @@ class SubAgentCallCard implements Component {
   render(width: number): string[] {
     const w = Math.min(width, 80);
     const tracker = activeTrackers.get(this.trackerId);
-    const borderColor = (s: string) => chalk.hex(C.slate)(s);
-    const accentColor = (s: string) => chalk.hex(C.orange).bold(s);
     const lines: string[] = [];
+    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
     if (!tracker || tracker.status === "spawning") {
-      // Spawning state — pulsing symbol
       const pulseColor = getPulseColor();
       const pulseSymbol = globalPulse.getSymbol();
       const spinner = chalk.hex(pulseColor)(pulseSymbol);
-      const title = `${spinner} Sub-Agent: ${this.agentName}`;
-      lines.push(boxTop(title, w, borderColor, accentColor));
-      lines.push(boxLine(
-        chalk.hex(C.dusty)("spawning sub-agent..."),
-        w, borderColor
-      ));
-      const taskPreview = truncate(this.task, w - 16);
-      lines.push(boxLine(
-        chalk.hex(C.mutedText)("task: ") + chalk.hex(C.sand)(taskPreview),
-        w, borderColor
-      ));
-      lines.push(boxBottom(w, borderColor));
+      lines.push(
+        chalk.hex(C.orange).bold(`\u2500 ${spinner} Sub-Agent: ${this.agentName}`) +
+        dim("\u2500".repeat(Math.max(0, w - 16 - stripAnsi(this.agentName).length)))
+      );
+      lines.push(`  ${dim("spawning sub-agent...")}`);
+      lines.push(`  ${dim("task: ")}${chalk.hex(C.sand)(truncate(this.task, w - 16))}`);
     } else if (tracker.status === "running" || tracker.status === "calling_tool") {
-      // Running state with animation — pulsing symbol + animated border
       const pulseColor = getPulseColor();
       const pulseSymbol = globalPulse.getSymbol();
       const spinner = chalk.hex(pulseColor)(pulseSymbol);
-      const title = `${spinner} Sub-Agent: ${tracker.name}`;
-      const accentRunning = (s: string) => chalk.hex(C.teal).bold(s);
+      lines.push(
+        chalk.hex(C.teal).bold(`\u2500 ${spinner} Sub-Agent: ${tracker.name}`) +
+        dim("\u2500".repeat(Math.max(0, w - 16 - stripAnsi(tracker.name).length)))
+      );
 
-      lines.push(boxTop(title, w, borderColor, accentRunning));
-
-      // Task description
       const taskPreview = truncate(tracker.task, w - 16);
-      lines.push(boxLine(
-        chalk.hex(C.mutedText)("Task: ") + chalk.hex(C.cream)(taskPreview),
-        w, borderColor
-      ));
+      lines.push(`  ${dim("Task: ")}${chalk.hex(C.cream)(taskPreview)}`);
 
-      // Status line with turn info
       const turnInfo = chalk.hex(C.sand)(`Turn ${tracker.turn}/${tracker.maxTurns}`);
-
-      // Tool-specific icon
       let toolIcon = "";
       if (tracker.currentTool) {
         const toolName = tracker.currentTool;
@@ -459,46 +443,37 @@ class SubAgentCallCard implements Component {
         else if (toolName.includes("list") || toolName.includes("ls") || toolName.includes("glob")) toolIcon = "\u2261";
         else toolIcon = "\u25b4";
       }
-
       const toolInfo = tracker.currentTool
-        ? chalk.hex(C.mutedText)(" \u00b7 ") + chalk.hex(C.lavender)(`${toolIcon} ${tracker.currentTool}`)
+        ? dim(" \u00b7 ") + chalk.hex(C.lavender)(`${toolIcon} ${tracker.currentTool}`)
         : "";
-      const timeInfo = chalk.hex(C.mutedText)(" \u00b7 ") + chalk.hex(C.dusty)(`\u25f7 ${elapsed(tracker.startTime)}`);
-      lines.push(boxLine(`${turnInfo}${toolInfo}${timeInfo}`, w, borderColor));
+      const timeInfo = dim(" \u00b7 ") + dim(`\u25f7 ${elapsed(tracker.startTime)}`);
+      lines.push(`  ${turnInfo}${toolInfo}${timeInfo}`);
 
-      // Tool call count with animated verb
       if (tracker.toolCallCount > 0) {
         const verb = STATUS_VERBS[getGlobalVerbIndex() % STATUS_VERBS.length];
         const frameInVerb = getGlobalFrame() % 10;
         const charsToShow = Math.min(frameInVerb + 1, verb.length);
         const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "\u2026" : "");
-        const calls = chalk.hex(C.dusty)(`${tracker.toolCallCount} tool calls`);
-        lines.push(boxLine(`${chalk.hex(C.orange).bold(displayVerb)}${chalk.hex(C.orange)("...")}  ${chalk.hex(C.mutedText)("\u00b7")}  ${calls}`, w, borderColor));
+        const calls = dim(`${tracker.toolCallCount} tool calls`);
+        lines.push(`  ${chalk.hex(C.orange).bold(displayVerb)}${chalk.hex(C.orange)("...")}  ${dim("\u00b7")}  ${calls}`);
 
-        // Show recent streaming output lines
         if (tracker.outputLines && tracker.outputLines.length > 0) {
           const recent = tracker.outputLines.slice(-2);
           for (const ol of recent) {
-            const trimmed = truncate(ol, w - 8);
-            lines.push(boxLine(chalk.hex(C.dusty)(trimmed), w, borderColor));
+            lines.push(`  ${dim(truncate(ol, w - 8))}`);
           }
         }
       }
 
-      // Mini progress indicator with per-agent color
       const barColor = tracker.turn / tracker.maxTurns > 0.7 ? C.sage :
         tracker.turn / tracker.maxTurns > 0.3 ? C.teal : C.lavender;
       const dot = chalk.hex(barColor)(getDotPulse());
       const barWidth = Math.min(20, w - 20);
       const bar = progressBar(tracker.turn, tracker.maxTurns, barWidth, barColor);
-      lines.push(boxLine(
-        `${dot} ` + bar + chalk.hex(C.dusty)(` ${Math.round((tracker.turn / tracker.maxTurns) * 100)}%`),
-        w, borderColor
-      ));
+      lines.push(`  ${dot} ${bar}${dim(` ${Math.round((tracker.turn / tracker.maxTurns) * 100)}%`)}`);
 
       // ── CEO Connection Visualization ──
       if (tracker.ceoRequest) {
-        lines.push(boxDivider(w, borderColor));
         const ceo = tracker.ceoRequest;
         const agentName = tracker.name || this.agentName;
         const prefix = `${agentName} `;
@@ -506,35 +481,28 @@ class SubAgentCallCard implements Component {
         const pLen = stripAnsi(prefix).length;
         const sLen = stripAnsi(suffix).length;
         const dashSpace = Math.max(4, w - 8 - pLen - sLen);
-
         const frame = getGlobalFrame() % 48;
         const progress = frame / 48;
-
-        let dot: string;
+        let dot2: string;
         let idx: number;
         if (ceo.status === 'requesting' || ceo.status === 'ceo_evaluating') {
           idx = Math.round(progress * (dashSpace - 1));
-          dot = chalk.hex(C.sage)("\u25c9");
+          dot2 = chalk.hex(C.sage)("\u25c9");
         } else {
           idx = Math.round((1 - progress) * (dashSpace - 1));
-          dot = chalk.hex(C.orange)("\u25c9");
+          dot2 = chalk.hex(C.orange)("\u25c9");
         }
-
-        const connLine = prefix + "\u2500".repeat(idx) + dot + "\u2500".repeat(Math.max(0, dashSpace - idx - 1)) + suffix;
-        lines.push(boxLine(truncateToWidth(connLine, w - 6), w, borderColor));
-
+        const connLine = prefix + "\u2500".repeat(idx) + dot2 + "\u2500".repeat(Math.max(0, dashSpace - idx - 1)) + suffix;
+        lines.push(`  ${dim(truncateToWidth(connLine, w - 6))}`);
         const statusColor = ceo.status === 'requesting' ? C.sage : ceo.status === 'ceo_evaluating' ? C.amber : ceo.status === 'ceo_approved' ? C.orange : C.coral;
         const statusIcon = ceo.status === 'requesting' ? "\u25c9" : ceo.status === 'ceo_evaluating' ? "\u25d0" : ceo.status === 'ceo_approved' ? "\u2713" : "\u2717";
         const statusMsg = ceo.status === 'requesting' ? `requesting "${ceo.toolName}" from CEO`
           : ceo.status === 'ceo_evaluating' ? `CEO evaluating "${ceo.toolName}"...`
           : ceo.status === 'ceo_approved' ? `"${ceo.toolName}" approved`
           : `"${ceo.toolName}" denied`;
-        lines.push(boxLine(`${chalk.hex(statusColor)(statusIcon)} ${statusMsg}`, w, borderColor));
+        lines.push(`  ${chalk.hex(statusColor)(statusIcon)} ${statusMsg}`);
       }
-
-      lines.push(boxBottom(w, borderColor));
     } else {
-      // Completed or error — will be shown by renderResult
       return [];
     }
 
@@ -562,30 +530,23 @@ class SubAgentResultCard implements Component {
     const tracker = activeTrackers.get(this.ctx.toolCallId);
     const isError = this.result?.isError || this.ctx.isError;
     const lines: string[] = [];
+    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
-    // Determine colors based on status
-    const borderColor = isError
-      ? (s: string) => chalk.hex(C.warmRed)(s)
-      : (s: string) => chalk.hex(C.sage)(s);
-    const accentColor = isError
-      ? (s: string) => chalk.hex(C.coral).bold(s)
-      : (s: string) => chalk.hex(C.sage).bold(s);
+    const accentClr = isError ? C.coral : C.sage;
     const icon = isError ? "\u2717" : "\u2713";
     const name = tracker?.name || this.ctx.args?.agentId || "agent";
 
-    // Title
-    const title = `${icon} Sub-Agent: ${name}`;
-    lines.push(boxTop(title, w, borderColor, accentColor));
+    lines.push(
+      chalk.hex(accentClr).bold(`\u2500 ${icon} Sub-Agent: ${name}`) +
+      dim("\u2500".repeat(Math.max(0, w - 16 - stripAnsi(name).length)))
+    );
 
     // Stats line
     if (tracker) {
       const duration = elapsed(tracker.startTime, tracker.endTime);
       const turns = `${tracker.turn} turns`;
       const tools = `${tracker.toolCallCount} tool calls`;
-      lines.push(boxLine(
-        chalk.hex(C.dusty)(`Completed in ${duration}  \u00b7  ${turns}  \u00b7  ${tools}`),
-        w, borderColor
-      ));
+      lines.push(`  ${dim(`Completed in ${duration}  \u00b7  ${turns}  \u00b7  ${tools}`)}`);
     }
 
     // Result content with expand/collapse
@@ -597,31 +558,24 @@ class SubAgentResultCard implements Component {
       || "";
 
     if (resultText) {
-      lines.push(boxDivider(w, borderColor));
-
       const resultLines = resultText.split("\n");
       const COLLAPSED_LINES = 8;
       const showAll = this.expanded || resultLines.length <= COLLAPSED_LINES;
       const displayLines = showAll ? resultLines : resultLines.slice(0, COLLAPSED_LINES);
       const contentColor = isError ? chalk.hex(C.coral) : chalk.hex(C.sand);
 
-      // Use formatBoxContent for word-wrapping and table detection
-      const formatted = formatBoxContent(displayLines.join("\n"), w, borderColor, contentColor);
-      for (const fLine of formatted) lines.push(fLine);
+      for (const rl of displayLines) {
+        lines.push(`  ${contentColor(truncate(rl, w - 4))}`);
+      }
 
       if (!showAll) {
         const remaining = resultLines.length - COLLAPSED_LINES;
-        const hint = chalk.hex(C.lavender)(`\u25b8 ${remaining} more lines - press e to expand`);
-        const padded = hint + " ".repeat(Math.max(0, w - 6 - stripAnsi(hint).length));
-        lines.push(boxLine(padded, w, borderColor));
+        lines.push(`  ${chalk.hex(C.lavender)(`\u25b8 ${remaining} more lines - press e to expand`)}`);
       } else if (resultLines.length > COLLAPSED_LINES) {
-        const hint = chalk.hex(C.dusty)(`\u25be Showing all ${resultLines.length} lines - press e to collapse`);
-        const padded = hint + " ".repeat(Math.max(0, w - 6 - stripAnsi(hint).length));
-        lines.push(boxLine(padded, w, borderColor));
+        lines.push(`  ${dim(`\u25be Showing all ${resultLines.length} lines - press e to collapse`)}`);
       }
     }
 
-    lines.push(boxBottom(w, borderColor));
     return lines;
   }
 }
@@ -664,9 +618,8 @@ class ParallelAgentsCallCard implements Component {
 
   render(width: number): string[] {
     const w = Math.min(width, 100);
-    const borderColor = (s: string) => chalk.hex(C.slate)(s);
-    const accentColor = (s: string) => chalk.hex(C.lavender).bold(s);
     const lines: string[] = [];
+    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
     const trackers: SubAgentProgress[] = [];
     for (const [key, t] of activeTrackers) {
@@ -686,10 +639,17 @@ class ParallelAgentsCallCard implements Component {
     const pulseColor = getPulseColor();
     const pulseSymbol = globalPulse.getSymbol();
     const spinner = chalk.hex(pulseColor)(pulseSymbol);
-    const title = `${spinner} Parallel Execution  \u00b7  ${doneCount}/${total} done`;
-    lines.push(boxTop(title, w, borderColor, accentColor));
+    lines.push(
+      chalk.hex(C.lavender)(`${spinner} Parallel Execution`) +
+      dim(` \u00b7  ${doneCount}/${total} done`) +
+      dim("\u2500".repeat(Math.max(0, w - 26 - String(doneCount).length - String(total).length)))
+    );
 
     for (let i = 0; i < this.tasks.length; i++) {
+      const isLast = i === this.tasks.length - 1;
+      const prefix = isLast ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
+      const childPrefix = isLast ? "   " : "\u2502  ";
+
       const tracker = trackers.find(t => t.name === this.tasks[i].agentId) || trackers[i];
       const task = this.tasks[i];
 
@@ -702,11 +662,11 @@ class ParallelAgentsCallCard implements Component {
         icon = chalk.hex(C.teal)(getDotPulse());
         nameStyle = chalk.hex(C.cream).bold(task.agentId);
         const toolInfo = tracker.currentTool ? chalk.hex(C.lavender)(` ${tracker.currentTool}`) : "";
-        statusLine = chalk.hex(C.sand)(`turn ${tracker.turn}/${tracker.maxTurns}${toolInfo}`) + chalk.hex(C.dusty)(`  \u25f7${elapsed(tracker.startTime)}`);
+        statusLine = chalk.hex(C.sand)(`turn ${tracker.turn}/${tracker.maxTurns}${toolInfo}`) + dim(`  \u25f7${elapsed(tracker.startTime)}`);
       } else if (tracker.status === "complete") {
         icon = chalk.hex(C.sage)("\u2713");
         nameStyle = chalk.hex(C.sage).bold(task.agentId);
-        statusLine = chalk.hex(C.sage)("done") + chalk.hex(C.dusty)(`  ${elapsed(tracker.startTime, tracker.endTime)} \u00b7 ${tracker.toolCallCount}tools`);
+        statusLine = chalk.hex(C.sage)("done") + dim(`  ${elapsed(tracker.startTime, tracker.endTime)} \u00b7 ${tracker.toolCallCount}tools`);
       } else {
         icon = chalk.hex(C.warmRed)("\u2717");
         nameStyle = chalk.hex(C.warmRed).bold(task.agentId);
@@ -714,8 +674,8 @@ class ParallelAgentsCallCard implements Component {
       }
 
       const taskPreview = truncate(task.task, Math.max(20, w - 40));
-      lines.push(boxLine(`${icon}  ${nameStyle}  ${chalk.hex(C.mutedText)(taskPreview)}`, w, borderColor));
-      lines.push(boxLine(`    ${statusLine}`, w, borderColor));
+      lines.push(`${prefix}${icon}  ${nameStyle}  ${dim(taskPreview)}`);
+      lines.push(`${childPrefix}${statusLine}`);
 
       // Compact CEO indicator for parallel view
       if (tracker?.ceoRequest) {
@@ -726,16 +686,15 @@ class ParallelAgentsCallCard implements Component {
           : ceo.status === 'ceo_evaluating' ? `CEO:${ceo.toolName}`
           : ceo.status === 'ceo_approved' ? `CEO\u2713:${ceo.toolName}`
           : `CEO\u2717:${ceo.toolName}`;
-        lines.push(boxLine(`    ${chalk.hex(cColor)(cIcon)} ${chalk.hex(C.mutedText)(cLabel)}`, w, borderColor));
+        lines.push(`${childPrefix} ${chalk.hex(cColor)(cIcon)} ${dim(cLabel)}`);
       }
     }
 
-    lines.push(boxEmpty(w, borderColor));
+    // Progress bar at the bottom
     const barWidth = Math.min(30, w - 30);
     const bar = progressBar(doneCount, total, barWidth);
-    lines.push(boxLine(`${chalk.hex(C.lavender)(bar)}  ${chalk.hex(C.cream)(`${doneCount}/${total} complete`)}`, w, borderColor));
+    lines.push(`  ${chalk.hex(C.lavender)(bar)}  ${chalk.hex(C.cream)(`${doneCount}/${total} complete`)}`);
 
-    lines.push(boxBottom(w, borderColor));
     return lines;
   }
 }
@@ -758,6 +717,7 @@ class ParallelAgentsResultCard implements Component {
   render(width: number): string[] {
     const w = Math.min(width, 100);
     const lines: string[] = [];
+    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
     const trackers: SubAgentProgress[] = [];
     for (const [key, t] of activeTrackers) {
@@ -771,16 +731,13 @@ class ParallelAgentsResultCard implements Component {
     const total = trackers.length || 1;
     const allSuccess = errorCount === 0;
 
-    const borderColor = allSuccess
-      ? (s: string) => chalk.hex(C.sage)(s)
-      : (s: string) => chalk.hex(C.amber)(s);
-    const accentColor = allSuccess
-      ? (s: string) => chalk.hex(C.sage).bold(s)
-      : (s: string) => chalk.hex(C.amber).bold(s);
-
+    const accentClr = allSuccess ? C.sage : C.amber;
     const icon = allSuccess ? "✔" : "▲";
-    const title = `${icon} Parallel Results — ${successCount}/${total} succeeded`;
-    lines.push(boxTop(title, w, borderColor, accentColor));
+
+    lines.push(
+      chalk.hex(accentClr).bold(`\u2500 ${icon} Parallel Results \u2014 ${successCount}/${total} succeeded`) +
+      dim("\u2500".repeat(Math.max(0, w - 24 - String(successCount).length - String(total).length)))
+    );
 
     const totalTime = trackers.length > 0
       ? elapsed(
@@ -790,40 +747,32 @@ class ParallelAgentsResultCard implements Component {
       : "0s";
     const totalToolCalls = trackers.reduce((sum, t) => sum + t.toolCallCount, 0);
 
-    lines.push(boxLine(
-      chalk.hex(C.dusty)(`${totalTime} total · ${totalToolCalls} tool calls`) +
-      (errorCount > 0 ? chalk.hex(C.warmRed)(` · ${errorCount} failed`) : ""),
-      w, borderColor
-    ));
-
-    lines.push(boxDivider(w, borderColor));
+    lines.push(
+      `  ${dim(`${totalTime} total \u00b7 ${totalToolCalls} tool calls`)}` +
+      (errorCount > 0 ? chalk.hex(C.warmRed)(` \u00b7 ${errorCount} failed`) : "")
+    );
 
     for (const tracker of trackers) {
       const statusIcon = tracker.status === "complete"
-        ? chalk.hex(C.sage)("✔")
-        : chalk.hex(C.warmRed)("▲");
+        ? chalk.hex(C.sage)("\u2713")
+        : chalk.hex(C.warmRed)("\u25b2");
       const name = chalk.hex(C.cream).bold(tracker.name);
-      const time = chalk.hex(C.dusty)(elapsed(tracker.startTime, tracker.endTime));
-      lines.push(boxLine(`${statusIcon}  ${name}  ${chalk.hex(C.dusty)(time)}`, w, borderColor));
+      const time = dim(elapsed(tracker.startTime, tracker.endTime));
+      lines.push(`  ${statusIcon}  ${name}  ${time}`);
 
       if (tracker.result) {
         const resultLines = tracker.result.split("\n").slice(0, 8);
-        const contentColor = chalk.hex(C.sand);
-        const block = formatBoxContent(resultLines.join("\n"), w, borderColor, (s: string) => contentColor("  " + s));
-        for (const line of block) {
-          const inner = line.slice(3, -2).trimEnd();
-          lines.push(boxLine(inner, w, borderColor));
+        for (const rl of resultLines) {
+          lines.push(`    ${chalk.hex(C.sand)(truncate(rl, w - 8))}`);
         }
         if (tracker.result.split("\n").length > 8) {
-          lines.push(boxLine(chalk.hex(C.dusty)("  ... more lines"), w, borderColor));
+          lines.push(`    ${dim("... more lines")}`);
         }
       } else if (tracker.error) {
-        lines.push(boxLine(chalk.hex(C.coral)("  " + truncate(tracker.error, w - 8)), w, borderColor));
+        lines.push(`    ${chalk.hex(C.coral)(truncate(tracker.error, w - 8))}`);
       }
-      lines.push(boxEmpty(w, borderColor));
     }
 
-    lines.push(boxBottom(w, borderColor));
     return lines;
   }
 }
@@ -843,11 +792,13 @@ class SubAgentCreatedCard implements Component {
 
   render(width: number): string[] {
     const w = Math.min(width, 70);
-    const borderColor = (s: string) => chalk.hex(C.teal)(s);
-    const accentColor = (s: string) => chalk.hex(C.teal).bold(s);
     const lines: string[] = [];
+    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
-    lines.push(boxTop("\u2726 New Sub-Agent Created", w, borderColor, accentColor));
+    lines.push(
+      chalk.hex(C.teal).bold("\u2500 \u2726 New Sub-Agent Created") +
+      dim("\u2500".repeat(Math.max(0, w - 26)))
+    );
 
     const resultText = this.result?.content
       ?.filter((c: any) => c.type === "text")
@@ -856,13 +807,9 @@ class SubAgentCreatedCard implements Component {
 
     const textLines = resultText.split("\n");
     for (const line of textLines.slice(0, 5)) {
-      lines.push(boxLine(
-        chalk.hex(C.cream)(truncate(line, w - 6)),
-        w, borderColor
-      ));
+      lines.push(`  ${chalk.hex(C.cream)(truncate(line, w - 4))}`);
     }
 
-    lines.push(boxBottom(w, borderColor));
     return lines;
   }
 }
@@ -882,11 +829,13 @@ class SubAgentListCard implements Component {
 
   render(width: number): string[] {
     const w = Math.min(width, 80);
-    const borderColor = (s: string) => chalk.hex(C.slate)(s);
-    const accentColor = (s: string) => chalk.hex(C.orange).bold(s);
     const lines: string[] = [];
+    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
-    lines.push(boxTop("\u2605 Available Sub-Agents", w, borderColor, accentColor));
+    lines.push(
+      chalk.hex(C.lavender).bold("\u2500 \u2605 Available Sub-Agents") +
+      dim("\u2500".repeat(Math.max(0, w - 24)))
+    );
 
     const resultText = this.result?.content
       ?.filter((c: any) => c.type === "text")
@@ -894,43 +843,35 @@ class SubAgentListCard implements Component {
       .join("\n") || "";
 
     if (!resultText || resultText.includes("No sub-agents")) {
-      lines.push(boxLine(
-        chalk.hex(C.dusty)("No sub-agents configured yet."),
-        w, borderColor
-      ));
-      lines.push(boxLine(
-        chalk.hex(C.mutedText)("Use create_subagent to define one."),
-        w, borderColor
-      ));
+      lines.push(dim("  No sub-agents configured yet."));
+      lines.push(dim("  Use create_subagent to define one."));
     } else {
       const agentLines = resultText.split("\n").filter((l: string) => l.trim());
-      for (const line of agentLines) {
-        // Parse "- **name**: description (Model: ..., Tools: ...)"
-        const match = line.match(/\*\*(.+?)\*\*:\s*(.+?)(?:\s*\(Model:\s*(.+?),\s*Tools:\s*(.+?)\))?$/);
+      const total = agentLines.length;
+      for (let i = 0; i < total; i++) {
+        const isLast = i === total - 1;
+        const prefix = isLast ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
+        const childPrefix = isLast ? "   " : "\u2502  ";
+
+        const match = agentLines[i].match(/\*\*(.+?)\*\*:\s*(.+?)(?:\s*\(Model:\s*(.+?),\s*Tools:\s*(.+?)\))?$/);
         if (match) {
           const [, name, desc, model, tools] = match;
-          lines.push(boxLine(
-            chalk.hex(C.orange).bold(name || "") +
-            chalk.hex(C.cream)("  " + truncate(desc || "", w - (name || "").length - 20)),
-            w, borderColor
-          ));
+          lines.push(
+            prefix + chalk.hex(C.orange).bold(name) +
+            dim(" \u2014 ") + chalk.hex(C.cream)(truncate(desc || "", w - (name || "").length - 20))
+          );
           if (tools) {
-            lines.push(boxLine(
-              chalk.hex(C.dusty)("  Tools: ") + chalk.hex(C.lavender)(tools) +
-              (model ? chalk.hex(C.dusty)("  ·  Model: ") + chalk.hex(C.teal)(model) : ""),
-              w, borderColor
-            ));
+            lines.push(
+              childPrefix + dim("Tools: ") + chalk.hex(C.lavender)(tools) +
+              (model ? dim("  \u00b7  Model: ") + chalk.hex(C.teal)(model) : "")
+            );
           }
         } else {
-          lines.push(boxLine(
-            chalk.hex(C.sand)(truncate(line.replace(/^-\s*/, ""), w - 6)),
-            w, borderColor
-          ));
+          lines.push(prefix + chalk.hex(C.sand)(truncate(agentLines[i].replace(/^-\s*/, ""), w - 6)));
         }
       }
     }
 
-    lines.push(boxBottom(w, borderColor));
     return lines;
   }
 }
@@ -1266,7 +1207,8 @@ class SubAgentRuntime {
     private ctx: ExtensionContext,
     private config: AgentConfig,
     private trackerId: string,
-    private signal?: AbortSignal
+    private signal?: AbortSignal,
+    private parentName = "ceo"
   ) {
     this.storage = new LocalStorageDriver(this.ctx.cwd);
     this.tracker = {
@@ -1719,7 +1661,7 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
         const results = await Promise.all(toolCalls.map(async (call: any) => {
           if (call.type !== "toolCall") return null;
           this.ctx.ui.notify(
-            `${chalk.hex(C.teal)("\u26a1")} ${this.config.name} \u2192 ${chalk.hex(C.lavender)(call.name)}`,
+            `${chalk.hex(C.teal)("\u26a1")} ${this.parentName} \u2192 ${chalk.hex(C.lavender)(call.name)} \u2192 ${chalk.hex(C.cream)(this.config.name)}`,
             "info"
           );
           const result = await this.runTool(call.name, call.arguments);
