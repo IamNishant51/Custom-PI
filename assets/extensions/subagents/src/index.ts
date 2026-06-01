@@ -304,11 +304,15 @@ function truncate(str: string, maxLen: number): string {
   return str.slice(0, maxLen - 1) + "…";
 }
 
-function progressBar(current: number, total: number, width: number): string {
+function progressBar(current: number, total: number, width: number, color?: string): string {
   const filled = Math.round((current / total) * width);
   const empty = width - filled;
-  const bar = "█".repeat(filled) + "░".repeat(empty);
-  return bar;
+  const filledPart = "\u2588".repeat(filled);
+  const emptyPart = "\u2591".repeat(empty);
+  if (color) {
+    return chalk.hex(color)(filledPart) + chalk.hex(C.dusty)(emptyPart);
+  }
+  return filledPart + emptyPart;
 }
 
 // ── Pure-JS recursive grep fallback (no rg/grep dependency) ──
@@ -402,24 +406,24 @@ class SubAgentCallCard implements Component {
     const lines: string[] = [];
 
     if (!tracker || tracker.status === "spawning") {
-      // Spawning state — pulsing ∞ symbol
+      // Spawning state — pulsing symbol
       const pulseColor = getPulseColor();
       const pulseSymbol = globalPulse.getSymbol();
       const spinner = chalk.hex(pulseColor)(pulseSymbol);
       const title = `${spinner} Sub-Agent: ${this.agentName}`;
       lines.push(boxTop(title, w, borderColor, accentColor));
       lines.push(boxLine(
-        chalk.hex(C.dusty)("Spawning sub-agent..."),
+        chalk.hex(C.dusty)("spawning sub-agent..."),
         w, borderColor
       ));
       const taskPreview = truncate(this.task, w - 16);
       lines.push(boxLine(
-        chalk.hex(C.mutedText)("Task: ") + chalk.hex(C.sand)(taskPreview),
+        chalk.hex(C.mutedText)("task: ") + chalk.hex(C.sand)(taskPreview),
         w, borderColor
       ));
       lines.push(boxBottom(w, borderColor));
     } else if (tracker.status === "running" || tracker.status === "calling_tool") {
-      // Running state with animation — pulsing ∞ symbol
+      // Running state with animation — pulsing symbol + animated border
       const pulseColor = getPulseColor();
       const pulseSymbol = globalPulse.getSymbol();
       const spinner = chalk.hex(pulseColor)(pulseSymbol);
@@ -437,20 +441,32 @@ class SubAgentCallCard implements Component {
 
       // Status line with turn info
       const turnInfo = chalk.hex(C.sand)(`Turn ${tracker.turn}/${tracker.maxTurns}`);
+
+      // Tool-specific icon
+      let toolIcon = "";
+      if (tracker.currentTool) {
+        const toolName = tracker.currentTool;
+        if (toolName.includes("read") || toolName.includes("search") || toolName.includes("grep")) toolIcon = "\u25a1";
+        else if (toolName.includes("write") || toolName.includes("create") || toolName.includes("edit")) toolIcon = "\u270e";
+        else if (toolName.includes("bash") || toolName.includes("run") || toolName.includes("exec")) toolIcon = "\u25b6";
+        else if (toolName.includes("list") || toolName.includes("ls") || toolName.includes("glob")) toolIcon = "\u2261";
+        else toolIcon = "\u25b4";
+      }
+
       const toolInfo = tracker.currentTool
-        ? chalk.hex(C.mutedText)(" · ") + chalk.hex(C.lavender)(`${tracker.currentTool}`)
+        ? chalk.hex(C.mutedText)(" \u00b7 ") + chalk.hex(C.lavender)(`${toolIcon} ${tracker.currentTool}`)
         : "";
-      const timeInfo = chalk.hex(C.mutedText)(" · ") + chalk.hex(C.dusty)(`⏱ ${elapsed(tracker.startTime)}`);
+      const timeInfo = chalk.hex(C.mutedText)(" \u00b7 ") + chalk.hex(C.dusty)(`\u25f7 ${elapsed(tracker.startTime)}`);
       lines.push(boxLine(`${turnInfo}${toolInfo}${timeInfo}`, w, borderColor));
 
-      // Tool call count
+      // Tool call count with animated verb
       if (tracker.toolCallCount > 0) {
         const verb = STATUS_VERBS[getGlobalVerbIndex() % STATUS_VERBS.length];
         const frameInVerb = getGlobalFrame() % 10;
         const charsToShow = Math.min(frameInVerb + 1, verb.length);
-        const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "…" : "");
+        const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "\u2026" : "");
         const calls = chalk.hex(C.dusty)(`${tracker.toolCallCount} tool calls`);
-        lines.push(boxLine(`${chalk.hex(C.orange).bold(displayVerb)}${chalk.hex(C.orange)("...")}  ${chalk.hex(C.mutedText)("·")}  ${calls}`, w, borderColor));
+        lines.push(boxLine(`${chalk.hex(C.orange).bold(displayVerb)}${chalk.hex(C.orange)("...")}  ${chalk.hex(C.mutedText)("\u00b7")}  ${calls}`, w, borderColor));
 
         // Show recent streaming output lines
         if (tracker.outputLines && tracker.outputLines.length > 0) {
@@ -462,12 +478,14 @@ class SubAgentCallCard implements Component {
         }
       }
 
-      // Mini progress indicator
-      const pulse = chalk.hex(C.teal)(getDotPulse());
+      // Mini progress indicator with per-agent color
+      const barColor = tracker.turn / tracker.maxTurns > 0.7 ? C.sage :
+        tracker.turn / tracker.maxTurns > 0.3 ? C.teal : C.lavender;
+      const dot = chalk.hex(barColor)(getDotPulse());
       const barWidth = Math.min(20, w - 20);
-      const bar = progressBar(tracker.turn, tracker.maxTurns, barWidth);
+      const bar = progressBar(tracker.turn, tracker.maxTurns, barWidth, barColor);
       lines.push(boxLine(
-        `${pulse} ` + chalk.hex(C.teal)(bar) + chalk.hex(C.dusty)(` ${Math.round((tracker.turn / tracker.maxTurns) * 100)}%`),
+        `${dot} ` + bar + chalk.hex(C.dusty)(` ${Math.round((tracker.turn / tracker.maxTurns) * 100)}%`),
         w, borderColor
       ));
 
@@ -477,7 +495,7 @@ class SubAgentCallCard implements Component {
         const ceo = tracker.ceoRequest;
         const agentName = tracker.name || this.agentName;
         const prefix = `${agentName} `;
-        const suffix = ` → CEO`;
+        const suffix = ` \u2192 CEO`;
         const pLen = stripAnsi(prefix).length;
         const sLen = stripAnsi(suffix).length;
         const dashSpace = Math.max(4, w - 8 - pLen - sLen);
@@ -489,20 +507,20 @@ class SubAgentCallCard implements Component {
         let idx: number;
         if (ceo.status === 'requesting' || ceo.status === 'ceo_evaluating') {
           idx = Math.round(progress * (dashSpace - 1));
-          dot = chalk.hex(C.sage)("●");
+          dot = chalk.hex(C.sage)("\u25c9");
         } else {
           idx = Math.round((1 - progress) * (dashSpace - 1));
-          dot = chalk.hex(C.orange)("●");
+          dot = chalk.hex(C.orange)("\u25c9");
         }
 
-        const connLine = prefix + "─".repeat(idx) + dot + "─".repeat(Math.max(0, dashSpace - idx - 1)) + suffix;
+        const connLine = prefix + "\u2500".repeat(idx) + dot + "\u2500".repeat(Math.max(0, dashSpace - idx - 1)) + suffix;
         lines.push(boxLine(truncateToWidth(connLine, w - 6), w, borderColor));
 
         const statusColor = ceo.status === 'requesting' ? C.sage : ceo.status === 'ceo_evaluating' ? C.amber : ceo.status === 'ceo_approved' ? C.orange : C.coral;
-        const statusIcon = ceo.status === 'requesting' ? "●" : ceo.status === 'ceo_evaluating' ? "◐" : ceo.status === 'ceo_approved' ? "✓" : "✗";
+        const statusIcon = ceo.status === 'requesting' ? "\u25c9" : ceo.status === 'ceo_evaluating' ? "\u25d0" : ceo.status === 'ceo_approved' ? "\u2713" : "\u2717";
         const statusMsg = ceo.status === 'requesting' ? `requesting "${ceo.toolName}" from CEO`
           : ceo.status === 'ceo_evaluating' ? `CEO evaluating "${ceo.toolName}"...`
-          : ceo.status === 'ceo_approved' ? `"${ceo.toolName}" approved — now available`
+          : ceo.status === 'ceo_approved' ? `"${ceo.toolName}" approved`
           : `"${ceo.toolName}" denied`;
         lines.push(boxLine(`${chalk.hex(statusColor)(statusIcon)} ${statusMsg}`, w, borderColor));
       }
@@ -545,7 +563,7 @@ class SubAgentResultCard implements Component {
     const accentColor = isError
       ? (s: string) => chalk.hex(C.coral).bold(s)
       : (s: string) => chalk.hex(C.sage).bold(s);
-    const icon = isError ? "✗" : "✓";
+    const icon = isError ? "\u2717" : "\u2713";
     const name = tracker?.name || this.ctx.args?.agentId || "agent";
 
     // Title
@@ -558,7 +576,7 @@ class SubAgentResultCard implements Component {
       const turns = `${tracker.turn} turns`;
       const tools = `${tracker.toolCallCount} tool calls`;
       lines.push(boxLine(
-        chalk.hex(C.dusty)(`Completed in ${duration}  ·  ${turns}  ·  ${tools}`),
+        chalk.hex(C.dusty)(`Completed in ${duration}  \u00b7  ${turns}  \u00b7  ${tools}`),
         w, borderColor
       ));
     }
@@ -586,11 +604,11 @@ class SubAgentResultCard implements Component {
 
       if (!showAll) {
         const remaining = resultLines.length - COLLAPSED_LINES;
-        const hint = chalk.hex(C.lavender)(`▸ ${remaining} more lines — press e to expand`);
+        const hint = chalk.hex(C.lavender)(`\u25b8 ${remaining} more lines - press e to expand`);
         const padded = hint + " ".repeat(Math.max(0, w - 6 - stripAnsi(hint).length));
         lines.push(boxLine(padded, w, borderColor));
       } else if (resultLines.length > COLLAPSED_LINES) {
-        const hint = chalk.hex(C.dusty)(`▾ Showing all ${resultLines.length} lines — press e to collapse`);
+        const hint = chalk.hex(C.dusty)(`\u25be Showing all ${resultLines.length} lines - press e to collapse`);
         const padded = hint + " ".repeat(Math.max(0, w - 6 - stripAnsi(hint).length));
         lines.push(boxLine(padded, w, borderColor));
       }
@@ -661,7 +679,7 @@ class ParallelAgentsCallCard implements Component {
     const pulseColor = getPulseColor();
     const pulseSymbol = globalPulse.getSymbol();
     const spinner = chalk.hex(pulseColor)(pulseSymbol);
-    const title = `${spinner} ⚡ Parallel Execution  ·  ${doneCount}/${total} done`;
+    const title = `${spinner} Parallel Execution  \u00b7  ${doneCount}/${total} done`;
     lines.push(boxTop(title, w, borderColor, accentColor));
 
     for (let i = 0; i < this.tasks.length; i++) {
@@ -670,20 +688,20 @@ class ParallelAgentsCallCard implements Component {
 
       let icon: string, nameStyle: string, statusLine: string;
       if (!tracker || tracker.status === "spawning") {
-        icon = chalk.hex(C.dusty)("◌");
+        icon = chalk.hex(C.dusty)("\u25cc");
         nameStyle = chalk.hex(C.dusty)(task.agentId);
         statusLine = chalk.hex(C.dusty)("waiting...");
       } else if (tracker.status === "running" || tracker.status === "calling_tool") {
         icon = chalk.hex(C.teal)(getDotPulse());
         nameStyle = chalk.hex(C.cream).bold(task.agentId);
         const toolInfo = tracker.currentTool ? chalk.hex(C.lavender)(` ${tracker.currentTool}`) : "";
-        statusLine = chalk.hex(C.sand)(`turn ${tracker.turn}/${tracker.maxTurns}${toolInfo}`) + chalk.hex(C.dusty)(`  ⏱${elapsed(tracker.startTime)}`);
+        statusLine = chalk.hex(C.sand)(`turn ${tracker.turn}/${tracker.maxTurns}${toolInfo}`) + chalk.hex(C.dusty)(`  \u25f7${elapsed(tracker.startTime)}`);
       } else if (tracker.status === "complete") {
-        icon = chalk.hex(C.sage)("✓");
+        icon = chalk.hex(C.sage)("\u2713");
         nameStyle = chalk.hex(C.sage).bold(task.agentId);
-        statusLine = chalk.hex(C.sage)("done") + chalk.hex(C.dusty)(`  ${elapsed(tracker.startTime, tracker.endTime)} · ${tracker.toolCallCount}tools`);
+        statusLine = chalk.hex(C.sage)("done") + chalk.hex(C.dusty)(`  ${elapsed(tracker.startTime, tracker.endTime)} \u00b7 ${tracker.toolCallCount}tools`);
       } else {
-        icon = chalk.hex(C.warmRed)("✗");
+        icon = chalk.hex(C.warmRed)("\u2717");
         nameStyle = chalk.hex(C.warmRed).bold(task.agentId);
         statusLine = chalk.hex(C.coral)(tracker.error || "failed");
       }
@@ -696,11 +714,11 @@ class ParallelAgentsCallCard implements Component {
       if (tracker?.ceoRequest) {
         const ceo = tracker.ceoRequest;
         const cColor = ceo.status === 'requesting' || ceo.status === 'ceo_evaluating' ? C.sage : C.orange;
-        const cIcon = ceo.status === 'ceo_evaluating' ? "◐" : "●";
-        const cLabel = ceo.status === 'requesting' ? `→CEO:${ceo.toolName}`
+        const cIcon = ceo.status === 'ceo_evaluating' ? "\u25d0" : "\u25c9";
+        const cLabel = ceo.status === 'requesting' ? `\u2192CEO:${ceo.toolName}`
           : ceo.status === 'ceo_evaluating' ? `CEO:${ceo.toolName}`
-          : ceo.status === 'ceo_approved' ? `CEO✓:${ceo.toolName}`
-          : `CEO✗:${ceo.toolName}`;
+          : ceo.status === 'ceo_approved' ? `CEO\u2713:${ceo.toolName}`
+          : `CEO\u2717:${ceo.toolName}`;
         lines.push(boxLine(`    ${chalk.hex(cColor)(cIcon)} ${chalk.hex(C.mutedText)(cLabel)}`, w, borderColor));
       }
     }
@@ -822,7 +840,7 @@ class SubAgentCreatedCard implements Component {
     const accentColor = (s: string) => chalk.hex(C.teal).bold(s);
     const lines: string[] = [];
 
-    lines.push(boxTop("✦ New Sub-Agent Created", w, borderColor, accentColor));
+    lines.push(boxTop("\u2726 New Sub-Agent Created", w, borderColor, accentColor));
 
     const resultText = this.result?.content
       ?.filter((c: any) => c.type === "text")
@@ -861,7 +879,7 @@ class SubAgentListCard implements Component {
     const accentColor = (s: string) => chalk.hex(C.orange).bold(s);
     const lines: string[] = [];
 
-    lines.push(boxTop("★ Available Sub-Agents", w, borderColor, accentColor));
+    lines.push(boxTop("\u2605 Available Sub-Agents", w, borderColor, accentColor));
 
     const resultText = this.result?.content
       ?.filter((c: any) => c.type === "text")
@@ -961,7 +979,7 @@ class QuantumHUDWidget implements Component {
     const pulseColor = getPulseColor();
 
     // Borderless modern header line
-    const title = ` ❖ CUSTOM-PI Swarm Dashboard `;
+    const title = ` \u2756 CUSTOM-PI Swarm Dashboard `;
     const cpuStr = `cpu: ${cpuLoad}`;
     const ramStr = `ram: ${memPercent}%`;
     const memStr = memStats.totalEntries > 0 ? `mem: ${memStats.totalEntries}` : "";
@@ -1671,11 +1689,11 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
         const results = await Promise.all(toolCalls.map(async (call: any) => {
           if (call.type !== "toolCall") return null;
           this.ctx.ui.notify(
-            `${chalk.hex(C.teal)("⚡")} ${this.config.name} → ${chalk.hex(C.lavender)(call.name)}`,
+            `${chalk.hex(C.teal)("\u26a1")} ${this.config.name} \u2192 ${chalk.hex(C.lavender)(call.name)}`,
             "info"
           );
           const result = await this.runTool(call.name, call.arguments);
-          const line = `⚡ ${call.name}: ${result.slice(0, 200).replace(/\n/g, " ")}${result.length > 200 ? "..." : ""}`;
+          const line = `\u25b6 ${call.name}: ${result.slice(0, 200).replace(/\n/g, " ")}${result.length > 200 ? "..." : ""}`;
           this.tracker.outputLines.push(line);
           if (this.tracker.outputLines.length > 20) this.tracker.outputLines.shift();
           return {
@@ -1875,35 +1893,35 @@ function patchToolExecution(proto: any) {
     }
 
     let statusColorFn = (str: string) => str;
-    let statusSymbol = "⚙";
+    let statusSymbol = "\u25d8";
     let statusLabel = "RUNNING";
 
     if (theme && typeof theme.fg === "function") {
       if (this.isPartial) {
         statusColorFn = (str: string) => theme.fg("accent", str);
-        statusSymbol = "🔧";
+        statusSymbol = "\u25d8";
         statusLabel = "PENDING";
       } else if (this.result?.isError) {
         statusColorFn = (str: string) => theme.fg("error", str);
-        statusSymbol = "✗";
+        statusSymbol = "\u2717";
         statusLabel = "FAILED";
       } else {
         statusColorFn = (str: string) => theme.fg("success", str);
-        statusSymbol = "✓";
+        statusSymbol = "\u2713";
         statusLabel = "SUCCESS";
       }
     } else {
       if (this.isPartial) {
         statusColorFn = (str: string) => `\x1b[36m${str}\x1b[0m`;
-        statusSymbol = "🔧";
+        statusSymbol = "\u25d8";
         statusLabel = "PENDING";
       } else if (this.result?.isError) {
         statusColorFn = (str: string) => `\x1b[31m${str}\x1b[0m`;
-        statusSymbol = "✗";
+        statusSymbol = "\u2717";
         statusLabel = "FAILED";
       } else {
         statusColorFn = (str: string) => `\x1b[32m${str}\x1b[0m`;
-        statusSymbol = "✓";
+        statusSymbol = "\u2713";
         statusLabel = "SUCCESS";
       }
     }
@@ -2423,7 +2441,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
 `;
 
       fs.writeFileSync(filePath, markdownContent, "utf8");
-      context.ui.notify(`${chalk.hex(C.teal)("✦")} Created sub-agent: ${chalk.hex(C.cream).bold(safeName)}`, "info");
+      context.ui.notify(`${chalk.hex(C.teal)("\u2726")} Created sub-agent: ${chalk.hex(C.cream).bold(safeName)}`, "info");
 
       return {
         content: [{
@@ -2452,7 +2470,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
             deleted = true;
-            context.ui.notify(`${chalk.hex(C.coral)("✗")} Deleted sub-agent: ${chalk.hex(C.cream).bold(safeName)}`, "info");
+            context.ui.notify(`${chalk.hex(C.coral)("\u2717")} Deleted sub-agent: ${chalk.hex(C.cream).bold(safeName)}`, "info");
           }
         }
         if (deleted) {
@@ -2505,7 +2523,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
       setupWidget(context);
 
       context.ui.notify(
-        `${chalk.hex(C.orange)("🤖")} Spawning sub-agent: ${chalk.hex(C.cream).bold(config.name)}`,
+        `${chalk.hex(C.orange)("\u25a3")} Spawning sub-agent: ${chalk.hex(C.cream).bold(config.name)}`,
         "info"
       );
 
@@ -2632,7 +2650,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
       setupWidget(context);
 
       context.ui.notify(
-        `${chalk.hex(C.lavender)("⚡")} Spawning ${chalk.hex(C.cream).bold(String(tasks.length))} sub-agents in parallel`,
+        `${chalk.hex(C.lavender)("\u26a1")} Spawning ${chalk.hex(C.cream).bold(String(tasks.length))} sub-agents in parallel`,
         "info"
       );
 
@@ -2760,8 +2778,8 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         const lines = results.map((r, i) => {
           const icon =
             r.entry.type === "fact" ? "" :
-            r.entry.type === "decision" ? "⚡" :
-            r.entry.type === "preference" ? "💡" : "";
+            r.entry.type === "decision" ? "\u25b6" :
+            r.entry.type === "preference" ? "\u2726" : "";
           return `${i + 1}. ${icon}[${r.entry.type}] ${r.entry.content} (relevance: ${(r.score * 100).toFixed(0)}%, importance: ${r.entry.importance}, project: ${r.entry.project})`;
         });
         return { content: [{ type: "text", text: lines.join("\n") }] };
@@ -3220,7 +3238,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
           return { content: [{ type: "text", text: `No messages in the current session matched "${params.query}". Try different keywords or check the memory_search tool for persistent memories.` }] };
         }
 
-        const iconForRole: Record<string, string> = { user: "🧑", assistant: "🤖", tool: "🔧" };
+        const iconForRole: Record<string, string> = { user: "\u25c6", assistant: "\u25a3", tool: "\u25d8" };
         const lines = top.map((m, i) => {
           const timeStr = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : "";
           const roleLabel = (iconForRole[m.role] || "") + ` ${m.role.toUpperCase()}`;

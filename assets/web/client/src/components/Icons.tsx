@@ -1,104 +1,111 @@
-interface AsciiProps {
+import {
+  MessageSquare, LayoutDashboard, KeyRound, BarChart3,
+  Brain, FileText, Users, Puzzle, Settings, Menu,
+  Zap, ArrowRight, Send, Play, Check, X, Plus, Trash2,
+  Eye, RefreshCw, type LucideIcon,
+} from "lucide-react";
+
+interface IconProps {
   size?: number;
   className?: string;
   style?: React.CSSProperties;
 }
 
-export function AsciiChat({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[+]</span>;
+export function NavIcon({ icon: Icon, size = 14, className, style }: IconProps & { icon: LucideIcon }) {
+  return <Icon size={size} className={className} style={style} />;
 }
 
-export function AsciiDashboard({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[#]</span>;
+export function ChatIcon(props: IconProps) {
+  return <MessageSquare size={14} {...props} />;
 }
 
-export function AsciiVault({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[@]</span>;
+export function DashboardIcon(props: IconProps) {
+  return <LayoutDashboard size={14} {...props} />;
 }
 
-export function AsciiBudget({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[$]</span>;
+export function VaultIcon(props: IconProps) {
+  return <KeyRound size={14} {...props} />;
 }
 
-export function AsciiMemory({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[M]</span>;
+export function BudgetIcon(props: IconProps) {
+  return <BarChart3 size={14} {...props} />;
 }
 
-export function AsciiWorkProducts({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[F]</span>;
+export function MemoryIcon(props: IconProps) {
+  return <Brain size={14} {...props} />;
 }
 
-export function AsciiAgents({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[A]</span>;
+export function WorkProductsIcon(props: IconProps) {
+  return <FileText size={14} {...props} />;
 }
 
-export function AsciiMCP({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[P]</span>;
+export function AgentsIcon(props: IconProps) {
+  return <Users size={14} {...props} />;
 }
 
-export function AsciiSettings({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[*]</span>;
+export function MCPIcon(props: IconProps) {
+  return <Puzzle size={14} {...props} />;
 }
 
-export function AsciiMenu({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 14 }}>[=]</span>;
+export function SettingsIcon(props: IconProps) {
+  return <Settings size={14} {...props} />;
 }
 
-export function AsciiLightning({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[!]</span>;
+export function MenuIcon(props: IconProps) {
+  return <Menu size={14} {...props} />;
 }
 
-export function AsciiArrowRight({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>{">"}</span>;
+export function LightningIcon(props: IconProps) {
+  return <Zap size={14} {...props} />;
 }
 
-export function AsciiSend({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 12 }}>{">"}</span>;
+export function ArrowRightIcon(props: IconProps) {
+  return <ArrowRight size={14} {...props} />;
 }
 
-export function AsciiPlay({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>{">"}</span>;
+export function SendIcon(props: IconProps) {
+  return <Send size={14} {...props} />;
 }
 
-export function AsciiCheck({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[x]</span>;
+export function PlayIcon(props: IconProps) {
+  return <Play size={14} {...props} />;
 }
 
-export function AsciiX({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[-]</span>;
+export function CheckIcon(props: IconProps) {
+  return <Check size={14} {...props} />;
 }
 
-export function AsciiPlus({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[+]</span>;
+export function XIcon(props: IconProps) {
+  return <X size={14} {...props} />;
 }
 
-export function AsciiTrash({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[D]</span>;
+export function PlusIcon(props: IconProps) {
+  return <Plus size={14} {...props} />;
 }
 
-export function AsciiEye({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[.]</span>;
+export function TrashIcon(props: IconProps) {
+  return <Trash2 size={14} {...props} />;
 }
 
-export function AsciiRefresh({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[R]</span>;
+export function EyeIcon(props: IconProps) {
+  return <Eye size={14} {...props} />;
 }
 
-export function AsciiTeams({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[T]</span>;
+export function RefreshIcon(props: IconProps) {
+  return <RefreshCw size={14} {...props} />;
 }
 
-export function AsciiUsers({ className }: AsciiProps) {
-  return <span className={className} style={{ fontFamily: "inherit", fontSize: 11 }}>[U]</span>;
+export function TeamsIcon(props: IconProps) {
+  return <Users size={14} {...props} />;
 }
 
 const BANNER = [
-  "  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗",
-  " ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║",
-  " ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║",
-  " ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║",
-  " ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║",
-  "  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝",
+  "  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u256c\u2551   \u256c\u2551 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2551   \u2588\u2588\u2588\u2551      \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u256c\u2551",
+  " \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d \u256c\u2551   \u256c\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u256c\u2555\u2550\u2550\u255d\u2588\u2588\u2555\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2551      \u2588\u2588\u2555\u2550\u2550\u2588\u2588\u2557\u256c\u2551",
+  " \u256c\u2551      \u256c\u2551   \u256c\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557    \u256c\u2551   \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u256c\u2551",
+  " \u256c\u2551      \u256c\u2551   \u256c\u2551 \u255a\u2550\u2550\u2550\u2550\u2588\u2588\u2551    \u256c\u2551   \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2551\u255a\u2550\u2550\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2555\u2550\u2550\u2550\u255d \u256c\u2551",
+  " \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d    \u256c\u2551   \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2551 \u255a\u2550\u2550 \u256c\u2551      \u2588\u2588\u2551     \u256c\u2551",
+  "  \u255a\u2550\u2550\u2550\u2550\u2550\u255d  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d     \u255a\u2550\u255d    \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u255d     \u255a\u2550\u255d     \u255a\u2550\u255d",
 ];
 
 const BANNER_COLORS = [
