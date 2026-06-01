@@ -200,6 +200,8 @@ printBoxLine(`  \x1b[38;5;226mSwarm Status:\x1b[0m online (builder/researcher/re
 printBoxLine(`  \x1b[38;5;226mHardware:\x1b[0m ${cpuModel.slice(0, 56)}`);
 console.log(pad + "\x1b[38;5;135m└────────────────────────────────────────────────────────────────────────┘\x1b[0m\n");
 console.log(pad + '\x1b[38;5;121m⚡ Starting custom-pi core console...\x1b[0m\n');
+// Space between the startup logo and the pi-agent TUI input bar
+console.log('\n'.repeat(15));
 
 // Spawn the globally installed 'pi' binary, forwarding args and pipes without deprecation shell warning on Unix
 const piProcess = spawn('pi', args, {
