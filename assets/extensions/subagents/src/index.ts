@@ -2029,22 +2029,20 @@ function patchAssistantMessage(proto: any) {
     const lines = originalRender.call(this, width - 4);
     if (lines.length === 0) return lines;
 
-    // OpenClaude Claude Brand Orange: rgb(215,119,87)
-    const brandOrange = (theme && typeof theme.fg === "function")
+    // Custom-PI signature purple: ✦ C-P
+    const purple = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("accent", s)
-      : (s: string) => `\x1b[38;2;215;119;87m${s}\x1b[0m`;
+      : (s: string) => `\x1b[38;2;143;122;244m${s}\x1b[0m`;
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-    const modelStr = this.message?.model || "assistant";
-
-    // Branded prefix for assistant: ✦ C-P  (Custom-PI)
+    // Branded prefix for assistant: ✦ C-P (Custom-PI)
     const assistantLabel = "C-P";
     const prefix = "\u2726 "; // ✦
 
     const result: string[] = [];
-    result.push(brandOrange(truncateToWidth(prefix + assistantLabel, width - 4)));
+    result.push(purple(truncateToWidth(prefix + assistantLabel, width - 4)));
     for (const line of lines) {
       result.push(line);
     }
