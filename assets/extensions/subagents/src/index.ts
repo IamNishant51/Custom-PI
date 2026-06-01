@@ -16,7 +16,7 @@ import { store as storeMemory, search as searchMemory, remove as deleteMemory, s
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
-import { TuiManager, TuiApp, SPACING as TUI_SPACING } from "./tui";
+import { TuiManager, SPACING as TUI_SPACING } from "./tui";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
 import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate as fileConsolidate, getMemoryStats } from "./memory-file-store";
@@ -1942,6 +1942,27 @@ function patchToolExecution(proto: any) {
   };
 }
 
+let assistantMessagePatched = false;
+
+function patchAssistantMessage(proto: any) {
+  if (assistantMessagePatched) return;
+  assistantMessagePatched = true;
+  debugLog("PATCHING ASSISTANT MESSAGE PROTOTYPE");
+
+  const originalRender = proto.render;
+  proto.render = function (this: any, width: number) {
+    const lines = originalRender.call(this, width);
+    if (lines.length === 0) return lines;
+
+    const modelStr = this.message?.model || "assistant";
+    const modelTag = theme && typeof theme.fg === "function"
+      ? theme.fg("muted", `\u2502 ${modelStr} \u2502`)
+      : `\x1b[90m\u2502 ${modelStr} \u2502\x1b[0m`;
+
+    return [modelTag, ...lines];
+  };
+}
+
 function applyLivePatches(tui: any, themeInstance: any) {
   if (livePatchesApplied) return;
   livePatchesApplied = true;
@@ -2022,6 +2043,8 @@ function applyLivePatches(tui: any, themeInstance: any) {
         const className = child.constructor?.name;
         if (className === "UserMessageComponent") {
           patchUserMessage(Object.getPrototypeOf(child));
+        } else if (className === "AssistantMessageComponent") {
+          patchAssistantMessage(Object.getPrototypeOf(child));
         } else if (className === "ToolExecutionComponent") {
           patchToolExecution(Object.getPrototypeOf(child));
         }
@@ -2155,7 +2178,6 @@ function teardownWidget(ctx: ExtensionContext) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function (pi: ExtensionAPI) {
-  let globalTuiApp: TuiApp | null = null;
 
   // ── MCP Server Client Integration ─────────────────────────────────────────
   const PI_DIR_GLOBAL = path.join(os.homedir(), ".pi", "agent");
@@ -3553,33 +3575,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
-  // Command: Toggle fullscreen TUI mode
-  pi.registerCommand("tui", {
-    description: "Toggle fullscreen TUI mode with animated rendering (/tui fullscreen, /tui default)",
-    handler(args, ctx) {
-      const mode = (args as string || "").trim().toLowerCase();
-      if (mode === "fullscreen" || mode === "fs") {
-        if (globalTuiApp?.isActive) {
-          ctx.ui.notify("Fullscreen TUI already active", "info");
-          return;
-        }
-        globalTuiApp = new TuiApp(ctx, pi);
-        globalTuiApp.start();
-        ctx.ui.notify("Fullscreen TUI activated. Run /tui default to switch back.", "info");
-      } else {
-        if (globalTuiApp?.isActive) {
-          globalTuiApp.stop();
-          globalTuiApp = null;
-          ctx.ui.notify("Switched to default TUI", "info");
-        } else {
-          ctx.ui.notify("Usage: /tui fullscreen — switch to animated fullscreen TUI. /tui default — switch back.", "info");
-        }
-      }
-    },
-    execute(args, ctx) {
-      return (this as any).handler(args, ctx);
-    }
-  });
+  // (no /tui fullscreen command — all enhancements apply directly to the default TUI)
 
   // Event Hook: Setup HUD on session start, run consolidation for crash recovery
   pi.on("session_start", async (_event, ctx) => {
@@ -3667,7 +3663,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         // }
       });
     }
-    ctx.ui.notify("Fullscreen TUI available: /tui fullscreen", "info");
+    ctx.ui.notify("Subagent extensions active. All TUI enhancements applied to default UI.", "info");
   });
 
   // Event Hook: Inject task memory into system prompt
