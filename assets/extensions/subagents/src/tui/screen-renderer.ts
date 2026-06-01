@@ -305,65 +305,103 @@ export class ScreenRenderer {
     return y + 1;
   }
 
+  /** Streaming dot animation frame — cycles 0-3 */
+  private streamDot(frame: number): string {
+    const dots = ["\u25cc", "\u25cd", "\u25ce", "\u25cd"];
+    return dots[frame % dots.length];
+  }
+
   drawMessageBubble(y: number, width: number, role: string, content: string, timestamp: string, opts?: {
     toolCalls?: number;
     duration?: string;
     agentName?: string;
     isStreaming?: boolean;
+    animFrame?: number;
+    modelName?: string;
+    agentColor?: string;
   }): number {
     const cols = this.screen.getCols();
     const cx = this.contentLeft;
     const cw = this.contentWidth;
     const isUser = role === "user";
+
+    // Color scheme
+    const badgeColor = opts?.agentColor || (isUser ? this.theme.accent : this.theme.info);
     const borderColor = isUser ? this.theme.userBubbleBorder : this.theme.assistantBubbleBorder;
+    const bgColor = isUser ? this.theme.userBubble : this.theme.card;
+
+    const canvasBg = this.style({ bg: this.theme.canvas });
     const bStyle = this.style({ fg: borderColor });
+    const badgeStyle = this.style({ fg: badgeColor, bold: true });
     const headerStyle = this.style({ fg: this.theme.muted, dim: true });
-    const canvasStyle = this.style({ bg: this.theme.canvas });
     const contentStyle = this.style({ fg: this.theme.ink });
+    const bubbleBg = this.style({ bg: bgColor });
 
-    // Agent badge: ◆ for user, ▣ for assistant
-    const agentIcon = isUser ? "\u25c6" : "\u25a3";
+    // Identity bar: badge symbol + role name + optional model tag
+    const badgeSym = isUser ? "\u25c6" : "\u25a3";
     const name = isUser ? "You" : (opts?.agentName || "Assistant");
-    const metaParts: string[] = [];
-    if (opts?.toolCalls !== undefined) metaParts.push(`tools: ${opts.toolCalls}`);
-    if (opts?.duration) metaParts.push(opts.duration);
-    if (opts?.isStreaming) metaParts.push("\u25cc streaming");
-    const meta = metaParts.length > 0 ? `  \u00b7  ${metaParts.join("  \u00b7  ")}` : "";
-    const headerText = `${agentIcon} ${name}${meta}  ${timestamp}`;
-    const headerW = measureWidth(headerText);
+    const modelTag = (!isUser && opts?.modelName) ? ` \u2502 ${opts.modelName}` : "";
 
+    // Meta info (right side of header)
+    const metaParts: string[] = [];
+    if (opts?.toolCalls !== undefined) metaParts.push(`tools:${opts.toolCalls}`);
+    if (opts?.duration) metaParts.push(opts.duration);
+    if (opts?.isStreaming) metaParts.push(this.streamDot(opts?.animFrame ?? 0));
+    const metaStr = metaParts.length > 0 ? `  \u00b7  ${metaParts.join("  \u00b7  ")}` : "";
+
+    const identityStr = `${badgeSym} ${name}${modelTag}`;
+    const identityW = measureWidth(stripAnsi(identityStr));
+
+    // Content wrap
     const maxContentW = Math.min(cw - PAD * 2, SPACING.maxBubbleWidth);
-    const lines = wordWrap(content, maxContentW - PAD);
+    const innerWrapW = Math.max(16, maxContentW - PAD);
+    const lines = wordWrap(content, innerWrapW);
     let maxLineW = 0;
     for (const line of lines) {
       const lineW = measureWidth(stripAnsi(line.trimEnd()));
       if (lineW > maxLineW) maxLineW = lineW;
     }
 
-    const bubbleW = Math.min(maxContentW, Math.max(headerW + PAD, maxLineW + PAD));
+    // Header line width
+    const headerTotalW = identityW + measureWidth(stripAnsi(metaStr)) + measureWidth(timestamp) + 4;
+    const bubbleW = Math.min(maxContentW, Math.max(headerTotalW + PAD, maxLineW + PAD + 4));
     const startX = isUser ? cx + cw - bubbleW - PAD_SM : cx + PAD_SM;
 
     if (y >= this.screen.getRows() - GUTTER) return y;
 
-    // Top border
-    this.screen.clearLine(y, canvasStyle);
+    // ── Top border ──
+    this.screen.clearLine(y, canvasBg);
     this.screen.writeString(startX, y, "\u256d" + BOX.h.repeat(bubbleW - 2) + "\u256e", bStyle);
     y++;
 
-    // Header line
+    // ── Identity bar (badge + name + model + meta + timestamp) ──
     if (y >= this.screen.getRows() - GUTTER) return y;
-    this.screen.clearLine(y, canvasStyle);
-    const trimmedHeader = headerText.length > bubbleW - PAD ? headerText.slice(0, bubbleW - PAD - 2) + "\u2026" : headerText;
-    this.screen.writeString(startX + PAD_SM, y, trimmedHeader, headerStyle);
+    this.screen.clearLine(y, bubbleBg);
+
+    // Badge + name (colored)
+    this.screen.writeString(startX + PAD_SM, y, badgeSym, badgeStyle);
+    this.screen.writeString(startX + PAD_SM + 2, y, name, badgeStyle);
+    if (modelTag) {
+      this.screen.writeString(startX + PAD_SM + 2 + measureWidth(name) + 1, y, modelTag, headerStyle);
+    }
+
+    // Meta + timestamp (right-aligned)
+    const rightContent = metaStr ? `${metaStr}  ${timestamp}` : timestamp;
+    const rightW = measureWidth(stripAnsi(rightContent));
+    const rightX = startX + bubbleW - PAD_SM - rightW;
+    if (rightX > startX + PAD_SM + identityW + 2) {
+      this.screen.writeString(rightX, y, rightContent, headerStyle);
+    }
+
     // Side borders
     this.screen.writeString(startX, y, "\u2502", bStyle);
     this.screen.writeString(startX + bubbleW - 1, y, "\u2502", bStyle);
     y++;
 
-    // Content
+    // ── Content lines ──
     for (const line of lines) {
       if (y >= this.screen.getRows() - GUTTER) break;
-      this.screen.clearLine(y, canvasStyle);
+      this.screen.clearLine(y, bubbleBg);
       const clean = line.trimEnd();
       const visibleLen = measureWidth(stripAnsi(clean));
       const pad = Math.max(0, bubbleW - PAD - visibleLen);
@@ -373,9 +411,9 @@ export class ScreenRenderer {
       y++;
     }
 
-    // Bottom border
+    // ── Bottom border ──
     if (y < this.screen.getRows() - GUTTER) {
-      this.screen.clearLine(y, canvasStyle);
+      this.screen.clearLine(y, canvasBg);
       this.screen.writeString(startX, y, "\u2570" + BOX.h.repeat(bubbleW - 2) + "\u256f", bStyle);
       y++;
     }
@@ -383,26 +421,41 @@ export class ScreenRenderer {
     return y + 1;
   }
 
-  drawThinkingBlock(y: number, width: number, content: string, isCollapsed: boolean, timestamp: string): number {
+  drawThinkingBlock(y: number, width: number, content: string, isCollapsed: boolean, timestamp: string, opts?: {
+    animFrame?: number;
+  }): number {
     const cx = this.contentLeft;
     const cw = this.contentWidth;
     const gutterX = cx + PAD_SM;
 
     const canvasStyle = this.style({ bg: this.theme.canvas });
     const headerStyle = this.style({ fg: this.theme.muted, dim: true });
-    const accentStyle = this.style({ fg: this.theme.accent, dim: true });
     const contentStyle = this.style({ fg: this.theme.muted, italic: true });
+
+    // Shimmer animated accent color
+    const frame = opts?.animFrame ?? 0;
+    const shimmerPhase = Math.sin(frame * 0.08) * 0.3 + 0.7;
+    const accentR = Math.round(0xff * shimmerPhase);
+    const accentG = Math.round(0x7a * shimmerPhase);
+    const accentB = Math.round(0x17 * shimmerPhase);
+    const accentHex = `#${accentR.toString(16).padStart(2, "0")}${accentG.toString(16).padStart(2, "0")}${accentB.toString(16).padStart(2, "0")}`;
+    let accentStyle: number;
+    if (this.useTruecolor) {
+      accentStyle = this.pool.getTruecolorStyle(accentHex);
+    } else {
+      accentStyle = this.style({ fg: accentHex });
+    }
 
     if (y >= this.screen.getRows() - GUTTER) return y;
 
-    // Accent strip (left border)
+    // Accent strip (left border) with shimmer
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(gutterX, y, "\u2502", accentStyle);
+    this.screen.writeString(gutterX, y, "\u258c", accentStyle);
     const chevron = isCollapsed ? "\u25b8" : "\u25be";
     const headerText = `${chevron} Reasoning  ${timestamp}`;
     this.screen.writeString(gutterX + PAD_SM, y, headerText, headerStyle);
 
-    // Right-side expand hint
+    // Collapse hint (right-aligned)
     const hint = isCollapsed ? "click to expand" : "click to collapse";
     const hintW = measureWidth(hint);
     const hintStyle = this.style({ fg: this.theme.dim, dim: true });
@@ -416,7 +469,7 @@ export class ScreenRenderer {
       for (const line of lines) {
         if (y >= this.screen.getRows() - GUTTER) break;
         this.screen.clearLine(y, canvasStyle);
-        this.screen.writeString(gutterX, y, "\u2502", accentStyle);
+        this.screen.writeString(gutterX, y, "\u258c", accentStyle);
         this.screen.writeString(gutterX + PAD_SM, y, line, contentStyle);
         y++;
       }

@@ -37,6 +37,7 @@ export class TuiApp {
   private sessionId = "session-1";
   private messageLimit = 100;
   private scrollOffset = 0;
+  private frameCounter = 0;
 
   constructor(ctx?: any, pi?: any) {
     this.ctx = ctx;
@@ -184,6 +185,7 @@ export class TuiApp {
 
   private renderFrame(): void {
     if (!this.active) return;
+    this.frameCounter++;
     this.syncMessages();
 
     const renderer = this.tui.renderer;
@@ -261,11 +263,15 @@ export class TuiApp {
 
       if (msg.role === "thinking") {
         const isCollapsed = this.collapsedThinkingIndices.has(i);
-        y = renderer.drawThinkingBlock(y, renderer.contentWidth, msg.content.slice(0, 300), isCollapsed, ts);
+        y = renderer.drawThinkingBlock(y, renderer.contentWidth, msg.content.slice(0, 300), isCollapsed, ts, {
+          animFrame: this.frameCounter,
+        });
       } else {
         y = renderer.drawMessageBubble(y, renderer.contentWidth, msg.role, msg.content.slice(0, 300), ts, {
           agentName: msg.role === "assistant" ? "Assistant" : undefined,
-          isStreaming: false,
+          isStreaming: msg.role === "assistant" && i === visibleMessages.length - 1,
+          animFrame: this.frameCounter,
+          modelName: msg.role === "assistant" ? this.sessionModel : undefined,
         });
       }
 
