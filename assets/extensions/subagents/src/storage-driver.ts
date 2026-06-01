@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -7,6 +8,18 @@ export interface StorageDriver {
   writeFile(filePath: string, content: string): Promise<void>;
   listDirectory(dirPath: string): Promise<Array<{ name: string; isDir: boolean; size?: number }>>;
   exists(filePath: string): Promise<boolean>;
+}
+
+export function writeAtomic(filePath: string, content: string): void {
+  const tmp = filePath + ".tmp." + process.pid;
+  fsSync.writeFileSync(tmp, content, "utf8");
+  fsSync.renameSync(tmp, filePath);
+}
+
+export async function writeAtomicAsync(filePath: string, content: string): Promise<void> {
+  const tmp = filePath + ".tmp." + process.pid;
+  await fs.writeFile(tmp, content, "utf8");
+  await fs.rename(tmp, filePath);
 }
 
 export class LocalStorageDriver implements StorageDriver {

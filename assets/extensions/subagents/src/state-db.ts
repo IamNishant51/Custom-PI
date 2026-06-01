@@ -2,9 +2,24 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import Database from "better-sqlite3";
+import { writeAtomic, writeAtomicAsync } from "./storage-driver";
 
 const DB_DIR = path.join(os.homedir(), ".pi", "agent");
 const DB_PATH = path.join(DB_DIR, "session-state.db");
+const CHECKPOINT_DIR = path.join(DB_DIR, "checkpoints");
+
+export interface Checkpoint {
+  taskId: string;
+  sessionId: string;
+  timestamp: number;
+  goal: string;
+  currentSubtask: string;
+  completedSubtasks: string[];
+  pendingSubtasks: string[];
+  stateNotes: string;
+  activeAgentName: string | null;
+  lastToolResult: string | null;
+}
 
 let db: any = null;
 
@@ -295,4 +310,61 @@ export function closeDb(): void {
     db.close();
     db = null;
   }
+}
+
+// ── Checkpointing ───────────────────────────────────────────────────────────
+
+function ensureCheckpointDir(): void {
+  if (!fs.existsSync(CHECKPOINT_DIR)) {
+    fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+  }
+}
+
+export function saveCheckpoint(cp: Checkpoint): void {
+  ensureCheckpointDir();
+  const filePath = path.join(CHECKPOINT_DIR, `${cp.sessionId}.json`);
+  writeAtomic(filePath, JSON.stringify(cp, null, 2));
+}
+
+export async function saveCheckpointAsync(cp: Checkpoint): Promise<void> {
+  ensureCheckpointDir();
+  const filePath = path.join(CHECKPOINT_DIR, `${cp.sessionId}.json`);
+  await writeAtomicAsync(filePath, JSON.stringify(cp, null, 2));
+}
+
+export function loadCheckpoint(sessionId: string): Checkpoint | null {
+  const filePath = path.join(CHECKPOINT_DIR, `${sessionId}.json`);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) as Checkpoint;
+  } catch {
+    return null;
+  }
+}
+
+export function listCheckpoints(): string[] {
+  ensureCheckpointDir();
+  return fs.readdirSync(CHECKPOINT_DIR)
+    .filter(f => f.endsWith(".json"))
+    .map(f => f.replace(/\.json$/, ""));
+}
+
+export function deleteCheckpoint(sessionId: string): void {
+  const filePath = path.join(CHECKPOINT_DIR, `${sessionId}.json`);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
+export function getLatestCheckpoint(): Checkpoint | null {
+  const ids = listCheckpoints();
+  if (ids.length === 0) return null;
+  let latest: Checkpoint | null = null;
+  for (const id of ids) {
+    const cp = loadCheckpoint(id);
+    if (cp && (!latest || cp.timestamp > latest.timestamp)) {
+      latest = cp;
+    }
+  }
+  return latest;
 }

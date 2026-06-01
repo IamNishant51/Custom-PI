@@ -29,7 +29,7 @@ import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate a
 import { initNudgeState, incrementTurn, shouldNudgeMemory, shouldNudgeSkill, resetMemoryNudge, resetSkillNudge, getNudgeState } from "./memory-nudge";
 import { runMemoryReview, runSkillReview, runPreCompressionFlush } from "./background-review";
 import { startCronJobs, stopCronJobs, isCronRunning } from "./cron-scheduler";
-import { ensureSession, insertMessage, searchSession, closeDb } from "./state-db";
+import { ensureSession, insertMessage, searchSession, closeDb, saveCheckpoint, getLatestCheckpoint } from "./state-db";
 import {
   vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
 } from "./secret-vault";
@@ -2776,6 +2776,22 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         let result: string = "";
         let runtime: SubAgentRuntime | null = null;
 
+        // Save checkpoint before delegation
+        try {
+          saveCheckpoint({
+            taskId: id,
+            sessionId: context.sessionId || "unknown",
+            timestamp: Date.now(),
+            goal: params.task.slice(0, 200),
+            currentSubtask: `Delegating to ${params.agentId}`,
+            completedSubtasks: [],
+            pendingSubtasks: [params.task],
+            stateNotes: `Sub-agent: ${params.agentId}`,
+            activeAgentName: params.agentId,
+            lastToolResult: null,
+          });
+        } catch { /* checkpoint must never crash execution */ }
+
         // Stop animation and clean up if abort signal fires
         if (signal) {
           signal.addEventListener("abort", () => {
@@ -2888,6 +2904,22 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         intervalMs: 120,
       });
       context.ui.setWorkingMessage(`Running ${tasks.length} sub-agents in parallel...`);
+
+      // Save checkpoint before parallel delegation
+      try {
+        saveCheckpoint({
+          taskId: id,
+          sessionId: context.sessionId || "unknown",
+          timestamp: Date.now(),
+          goal: `Parallel delegation (${tasks.length} tasks)`,
+          currentSubtask: `Spawning ${tasks.length} sub-agents`,
+          completedSubtasks: [],
+          pendingSubtasks: tasks.map(t => `${t.agentId}: ${t.task}`),
+          stateNotes: `Parallel tasks: ${tasks.map(t => t.agentId).join(", ")}`,
+          activeAgentName: null,
+          lastToolResult: null,
+        });
+      } catch { /* checkpoint must never crash execution */ }
 
       // Stop animation and clean up if abort signal fires
       if (signal) {
@@ -3938,10 +3970,43 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /resume, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // ── Resume Command ──────────────────────────────────────────────────────────
+  pi.registerCommand("resume", {
+    description: "Resume from the latest checkpoint. Restores goal, subtasks, and context.",
+    handler(args, ctx) {
+      const cp = getLatestCheckpoint();
+      if (!cp) {
+        ctx.ui.notify("No checkpoint found to resume from.", "error");
+        return;
+      }
+      if (Date.now() - cp.timestamp > 3600_000) {
+        ctx.ui.notify("Latest checkpoint is over 1 hour old. Too stale to resume.", "error");
+        return;
+      }
+      const stamp = new Date(cp.timestamp).toLocaleTimeString();
+      const age = Math.round((Date.now() - cp.timestamp) / 1000);
+      ctx.ui.notify(`Resuming checkpoint from ${stamp} (${age}s ago)`, "info");
+      const formatted = `**Checkpoint Recovery — ${stamp}**\n\n` +
+        `- **Goal**: ${cp.goal}\n` +
+        `- **Active Agent**: ${cp.activeAgentName || "N/A"}\n` +
+        `- **Current Subtask**: ${cp.currentSubtask}\n` +
+        `- **Completed**:\n${cp.completedSubtasks.map((t: string) => `  * [x] ${t}`).join("\n") || "  (None)"}\n` +
+        `- **Pending**:\n${cp.pendingSubtasks.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (None)"}\n` +
+        `- **Notes**: ${cp.stateNotes || "None"}`;
+      pi.sendMessage({
+        role: "system" as any,
+        content: [{ type: "text", text: formatted }]
+      });
     },
     execute(args, ctx) {
       return (this as any).handler(args, ctx);
@@ -3977,6 +4042,18 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     // Set playful geometric thinking indicator
     const megaFrames = ["◐", "◓", "◑", "◒"];
     ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });
+
+    // Check for recovery checkpoint on startup
+    try {
+      const latest = getLatestCheckpoint();
+      if (latest && Date.now() - latest.timestamp < 3600_000) {
+        const age = Math.round((Date.now() - latest.timestamp) / 1000);
+        ctx.ui.notify(
+          `Recovery checkpoint found from ${age}s ago (task: "${latest.goal.slice(0, 60)}"). Resume? Use /resume to continue.`,
+          "info"
+        );
+      }
+    } catch { /* checkpoint check must never crash startup */ }
 
     // Listen for abort signal (Escape key) to stop animation and clear working state
     if (ctx.signal) {
@@ -4466,6 +4543,21 @@ If nothing to report, return: {}`;
     } catch (e) {
       // silent — consolidation should never crash shutdown
     }
+    // Save final checkpoint for recovery
+    try {
+      saveCheckpoint({
+        taskId: "shutdown",
+        sessionId: "session_end",
+        timestamp: Date.now(),
+        goal: "Session shutdown — no active task",
+        currentSubtask: "",
+        completedSubtasks: [],
+        pendingSubtasks: [],
+        stateNotes: "Session ended. Checkpoint available for next session recovery.",
+        activeAgentName: null,
+        lastToolResult: null,
+      });
+    } catch {}
     // Clean up cloned repos
     for (const repoPath of clonedRepos) {
       try {
