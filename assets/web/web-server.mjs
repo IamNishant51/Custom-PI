@@ -10,6 +10,9 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
+import { createRequire } from "node:module";
+const _require = createRequire(import.meta.url);
+
 import { parse as parseYaml } from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -4951,7 +4954,7 @@ async function main() {
 
   app.get("/api/knowledge/triplets", async (req) => {
     try {
-      const Database = require("better-sqlite3");
+      const Database = _require("better-sqlite3");
       const db = new Database(STATE_DB_PATH, { readonly: true });
       const minConf = req.query?.minConfidence ?? 0.5;
       const limit = Math.min(parseInt(req.query?.limit ?? "50"), 200);
@@ -4977,7 +4980,7 @@ async function main() {
     try {
       const id = req.query?.id;
       if (!id) return { error: "id parameter required" };
-      const Database = require("better-sqlite3");
+      const Database = _require("better-sqlite3");
       const db = new Database(STATE_DB_PATH, { readonly: true });
       const entity = db.prepare("SELECT * FROM entities WHERE id = ?").get(id);
       if (!entity) { db.close(); return { error: "Entity not found" }; }
