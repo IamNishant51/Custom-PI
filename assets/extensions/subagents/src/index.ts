@@ -1,4 +1,6 @@
+import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import { Container, TUI, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import fs from "node:fs";
@@ -1720,6 +1722,186 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TUI MONKEY PATCHES — Collapsible reasoning & shrink-to-fit bubbles
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let chatContainerStartLine = 0;
+let renderedComponents: Array<{
+  component: any;
+  startLine: number;
+  endLine: number;
+}> = [];
+
+// Hook Container.prototype.render to capture chatContainer rendering details
+const originalContainerRender = Container.prototype.render;
+Container.prototype.render = function (this: any, width: number) {
+  const isChatContainer = this.children && this.children.some((child: any) => 
+    child instanceof UserMessageComponent || child instanceof AssistantMessageComponent
+  );
+  
+  if (isChatContainer) {
+    renderedComponents = [];
+    const lines: string[] = [];
+    for (const child of this.children) {
+      const startLine = lines.length;
+      const childLines = child.render(width);
+      const endLine = startLine + childLines.length;
+      
+      if (child instanceof UserMessageComponent || child instanceof AssistantMessageComponent) {
+        renderedComponents.push({
+          component: child,
+          startLine,
+          endLine,
+        });
+      }
+      
+      for (const line of childLines) {
+        lines.push(line);
+      }
+    }
+    return lines;
+  }
+  
+  return originalContainerRender.call(this, width);
+};
+
+// Hook TUI.prototype.render to capture the starting line of chatContainer in the layout
+const originalTuiRender = TUI.prototype.render;
+TUI.prototype.render = function (this: any, width: number) {
+  let offset = 0;
+  for (const child of this.children) {
+    const isChat = child.children && child.children.some((c: any) => 
+      c instanceof UserMessageComponent || c.children?.some((cc: any) => cc instanceof UserMessageComponent)
+    );
+    if (isChat) {
+      chatContainerStartLine = offset;
+      break;
+    }
+    const childLines = child.render(width);
+    offset += childLines.length;
+  }
+  return originalTuiRender.call(this, width);
+};
+
+const OSC133_ZONE_START = "\x1b]133;A\x07";
+const OSC133_ZONE_END = "\x1b]133;B\x07";
+const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
+
+// Hook UserMessageComponent.prototype.render for right-aligned shrink-to-fit bubble
+UserMessageComponent.prototype.render = function (this: any, width: number) {
+  const maxBubbleWidth = Math.max(20, Math.min(width - 6, Math.max(40, Math.floor(width * 0.75))));
+
+  const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
+  if (!markdownComponent) {
+    return [];
+  }
+
+  const markdownContentWidth = Math.max(1, maxBubbleWidth - 2);
+  const mdLines = markdownComponent.render(markdownContentWidth);
+
+  let maxLineW = 1;
+  for (const line of mdLines) {
+    const w = visibleWidth(line);
+    if (w > maxLineW) {
+      maxLineW = w;
+    }
+  }
+
+  const bubbleWidth = maxLineW + 2;
+  const bubbleLines = this.contentBox.render(bubbleWidth);
+  if (bubbleLines.length === 0) {
+    return [];
+  }
+
+  const padCount = Math.max(0, width - bubbleWidth);
+  const leftPad = " ".repeat(padCount);
+  const lines = bubbleLines.map((line: string) => leftPad + line);
+
+  lines[0] = OSC133_ZONE_START + lines[0];
+  lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
+
+  return lines;
+};
+
+// Handle mouse clicks on the scrolling TUI messages
+function handleTerminalMouseClick(col: number, row: number) {
+  if (!activeTuiInstance) return;
+  
+  const linesCount = activeTuiInstance.previousLines.length;
+  const terminalRows = activeTuiInstance.terminal.rows;
+  const viewportTop = Math.max(0, linesCount - terminalRows);
+  const lineIndex = viewportTop + row - 1;
+  
+  const clicked = renderedComponents.find(rc => {
+    const absStart = chatContainerStartLine + rc.startLine;
+    const absEnd = chatContainerStartLine + rc.endLine;
+    return lineIndex >= absStart && lineIndex < absEnd;
+  });
+  
+  if (!clicked) return;
+  
+  if (clicked.component instanceof UserMessageComponent) {
+    const idx = renderedComponents.indexOf(clicked);
+    const nextRc = renderedComponents.slice(idx + 1).find(rc => rc.component instanceof AssistantMessageComponent);
+    if (nextRc) {
+      const assistant = nextRc.component;
+      assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+      activeTuiInstance.requestRender();
+    }
+  } else if (clicked.component instanceof AssistantMessageComponent) {
+    const assistant = clicked.component;
+    assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+    activeTuiInstance.requestRender();
+  }
+}
+
+// Hook TUI.prototype.start and stop to toggle mouse tracking and intercept stdin data events
+const originalTuiStart = TUI.prototype.start;
+TUI.prototype.start = function (this: any) {
+  activeTuiInstance = this;
+  originalTuiStart.call(this);
+  
+  // Enable mouse tracking (1000h = report clicks, 1006h = SGR coordinate format)
+  process.stdout.write("\x1b[?1000h\x1b[?1006h");
+  
+  // Intercept stdin events to capture and swallow mouse reports
+  const originalEmit = process.stdin.emit;
+  (process.stdin as any)._originalEmit = originalEmit;
+  process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
+    if (event === "data" && Buffer.isBuffer(data)) {
+      const str = data.toString("utf8");
+      const mouseMatch = str.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+      if (mouseMatch) {
+        const button = parseInt(mouseMatch[1], 10);
+        const col = parseInt(mouseMatch[2], 10);
+        const row = parseInt(mouseMatch[3], 10);
+        const isRelease = mouseMatch[4] === "m";
+        if (!isRelease && button === 0) {
+          handleTerminalMouseClick(col, row);
+        }
+        return true; // swallow the mouse data chunk
+      }
+    }
+    return originalEmit.call(this, event, data, ...args);
+  };
+};
+
+const originalTuiStop = TUI.prototype.stop;
+TUI.prototype.stop = function (this: any) {
+  // Disable mouse tracking
+  process.stdout.write("\x1b[?1000l\x1b[?1006l");
+  
+  // Restore original stdin emit
+  if ((process.stdin as any)._originalEmit) {
+    process.stdin.emit = (process.stdin as any)._originalEmit;
+    delete (process.stdin as any)._originalEmit;
+  }
+  
+  activeTuiInstance = null;
+  originalTuiStop.call(this);
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  WIDGET MANAGEMENT — Persistent Dashboard
