@@ -1939,9 +1939,6 @@ function patchToolExecution(proto: any) {
         : `\x1b[38;2;80;200;120m`;  // green
     const statusDot = `${dotColor}\u25cf\x1b[0m`; // ●
     const yellow = (s: string) => `\x1b[38;2;220;180;60m${s}\x1b[0m`;
-    const dimFn = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("muted", s)
-      : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
     // Build param summary from tool arguments
     let paramSummary = "";
@@ -1956,15 +1953,8 @@ function patchToolExecution(proto: any) {
       }
     }
 
-    // Truncate long param summary
-    const maxSummaryW = Math.max(10, width - 20);
-    const fullHeader = this.toolName + (paramSummary ? " " + paramSummary : "");
-    const truncatedHeader = visibleWidth(fullHeader) > maxSummaryW
-      ? truncateToWidth(fullHeader, maxSummaryW) + "\u2026"
-      : fullHeader;
-
     // Build header: ● ToolName (params)
-    let headerLine = `${statusDot} ${yellow(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
+    const headerLine = `${statusDot} ${yellow(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
 
     // Detect diff output for edit-type tools
     const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
