@@ -1,5 +1,9 @@
 import { ScreenRenderer } from "./screen-renderer";
 import { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
+import { ToastManager } from "./components/toast";
+import type { Toast, ToastType } from "./components/toast";
+import { QuestionModalManager } from "./components/question-modal";
+import type { QuestionModalConfig } from "./components/question-modal";
 import { VimInputHandler } from "./input/vim-input";
 import { THEME, SPACING, type PulseConfig, type ConversationHeader, type ScrollIndicator } from "./types";
 import { PulseController } from "./app/pulse-controller";
@@ -13,6 +17,8 @@ export class TuiManager {
   renderer: ScreenRenderer;
   animFrame: AnimationFrame;
   vimInput: VimInputHandler;
+  toasts: ToastManager;
+  questions: QuestionModalManager;
   spinners: Map<string, SpinnerController> = new Map();
   shimmerBorders: Map<string, ShimmerBorderController> = new Map();
   private options: TuiManagerOptions;
@@ -24,6 +30,8 @@ export class TuiManager {
     this.renderer = new ScreenRenderer();
     this.animFrame = new AnimationFrame();
     this.vimInput = new VimInputHandler();
+    this.toasts = new ToastManager();
+    this.questions = new QuestionModalManager();
   }
 
   start(): void {
