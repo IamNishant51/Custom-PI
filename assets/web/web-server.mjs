@@ -3352,7 +3352,7 @@ async function resolveInternalUrl(url, cwd) {
         // vault://KEY
         const key = (parsed.hostname || parsed.pathname.replace(/^\/+/, "")).toUpperCase();
         const val = vaultGet(key);
-        if (val !== null) return `vault://${key} = ${val}`;
+        if (val !== null) return `vault://${key} = [REDACTED] (use vault_get tool to retrieve)`;
         return `Key '${key}' not found in vault.`;
       }
 
@@ -4617,10 +4617,21 @@ async function main() {
 
   const app = Fastify({ logger: { level: "warn" } });
 
+  // Auth middleware — optional bearer token via PI_API_KEY env var
+  const apiKey = process.env.PI_API_KEY || process.env.API_KEY || "";
   app.addHook("onRequest", (req, reply, done) => {
     reply.header("Access-Control-Allow-Origin", "*");
     reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    // Skip auth for preflight and health check
+    if (req.method === "OPTIONS" || req.url === "/api/health" || req.url.startsWith("/ws")) return done();
+    // If API_KEY is set, require bearer token
+    if (apiKey) {
+      const auth = req.headers.authorization;
+      if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== apiKey) {
+        return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header or set PI_API_KEY" });
+      }
+    }
     done();
   });
   app.options("/*", async (req, reply) => reply.code(204).send());
