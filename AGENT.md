@@ -126,6 +126,29 @@ function patchDynamicBorder(proto: any) {
 ```
 If you need to restore or custom-style the surrounding border box, modify this function.
 
+### 4. Tool Execution Status Dot Blinking
+The status dot in the `ToolExecutionComponent` indicates execution state:
+* When running (`isRunning` is true), the dot blinks by toggling between a hollow circle `○` (`\u25cb`) and a solid circle `●` (`\u25cf`) using the global animation tick `getGlobalFrame()`:
+  ```typescript
+  const dotChar = isRunning && (getGlobalFrame() % 6) < 3 ? "\u25cb" : "\u25cf";
+  ```
+* On completion (or if not running), it remains solid `●`.
+* The color maps to state: orange for running, red for error, green for success.
+
+### 5. Abort Signal Propagation (`ESC` key aborts)
+To prevent hanging loops when a user presses the escape/abort key (`ESC`):
+* The sub-agent runner and parallel swarm handlers track the `signal: AbortSignal`.
+* Sub-agent parallel runners listen to `"abort"` on this signal to terminate global animations and clear the active indicators:
+  ```typescript
+  signal.addEventListener("abort", () => {
+    stopGlobalAnimation();
+    context.ui.setWorkingIndicator();
+    context.ui.setWorkingMessage();
+    context.ui.setStatus("subagents", undefined);
+  }, { once: true });
+  ```
+* In `execute()` loops, early returns are triggered if `this.signal?.aborted` is detected to break out of retries.
+
 ---
 
 ## 🌐 Web Dashboard (React + Fastify)
