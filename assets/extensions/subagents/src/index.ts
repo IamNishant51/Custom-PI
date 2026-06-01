@@ -1922,9 +1922,20 @@ function patchToolExecution(proto: any) {
     );
 
     if (hasOwnBorders) {
-      // Tool renders its own visual — just prepend a clean status line, no wrapping
+      // Tool renders its own visual — realign borders by padding all lines to same width
+      let maxW = 1;
+      const stripped: string[] = [];
+      for (const line of rawLines) {
+        const w = visibleWidth(line);
+        if (w > maxW) maxW = w;
+        stripped.push(line);
+      }
+      const aligned = stripped.map((line: string) => {
+        const w = visibleWidth(line);
+        return w < maxW ? line + " ".repeat(maxW - w) : line;
+      });
       const header = statusColorFn(`${statusSymbol} ${this.toolName}  ${statusLabel}`);
-      return ["  " + header, ...rawLines.map((l: string) => "  " + l)];
+      return ["  " + header, ...aligned.map((l: string) => "  " + l)];
     }
 
     // Plain content — wrap in a clean bordered card
