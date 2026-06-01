@@ -75,9 +75,12 @@ function updateCentroid(embedding: number[], centroid: number[], rate: number): 
 }
 
 function ensureDirs(): void {
+  if (ensureDirs._done) return;
+  ensureDirs._done = true;
   if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
   if (!fs.existsSync(EPISODES_DIR)) fs.mkdirSync(EPISODES_DIR, { recursive: true });
 }
+ensureDirs._done = false;
 
 function migrateEntry(e: any): MemoryEntry {
   return {
@@ -520,10 +523,24 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
     let pruned = 0;
     let refreshed = 0;
 
-    const active = entries.filter(e => !e.deprecated);
+    const active = entries.filter(e => !e.deprecated && e.embedding?.length > 0);
 
+    // Use cluster-based comparison to avoid O(n²): compare entries within same cluster first
+    const clusters = loadClusters();
+    const compared = new Set<string>();
     for (let i = 0; i < active.length; i++) {
+      if (compared.size >= 2000) break; // cap total comparisons
+      const ei = active[i];
+      const ci = clusters.centroids.length > 0 ? nearestCentroid(ei.embedding, clusters.centroids) : 0;
       for (let j = i + 1; j < active.length; j++) {
+        if (compared.size >= 2000) break;
+        const key = `${Math.min(i, j)}-${Math.max(i, j)}`;
+        if (compared.has(key)) continue;
+        compared.add(key);
+        const ej = active[j];
+        const cj = clusters.centroids.length > 0 ? nearestCentroid(ej.embedding, clusters.centroids) : 0;
+        // Prefer comparing entries in the same cluster (faster convergence)
+        if (ci !== cj && compared.size > 500) continue;
         const sim = cosineSimilarity(active[i].embedding, active[j].embedding);
         if (sim > 0.88) {
           const keeper = active[i].importance >= active[j].importance ? active[i] : active[j];
