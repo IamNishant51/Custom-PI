@@ -1859,9 +1859,10 @@ function patchUserMessage(proto: any) {
     const contentWidth = Math.max(20, width - 6);
     const mdLines = markdownComponent.render(contentWidth);
 
-    const accentFn = (theme && typeof theme.fg === "function")
+    // OpenClaude Professional Blue: rgb(106,155,204)
+    const pointerColor = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("accent", s)
-      : (s: string) => `\x1b[36m${s}\x1b[0m`;
+      : (s: string) => `\x1b[38;2;106;155;204m${s}\x1b[0m`;
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
@@ -1869,15 +1870,15 @@ function patchUserMessage(proto: any) {
       ? (s: string) => theme.fg("userMessageText", s)
       : (s: string) => s;
 
+    // OpenClaude flat layout: ❯ You (message content)
+    // No box backgrounds, no tree connectors
     const lines: string[] = [];
-    const idx = treeCtxActive ? treeCtx.index : 0;
-    const total = treeCtxActive ? treeCtx.total : 1;
-    const conn = treeConnectorFirst(total); // ┌─ or └─ for user
-    const cont = treeContinuation(idx, total); // │ or spaces
-
-    lines.push(accentFn(conn) + " " + dimFn("you"));
-    for (const line of mdLines) {
-      lines.push(accentFn(cont) + textFn(line));
+    const pointer = "\u276f ";
+    if (mdLines.length > 0) {
+      lines.push(pointerColor(pointer) + dimFn("You") + "  " + textFn(mdLines[0]));
+    }
+    for (let i = 1; i < mdLines.length; i++) {
+      lines.push("  " + textFn(mdLines[i]));
     }
 
     lines[0] = OSC133_ZONE_START + lines[0];
