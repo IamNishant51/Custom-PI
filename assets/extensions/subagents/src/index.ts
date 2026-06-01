@@ -13,7 +13,7 @@ import os from "node:os";
 import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted, getSkills, flush as flushMemory } from "./memory-store";
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
-import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex } from "./animations";
+import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
 import { TuiManager } from "./tui/tui-manager";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
@@ -400,8 +400,10 @@ class SubAgentCallCard implements Component {
     const lines: string[] = [];
 
     if (!tracker || tracker.status === "spawning") {
-      // Spawning state
-      const spinner = chalk.hex(C.amber)(getSpinner());
+      // Spawning state — pulsing ∞ symbol
+      const pulseColor = getPulseColor();
+      const pulseSymbol = globalPulse.getSymbol();
+      const spinner = chalk.hex(pulseColor)(pulseSymbol);
       const title = `${spinner} Sub-Agent: ${this.agentName}`;
       lines.push(boxTop(title, w, borderColor, accentColor));
       lines.push(boxLine(
@@ -415,8 +417,10 @@ class SubAgentCallCard implements Component {
       ));
       lines.push(boxBottom(w, borderColor));
     } else if (tracker.status === "running" || tracker.status === "calling_tool") {
-      // Running state with animation
-      const spinner = chalk.hex(C.teal)(getSpinner());
+      // Running state with animation — pulsing ∞ symbol
+      const pulseColor = getPulseColor();
+      const pulseSymbol = globalPulse.getSymbol();
+      const spinner = chalk.hex(pulseColor)(pulseSymbol);
       const title = `${spinner} Sub-Agent: ${tracker.name}`;
       const accentRunning = (s: string) => chalk.hex(C.teal).bold(s);
 
@@ -652,7 +656,9 @@ class ParallelAgentsCallCard implements Component {
 
     if (allDone) return [];
 
-    const spinner = chalk.hex(C.lavender)(getProgressSpinner());
+    const pulseColor = getPulseColor();
+    const pulseSymbol = globalPulse.getSymbol();
+    const spinner = chalk.hex(pulseColor)(pulseSymbol);
     const title = `${spinner} ⚡ Parallel Execution  ·  ${doneCount}/${total} done`;
     lines.push(boxTop(title, w, borderColor, accentColor));
 
@@ -944,56 +950,65 @@ class QuantumHUDWidget implements Component {
     const memTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
     const cpuLoad = os.loadavg()[0].toFixed(1);
 
-    const running = Array.from(activeTrackers.values()).filter(
+    const trackers = Array.from(activeTrackers.values());
+    const running = trackers.filter(
       t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
     );
     const memStats = memoryStats();
 
-    let label = "❖ CUSTOM-PI";
-    let cpu = `CPU ${cpuLoad}`;
-    let ram = `RAM ${memPercent}%`;
-    let rag = memStats.totalEntries > 0 ? `Mem:${memStats.totalEntries}` : "";
-    let swarm = running.length > 0 ? `Agents:${running.length}` : "";
+    const pulseColor = getPulseColor();
 
-    if (w >= 90) {
-      label = "❖ CUSTOM-PI QUANTUM HUD";
-      ram = `RAM ${memPercent}% (${memUsed}G/${memTotal}G)`;
-      cpu = `CPU ${cpuLoad}L`;
-      rag = memStats.totalEntries > 0 ? `Memory: ${memStats.totalEntries}` : "";
-      swarm = running.length > 0 ? `Swarm: ${running.length} active` : "";
-    }
+    // Borderless modern header line
+    const title = ` ❖ CUSTOM-PI Swarm Dashboard `;
+    const cpuStr = `cpu: ${cpuLoad}`;
+    const ramStr = `ram: ${memPercent}%`;
+    const memStr = memStats.totalEntries > 0 ? `mem: ${memStats.totalEntries}` : "";
+    const activeStr = running.length > 0 ? `active: ${running.length}` : "idle";
 
-    const innerW = w - 4;
-    const parts = [this.t("accent", label), cpu, ram, rag, swarm].filter(Boolean);
-    const statsLine = parts.join(this.t("muted", " │ "));
-    const statsTrimmed = truncateToWidth(statsLine, innerW);
-    const pad = " ".repeat(Math.max(0, innerW - stripAnsi(statsTrimmed).length));
+    const parts = [cpuStr, ramStr, memStr, activeStr].filter(Boolean);
+    const statsText = parts.join(" ── ");
+    
+    // Combine title and stats with a dashed line separator
+    const headerPrefix = this.bold(this.t("accent", title));
+    const headerSuffix = ` ── ${statsText} `;
+    const visiblePrefixLen = stripAnsi(headerPrefix).length;
+    const visibleSuffixLen = stripAnsi(headerSuffix).length;
+    const dashesCount = Math.max(0, w - visiblePrefixLen - visibleSuffixLen);
+    const dashes = this.t("muted", "─".repeat(dashesCount));
+    
+    lines.push(headerPrefix + dashes + this.t("text", headerSuffix));
 
-    // Top border
-    lines.push(this.t("border", `╔${"═".repeat(w - 2)}╗`));
-    // Stats line
-    lines.push(this.t("border", "║ ") + statsTrimmed + pad + this.t("border", " ║"));
-
-    // Active agents sub-section
-    if (running.length > 0) {
-      lines.push(this.t("border", `╠${"═".repeat(w - 2)}╣`));
-      for (const agent of running) {
-        const dot = this.t("success", getSpinner());
+    // Render agent swarm as a hierarchical tree
+    if (trackers.length > 0) {
+      trackers.forEach((agent, index) => {
+        const isLast = index === trackers.length - 1;
+        const branchChar = isLast ? "└──" : "├──";
+        
+        const isRunning = agent.status === "running" || agent.status === "calling_tool" || agent.status === "spawning";
+        const dot = isRunning 
+          ? chalk.hex(pulseColor)(getSpinner()) 
+          : agent.status === "success" 
+            ? this.t("success", "✓") 
+            : this.t("muted", "○");
+        
         const name = this.bold(agent.name);
         const turn = `Turn ${agent.turn}/${agent.maxTurns}`;
-        const verb = agent.currentTool || "thinking";
-        const time = `⏱ ${elapsed(agent.startTime)}`;
-        const raw = w < 70
-          ? `   ${dot} ${name} ⬡ ${turn} ⬡ ${time}`
-          : `   ${dot} ${name} ⬡ ${turn} ⬡ ${this.t("accent", verb)} ⬡ ${time}`;
-        const agentLine = truncateToWidth(raw, innerW);
-        const agentPad = " ".repeat(Math.max(0, innerW - stripAnsi(agentLine).length));
-        lines.push(this.t("border", "║ ") + agentLine + agentPad + this.t("border", " ║"));
-      }
+        
+        let details = "";
+        if (isRunning) {
+          const tool = agent.currentTool ? this.t("accent", agent.currentTool) : "thinking";
+          details = ` ─ ${tool} ─ ${elapsed(agent.startTime)}`;
+        } else {
+          details = ` ─ ${agent.status}`;
+        }
+        
+        const lineContent = ` ${branchChar} ${dot} ${name} (${turn})${details}`;
+        lines.push(truncateToWidth(lineContent, w));
+      });
+    } else {
+      lines.push(this.t("muted", " └── No active subagents spawned."));
     }
 
-    // Bottom border
-    lines.push(this.t("border", `╚${"═".repeat(w - 2)}╝`));
     return lines;
   }
 }

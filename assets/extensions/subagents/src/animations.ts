@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { PulseController } from "./tui/app/pulse-controller";
 
-export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 export const DOT_PULSE = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 export const PROGRESS_SPINNER = ["▌", "▀", "▐", "▄"];
 export const BOUNCING_BAR = ["█", "▇", "▆", "▅", "▄", "▃", "▂", "▁"];
+
+export const globalPulse = new PulseController();
 
 function loadVerbs(): string[] {
   const env = process.env.PI_STATUS_VERBS;
@@ -46,6 +49,7 @@ export const activeInvalidators = new Map<string, () => void>();
 
 export function startGlobalAnimation() {
   if (globalAnimTimer) return;
+  globalPulse.start();
   globalAnimTimer = setInterval(() => {
     if (activeTrackers.size === 0) return;
     globalFrame = (globalFrame + 1) % (SPINNER_FRAMES.length * DOT_PULSE.length * BOUNCING_BAR.length);
@@ -63,6 +67,15 @@ export function stopGlobalAnimation() {
     clearInterval(globalAnimTimer);
     globalAnimTimer = null;
   }
+  globalPulse.stop();
+}
+
+export function getPulseColor(): string {
+  return globalPulse.getCurrentColor();
+}
+
+export function getPulseBrightColor(): string {
+  return globalPulse.getCurrentBrightColor();
 }
 
 export function getSpinner(): string { return SPINNER_FRAMES[globalFrame % SPINNER_FRAMES.length]; }

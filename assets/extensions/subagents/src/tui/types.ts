@@ -107,9 +107,47 @@ export const BOX = {
   itl: "┌", itr: "┐", ibl: "└", ibr: "┘",
 };
 
+export interface PulseConfig {
+  symbol: string;
+  restColor: string;
+  gradientColors: string[];
+  sweepMs: number;
+  breatheMs: number;
+  breatheAmplitude: number;
+  easing: boolean;
+}
+
+export interface TruecolorStyle {
+  fg?: string;
+  bg?: string;
+  bold?: boolean;
+  dim?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  inverse?: boolean;
+  strikethrough?: boolean;
+}
+
+export function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
 export function hexToAnsi(hex: string): number {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
+  const [r, g, b] = hexToRgb(hex);
   return 16 + 36 * Math.round(r / 255 * 5) + 6 * Math.round(g / 255 * 5) + Math.round(b / 255 * 5);
+}
+
+export function hexToTruecolor(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+export function bgHexToTruecolor(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `\x1b[48;2;${r};${g};${b}m`;
 }

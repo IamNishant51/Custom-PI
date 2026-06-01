@@ -1,6 +1,6 @@
 import { TuiManager } from "./tui-manager";
-import { SPINNERS } from "./types";
-import type { AgentState } from "./types";
+import { SPINNERS, BOX } from "./types";
+import type { AgentState, PulseConfig } from "./types";
 import { stripAnsi } from "./utils/measure-text";
 import { activeTrackers as globalTrackers } from "../animations";
 
@@ -36,11 +36,21 @@ export class TuiApp {
   get onSubmit(): ((text: string) => void) | null { return this._onSubmit; }
   set onSubmit(cb: ((text: string) => void) | null) { this._onSubmit = cb; }
 
-  start(): void {
+  start(pulseConfig?: Partial<PulseConfig>): void {
     if (this.active) return;
     this.active = true;
 
     this.tui.start();
+
+    if (pulseConfig) {
+      this.tui.renderer.pulse.updateConfig(pulseConfig);
+    }
+    this.tui.startPulse();
+
+    const pulseAnimId = "tui:pulse-tick";
+    this.tui.animFrame.add(pulseAnimId, () => {
+      this.tui.renderer.pulse.getState();
+    }, 16);
 
     process.stdout.write("\x1b[?1002h");
 
@@ -104,13 +114,33 @@ export class TuiApp {
       this.trackers.set(id, tracker as any);
     }
 
+    const runningCount = Array.from(this.trackers.values()).filter(
+      t => t.status === "running" || t.status === "calling_tool"
+    ).length;
+
     const defaultStyle = renderer.style({ bg: renderer.theme.canvas });
     renderer.screen.clear(defaultStyle);
 
     let y = 1;
 
+    // Pulse banner line (thin ∞ shimmer at top when agents are active)
+    if (runningCount > 0) {
+      y = renderer.drawPulseBannerLine(0);
+      y = 1;
+    }
+
     // Banner
     y = renderer.drawBanner(y);
+
+    // Pulse ∞ symbol next to running agent count in HUD area
+    if (runningCount > 0) {
+      const hudStyle = renderer.style({ bg: renderer.theme.canvas });
+      renderer.screen.clearLine(y, hudStyle);
+      renderer.drawPulseSymbol(2, y);
+      const statusText = ` ${runningCount} active     `;
+      renderer.screen.writeString(4, y, statusText, renderer.style({ fg: renderer.theme.muted }));
+      y++;
+    }
 
     // Messages (reversed, newest first)
     const visibleMessages = this.messageLog.slice(-10);
@@ -125,19 +155,39 @@ export class TuiApp {
       if (y >= rows - 6) break;
     }
 
-    // Agent cards
+    // Agent cards with pulse indicator
     for (const [id, tracker] of this.trackers) {
       if (y >= rows - 6) break;
       const running = tracker.status === "running" || tracker.status === "calling_tool";
       const verb = running ? tracker.currentTool || "thinking" : undefined;
       const toolStr = tracker.toolCallCount > 0 ? `${tracker.toolCallCount} tool calls` : undefined;
-      y = renderer.drawAgentCard(y, msgWidth, tracker.name, tracker.status, {
-        verb,
-        toolCalls: toolStr,
-        outputLines: tracker.outputLines,
-        duration: this.elapsed(tracker.startTime),
-        animate: running,
-      });
+
+      if (running) {
+        const pulseBox = renderer.drawPulseBorderBox(y, msgWidth, tracker.name);
+        y = pulseBox.y;
+        const verbLine = `${verb || "working"}...  ${toolStr || ""}`.trim();
+        renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
+        renderer.screen.writeString(2, y, `  ${verbLine}`, renderer.style({ fg: renderer.theme.muted }));
+        y++;
+        if (tracker.outputLines.length > 0) {
+          const last = tracker.outputLines[tracker.outputLines.length - 1];
+          renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
+          renderer.screen.writeString(2, y, `  ${last.slice(0, msgWidth - 8)}`, renderer.style({ fg: renderer.theme.dim, dim: true }));
+          y++;
+        }
+        const bStyle = renderer.style({ fg: renderer.theme.hairline });
+        renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
+        renderer.screen.writeString(1, y, "╰" + BOX.h.repeat(msgWidth - 2) + "╯", bStyle);
+        y++;
+      } else {
+        y = renderer.drawAgentCard(y, msgWidth, tracker.name, tracker.status, {
+          verb,
+          toolCalls: toolStr,
+          outputLines: tracker.outputLines,
+          duration: this.elapsed(tracker.startTime),
+          animate: running,
+        });
+      }
       y++;
     }
 
@@ -146,17 +196,18 @@ export class TuiApp {
       y = renderer.drawInputArea(y, msgWidth, this.inputText, this.cursorPos, this.tui.vimInput.state.mode);
     }
 
-    // Status bar
+    // Status bar with pulse
     if (rows > 2) {
-      const runningCount = Array.from(this.trackers.values()).filter(
-        t => t.status === "running" || t.status === "calling_tool"
-      ).length;
-      renderer.drawStatusBar(rows - 1, {
-        vimMode: this.tui.vimInput.state.mode,
-        memoryCount: this.memoryCount || undefined,
-        vaultCount: this.vaultCount || undefined,
-        agentStatus: runningCount > 0 ? `● ${runningCount} active` : "○ idle",
-      });
+      if (runningCount > 0) {
+        renderer.drawPulseInStatusBar(rows - 1, `agents: ${runningCount}`);
+      } else {
+        renderer.drawStatusBar(rows - 1, {
+          vimMode: this.tui.vimInput.state.mode,
+          memoryCount: this.memoryCount || undefined,
+          vaultCount: this.vaultCount || undefined,
+          agentStatus: `○ idle`,
+        });
+      }
     }
 
     renderer.render();

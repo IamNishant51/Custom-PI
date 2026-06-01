@@ -1,0 +1,9 @@
+{
+  "symbol": "∞",
+  "restColor": "#8B6914",
+  "gradientColors": ["#8B6914", "#B8860B", "#D08770", "#E8923A", "#FF9B4A"],
+  "sweepMs": 320,
+  "breatheMs": 2000,
+  "breatheAmplitude": 0.4,
+  "easing": true
+}

@@ -8,4 +8,6 @@ export { VimInputHandler, VimState } from "./input/vim-input";
 export { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
 export { measureWidth, truncateToWidth, wordWrap, stripAnsi } from "./utils/measure-text";
 export { SPINNERS, THEME, BOX, hexToAnsi } from "./types";
-export type { ThemeColors, SpinnerConfig, Message, AgentState, VimMode } from "./types";
+export type { ThemeColors, SpinnerConfig, Message, AgentState, VimMode, PulseConfig, TruecolorStyle } from "./types";
+export { PulseController, hexToRgb, rgbToHex } from "./app/pulse-controller";
+export type { PulseConfig as PulseControllerConfig } from "./app/pulse-controller";

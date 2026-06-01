@@ -1,22 +1,22 @@
 export const C = {
-  orange:     "#d08770",
-  amber:      "#d19a66",
-  coral:      "#c97a7a",
-  warmRed:    "#c97a7a",
-  sage:       "#7ab87a",
-  teal:       "#5ab0b0",
-  lavender:   "#b0a0cc",
-  sky:        "#7ab8d4",
-  sand:       "#c5b5a0",
-  cream:      "#d4c5a0",
-  dusty:      "#808080",
-  stone:      "#2a2a2a",
-  slate:      "#3a3a3a",
-  night:      "#0c0c0c",
-  charcoal:   "#111111",
-  deepBrown:  "#1a1410",
-  warmBlack:  "#141110",
-  forestTint: "#1a1f18",
-  emberTint:  "#1f1818",
-  mutedText:  "#808080",
+  orange:     "#ffb86c", // Peach/Warning
+  amber:      "#ffb86c",
+  coral:      "#ff5555", // Crimson/Error
+  warmRed:    "#ff5555",
+  sage:       "#00f087", // Neon mint green/Success
+  teal:       "#00d7ff", // Electric cyan/Info
+  lavender:   "#8f7af4", // Custom-PI signature Lavender
+  sky:        "#8f7af4",
+  sand:       "#e2e0eb", // Crisp primary text
+  cream:      "#e2e0eb",
+  dusty:      "#6a687a", // Muted slate grey
+  stone:      "#161420",
+  slate:      "#211f30",
+  night:      "#0f0e15", // Deep slate background
+  charcoal:   "#0f0e15",
+  deepBrown:  "#0f0e15",
+  warmBlack:  "#0f0e15",
+  forestTint: "#121b18",
+  emberTint:  "#1b1212",
+  mutedText:  "#6a687a",
 };

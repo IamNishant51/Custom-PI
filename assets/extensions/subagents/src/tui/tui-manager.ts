@@ -1,7 +1,8 @@
 import { ScreenRenderer } from "./screen-renderer";
 import { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
 import { VimInputHandler } from "./input/vim-input";
-import { THEME } from "./types";
+import { THEME, type PulseConfig } from "./types";
+import { PulseController } from "./app/pulse-controller";
 
 export interface TuiManagerOptions {
   useAltScreen?: boolean;
@@ -141,5 +142,35 @@ export class TuiManager {
 
   drawDivider(y: number, width: number, color: string): number {
     return this.renderer.drawDivider(y, width, color);
+  }
+
+  // ── Pulse Animation ───────────────────────────────────────────────────────
+
+  get pulse(): PulseController {
+    return this.renderer.pulse;
+  }
+
+  startPulse(): void {
+    this.renderer.pulse.start();
+  }
+
+  stopPulse(): void {
+    this.renderer.pulse.stop();
+  }
+
+  drawPulseSymbol(x: number, y: number, elapsed?: number): number {
+    return this.renderer.drawPulseSymbol(x, y, elapsed);
+  }
+
+  drawPulseInStatusBar(y: number, label: string, elapsed?: number): number {
+    return this.renderer.drawPulseInStatusBar(y, label, elapsed);
+  }
+
+  drawPulseBannerLine(y: number, elapsed?: number): number {
+    return this.renderer.drawPulseBannerLine(y, elapsed);
+  }
+
+  drawPulseBorderBox(y: number, width: number, title: string, elapsed?: number): { y: number; pulseStyle: number } {
+    return this.renderer.drawPulseBorderBox(y, width, title, elapsed);
   }
 }

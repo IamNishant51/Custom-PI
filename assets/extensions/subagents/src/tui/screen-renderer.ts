@@ -1,26 +1,40 @@
 import { TerminalScreen } from "./screen";
 import { StylePool } from "./style-pool";
 import { AnsiWriter } from "./ansi-writer";
-import { THEME, BOX, hexToAnsi, type ThemeColors } from "./types";
+import { THEME, BOX, hexToAnsi, type ThemeColors, type PulseConfig } from "./types";
 import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
+import { PulseController, hexToRgb, rgbToHex } from "./app/pulse-controller";
 
 export class ScreenRenderer {
   screen: TerminalScreen;
   pool: StylePool;
   writer: AnsiWriter;
   theme: ThemeColors;
+  pulse: PulseController;
   private frameTimer: ReturnType<typeof setTimeout> | null = null;
   private frameCallbacks: Array<() => void> = [];
   private running = false;
+  private useTruecolor: boolean;
 
   styleCache = new Map<string, number>();
 
   constructor() {
-    this.pool = new StylePool();
+    this.pool = new StylePool(true);
     this.screen = new TerminalScreen(this.pool);
     this.writer = new AnsiWriter();
     this.theme = { ...THEME };
+    this.pulse = new PulseController();
+    this.useTruecolor = this.detectTruecolor();
+    this.pool.setTruecolor(this.useTruecolor);
     this.pool.clear();
+  }
+
+  private detectTruecolor(): boolean {
+    const term = process.env.COLORTERM || "";
+    if (term === "truecolor" || term === "24bit") return true;
+    const colorterm = process.env.TERM || "";
+    if (colorterm.includes("truecolor") || colorterm.includes("24-bit")) return true;
+    return false;
   }
 
   ansi(hex: string): number {
@@ -42,6 +56,15 @@ export class ScreenRenderer {
       dim: def.dim,
       italic: def.italic,
     });
+    this.styleCache.set(key, id);
+    return id;
+  }
+
+  truecolorStyle(fg: string, bg?: string, opts?: { bold?: boolean; dim?: boolean }): number {
+    const key = `tc:${fg}:${bg ?? ""}:${opts?.bold ?? false}:${opts?.dim ?? false}`;
+    const cached = this.styleCache.get(key);
+    if (cached !== undefined) return cached;
+    const id = this.pool.getTruecolorStyle(fg, bg, opts);
     this.styleCache.set(key, id);
     return id;
   }
@@ -437,5 +460,90 @@ export class ScreenRenderer {
     this.screen.writeString(cols - sizeStr.length, y, sizeStr, this.style({ fg: this.theme.dim }));
 
     return y + 1;
+  }
+
+  // ── Pulse Animation Drawing ──────────────────────────────────────────────
+
+  drawPulseSymbol(x: number, y: number, elapsed?: number): number {
+    const state = this.pulse.getState(elapsed);
+    const symbol = this.pulse.getSymbol();
+    const canvasStyle = this.style({ bg: this.theme.canvas });
+
+    if (y >= this.screen.getRows()) return y;
+
+    if (this.useTruecolor) {
+      const tcStyle = this.pool.getTruecolorStyle(state.color);
+      this.screen.writeString(x, y, symbol, tcStyle);
+    } else {
+      const fallback = this.style({ fg: state.color });
+      this.screen.writeString(x, y, symbol, fallback);
+    }
+    return y;
+  }
+
+  drawPulseInStatusBar(y: number, label: string, elapsed?: number): number {
+    const cols = this.screen.getCols();
+    if (y >= this.screen.getRows()) return y;
+
+    const bgStyle = this.style({ bg: this.theme.surface });
+    const state = this.pulse.getState(elapsed);
+    const symbol = this.pulse.getSymbol();
+
+    this.screen.clearLine(y, bgStyle);
+
+    if (this.useTruecolor) {
+      const tcStyle = this.pool.getTruecolorStyle(state.color);
+      this.screen.writeString(1, y, ` ${symbol} ${label} `, tcStyle);
+    } else {
+      const pulseStyle = this.style({ fg: state.color, bold: true });
+      this.screen.writeString(1, y, ` ${symbol} ${label} `, pulseStyle);
+    }
+
+    const sizeStr = ` ${cols}x${this.screen.getRows()} `;
+    this.screen.writeString(cols - sizeStr.length, y, sizeStr, this.style({ fg: this.theme.dim }));
+
+    return y + 1;
+  }
+
+  drawPulseBannerLine(y: number, elapsed?: number): number {
+    const cols = this.screen.getCols();
+    if (y >= this.screen.getRows()) return y;
+
+    const state = this.pulse.getState(elapsed);
+    const canvasStyle = this.style({ bg: this.theme.canvas });
+    const fullLine = "∞".repeat(cols - 2);
+
+    this.screen.clearLine(y, canvasStyle);
+
+    if (this.useTruecolor) {
+      const tcStyle = this.pool.getTruecolorStyle(state.color);
+      this.screen.writeString(1, y, fullLine, tcStyle);
+    } else {
+      const pulseStyle = this.style({ fg: state.color, dim: true });
+      this.screen.writeString(1, y, fullLine, pulseStyle);
+    }
+    return y + 1;
+  }
+
+  drawPulseBorderBox(y: number, width: number, title: string, elapsed?: number): { y: number; pulseStyle: number } {
+    const cols = this.screen.getCols();
+    const w = Math.min(width, cols - 4);
+    const state = this.pulse.getState(elapsed);
+    const symbol = this.pulse.getSymbol();
+    const canvasStyle = this.style({ bg: this.theme.canvas });
+
+    const borderStyle = this.useTruecolor
+      ? this.pool.getTruecolorStyle(state.color)
+      : this.style({ fg: state.color });
+
+    const titleText = ` ${symbol} ${title} `;
+    const lineLen = Math.max(0, w - 2 - stripAnsi(titleText).length - 1);
+
+    this.screen.clearLine(y, canvasStyle);
+    this.screen.writeString(1, y, BOX.tl + BOX.h.repeat(Math.floor(lineLen / 2)), borderStyle);
+    this.screen.writeString(1 + Math.floor(lineLen / 2), y, titleText, borderStyle);
+    this.screen.writeString(1 + Math.floor(lineLen / 2) + stripAnsi(titleText).length, y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, borderStyle);
+
+    return { y: y + 1, pulseStyle: borderStyle };
   }
 }
