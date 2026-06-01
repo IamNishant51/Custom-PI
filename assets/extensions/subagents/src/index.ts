@@ -32,6 +32,7 @@ import {
   vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
 } from "./secret-vault";
 import { trackCost, getSessionCosts, getCostSummary, getBudgetConfig, setBudgetConfig } from "./cost-tracker";
+import { getCurrentRouting, getAvailableModels, setModelRoute, resetRouting } from "./model-router";
 import { recordWorkProduct, getWorkProducts, getWorkProductSummary, clearWorkProducts } from "./work-products";
 import { LocalStorageDriver, type StorageDriver } from "./storage-driver";
 import { runVerification } from "./verification-engine";
@@ -3665,6 +3666,89 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // Command: Context budget — detailed breakdown
+  pi.registerCommand("context-budget", {
+    description: "Detailed context budget report with cost estimates and limits.",
+    handler(_args, ctx) {
+      const usage = ctx.getContextUsage();
+      const percent = contextMonitor.getContextPercent();
+      const files = contextMonitor.getFilesModified();
+      const model = ctx.model;
+
+      const lines = ["── Context Budget ──"];
+      if (usage) {
+        const tokens = usage.tokens ?? "?";
+        const window_k = ((usage.contextWindow ?? 0) / 1000).toFixed(0);
+        lines.push(`  Context: ${Math.round(usage.percent ?? 0)}% (${tokens}/${window_k}k)`);
+      }
+      if (model) {
+        lines.push(`  Model: ${model.id} (window: ${(model.contextWindow / 1000).toFixed(0)}k)`);
+      }
+      lines.push(`  Files modified: ${files.length}`);
+
+      // Cost from tracker
+      try {
+        const costs = getCostSummary();
+        if (costs) {
+          lines.push(`  Session cost: \$${costs.totalCostUsd?.toFixed(4) ?? "?"}`);
+          lines.push(`  Daily total: \$${costs.dailyCostUsd?.toFixed(4) ?? "?"}`);
+        }
+      } catch {}
+
+      const loopWarnings = contextMonitor.getToolLoopWarnings();
+      if (loopWarnings.length > 0) loopWarnings.forEach(w => lines.push(`  ⚠ ${w}`));
+
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // Command: Model routing — view/configure cost-aware LLM routing
+  pi.registerCommand("model-routing", {
+    description: "View or configure model routing tiers (cheap/balanced/capable/reasoning).",
+    handler(args, ctx) {
+      const arg = (args as string || "").trim().toLowerCase();
+      if (!arg || arg === "show" || arg === "status") {
+        const routing = getCurrentRouting();
+        const lines = ["── Model Routing ──"];
+        for (const [tier, modelId] of Object.entries(routing)) {
+          lines.push(`  ${tier}: ${modelId}`);
+        }
+        lines.push("");
+        lines.push("Available models:");
+        const all = getAvailableModels();
+        for (const m of all) {
+          lines.push(`  ${m.id} (${m.tier}) — ${m.label}`);
+        }
+        ctx.ui.notify(lines.join("\n"), "info");
+      } else if (arg.startsWith("set ")) {
+        const parts = arg.slice(4).split(" ");
+        if (parts.length < 2) {
+          ctx.ui.notify("Usage: /model-routing set <tier> <modelId>", "warning");
+          return;
+        }
+        const tier = parts[0];
+        const model = parts[1];
+        const ok = setModelRoute(tier, model);
+        if (ok) {
+          ctx.ui.notify(`Routing: ${tier} → ${model}.`, "info");
+        } else {
+          ctx.ui.notify(`Invalid tier or model. See /model-routing for available models.`, "warning");
+        }
+      } else if (arg === "reset") {
+        resetRouting();
+        ctx.ui.notify("Model routing reset to defaults.", "info");
+      } else {
+        ctx.ui.notify("Usage: /model-routing [show|set <tier> <modelId>|reset]", "info");
+      }
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // Command: GateGuard status
   pi.registerCommand("gateguard", {
     description: "Show GateGuard status or reset tracking for files.",
@@ -3690,7 +3774,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
