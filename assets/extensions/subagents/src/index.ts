@@ -1798,62 +1798,64 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
+// Tree connector context — set by ContainerPrototype.render before child iteration
+let treeCtx: { index: number; total: number } = { index: 0, total: 0 };
+let treeCtxActive = false;
+
+function treeConnector(idx: number, total: number): string {
+  if (total === 1) return "\u2514\u2500\u2500 "; // └── (single child)
+  if (idx === 0) return "\u250c\u2500\u2500 "; // ┌── (first)
+  if (idx === total - 1) return "\u2514\u2500\u2500 "; // └── (last)
+  return "\u251c\u2500\u2500 "; // ├── (middle)
+}
+
+function treeContinuation(idx: number, total: number): string {
+  if (idx === total - 1) return "  "; // last child — no vertical bar
+  return "\u2502 "; // │
+}
+
+function treeConnectorFirst(total: number): string {
+  if (total === 1) return "\u2514\u2500"; // └─
+  return "\u250c\u2500"; // ┌─
+}
+
 function patchUserMessage(proto: any) {
   if (userMessagePatched) return;
   userMessagePatched = true;
   debugLog("PATCHING USER MESSAGE PROTOTYPE");
 
   proto.render = function (this: any, width: number) {
-    // Max width of the user bubble is 75% of terminal width
-    const maxBubbleWidth = Math.max(20, Math.min(width - 6, Math.max(40, Math.floor(width * 0.75))));
-
     const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
     if (!markdownComponent) {
       return [];
     }
 
-    // Render markdown content to determine text line wrapping
-    const markdownContentWidth = Math.max(1, maxBubbleWidth - 4); // 4 columns for border: `│ ` and ` │`
-    const mdLines = markdownComponent.render(markdownContentWidth);
+    const contentWidth = Math.max(20, width - 6);
+    const mdLines = markdownComponent.render(contentWidth);
 
-    // Find the maximum visible width across all wrapped lines
-    let maxLineW = 1;
+    const accentFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("accent", s)
+      : (s: string) => `\x1b[36m${s}\x1b[0m`;
+    const dimFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("muted", s)
+      : (s: string) => `\x1b[90m${s}\x1b[0m`;
+    const textFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("userMessageText", s)
+      : (s: string) => s;
+
+    const lines: string[] = [];
+    const idx = treeCtxActive ? treeCtx.index : 0;
+    const total = treeCtxActive ? treeCtx.total : 1;
+    const conn = treeConnectorFirst(total); // ┌─ or └─ for user
+    const cont = treeContinuation(idx, total); // │ or spaces
+
+    lines.push(accentFn(conn) + " " + dimFn("you"));
     for (const line of mdLines) {
-      const w = visibleWidth(line);
-      if (w > maxLineW) {
-        maxLineW = w;
-      }
+      lines.push(accentFn(cont) + textFn(line));
     }
 
-    // Draw thin border lines using the theme colors (accent for borders, userMessageText for text)
-    const borderStyle = (str: string) => {
-      return (theme && typeof theme.fg === "function") ? theme.fg("accent", str) : `\x1b[36m${str}\x1b[0m`;
-    };
-    const textStyle = (str: string) => {
-      return (theme && typeof theme.fg === "function") ? theme.fg("userMessageText", str) : str;
-    };
-
-    const topBorder = borderStyle("\u256d" + "\u2500".repeat(maxLineW + 2) + "\u256e");
-    const bottomBorder = borderStyle("\u2570" + "\u2500".repeat(maxLineW + 2) + "\u256f");
-
-    const bubbleLines: string[] = [];
-    bubbleLines.push(topBorder);
-
-    for (const line of mdLines) {
-      const w = visibleWidth(line);
-      const pad = " ".repeat(Math.max(0, maxLineW - w));
-      const content = textStyle(line) + pad;
-      bubbleLines.push(borderStyle("\u2502 ") + content + borderStyle(" \u2502"));
-    }
-
-    bubbleLines.push(bottomBorder);
-
-    const leftPad = "  ";
-    const lines = bubbleLines.map((line: string) => leftPad + line);
-
-    // Apply OSC 133 sequences for shell integration
     lines[0] = OSC133_ZONE_START + lines[0];
-    lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
+    lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
 
     return lines;
   };
@@ -1863,11 +1865,6 @@ function patchToolExecution(proto: any) {
   if (toolExecutionPatched) return;
   toolExecutionPatched = true;
   debugLog("PATCHING TOOL EXECUTION PROTOTYPE");
-
-  const originalUpdateDisplay = proto.updateDisplay;
-  proto.updateDisplay = function (this: any) {
-    originalUpdateDisplay.call(this);
-  };
 
   const originalToolRender = proto.render;
   proto.render = function (this: any, width: number) {
@@ -1882,83 +1879,73 @@ function patchToolExecution(proto: any) {
       return [];
     }
 
-    let statusColorFn = (str: string) => str;
+    let statusColorFn = (s: string) => s;
     let statusSymbol = "\u25d8";
     let statusLabel = "RUNNING";
 
     if (theme && typeof theme.fg === "function") {
       if (this.isPartial) {
-        statusColorFn = (str: string) => theme.fg("accent", str);
+        statusColorFn = (s: string) => theme.fg("accent", s);
         statusSymbol = "\u25d8";
-        statusLabel = "PENDING";
+        statusLabel = "running";
       } else if (this.result?.isError) {
-        statusColorFn = (str: string) => theme.fg("error", str);
+        statusColorFn = (s: string) => theme.fg("error", s);
         statusSymbol = "\u2717";
-        statusLabel = "FAILED";
+        statusLabel = "failed";
       } else {
-        statusColorFn = (str: string) => theme.fg("success", str);
+        statusColorFn = (s: string) => theme.fg("success", s);
         statusSymbol = "\u2713";
-        statusLabel = "SUCCESS";
+        statusLabel = "done";
       }
     } else {
       if (this.isPartial) {
-        statusColorFn = (str: string) => `\x1b[36m${str}\x1b[0m`;
-        statusSymbol = "\u25d8";
-        statusLabel = "PENDING";
+        statusColorFn = (s: string) => `\x1b[36m${s}\x1b[0m`;
+        statusLabel = "running";
       } else if (this.result?.isError) {
-        statusColorFn = (str: string) => `\x1b[31m${str}\x1b[0m`;
+        statusColorFn = (s: string) => `\x1b[31m${s}\x1b[0m`;
         statusSymbol = "\u2717";
-        statusLabel = "FAILED";
+        statusLabel = "failed";
       } else {
-        statusColorFn = (str: string) => `\x1b[32m${str}\x1b[0m`;
+        statusColorFn = (s: string) => `\x1b[32m${s}\x1b[0m`;
         statusSymbol = "\u2713";
-        statusLabel = "SUCCESS";
+        statusLabel = "done";
       }
     }
 
-    // Check if content already uses box-drawing chars (tool has its own visual structure)
+    const dimFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("muted", s)
+      : (s: string) => `\x1b[90m${s}\x1b[0m`;
+
+    // Check if content already uses box-drawing chars
     const hasOwnBorders = rawLines.some((l: string) =>
       l.includes("\u2554") || l.includes("\u2557") || l.includes("\u255a") || l.includes("\u255d") || l.includes("\u2551")
     );
 
+    const indent = "  ";
+    const idx = treeCtxActive ? treeCtx.index : 0;
+    const total = treeCtxActive ? treeCtx.total : 1;
+    const conn = treeConnector(idx, total);
+    const cont = treeContinuation(idx, total);
+    const connectorStr = conn;
+    const contentPrefix = cont;
+
     if (hasOwnBorders) {
-      // Tool renders its own visual — realign borders by padding all lines to same width
       let maxW = 1;
-      const stripped: string[] = [];
       for (const line of rawLines) {
         const w = visibleWidth(line);
         if (w > maxW) maxW = w;
-        stripped.push(line);
       }
-      const aligned = stripped.map((line: string) => {
+      const aligned = rawLines.map((line: string) => {
         const w = visibleWidth(line);
         return w < maxW ? line + " ".repeat(maxW - w) : line;
       });
-      const header = statusColorFn(`${statusSymbol} ${this.toolName}  ${statusLabel}`);
-      return ["  " + header, ...aligned.map((l: string) => "  " + l)];
+      const headerLine = statusColorFn(connectorStr + this.toolName) + "  " + dimFn(statusSymbol + " " + statusLabel);
+      return [indent + headerLine, ...aligned.map((l: string) => indent + contentPrefix + l)];
     }
 
-    // Plain content — wrap in a clean bordered card
-    const titleText = `${statusSymbol} ${this.toolName}  ${statusLabel}`;
-    const titleW = visibleWidth(titleText);
-    const maxLineW = Math.max(10, contentWidth);
-    let contentMaxW = 1;
-    for (const line of rawLines) {
-      const w = visibleWidth(line);
-      if (w > contentMaxW) contentMaxW = w;
-    }
-    const boxW = Math.max(titleW + 4, contentMaxW + 2);
-    const rightDashes = Math.max(2, boxW - titleW - 3);
-    const topBorder = statusColorFn("\u256d\u2500 " + titleText + " " + "\u2500".repeat(rightDashes) + "\u256e");
-    const bottomBorder = statusColorFn("\u2570" + "\u2500".repeat(boxW) + "\u256f");
-
-    const middleLines = rawLines.map((line: string) => {
-      const w = visibleWidth(line);
-      const pad = " ".repeat(Math.max(0, boxW - 2 - w));
-      return statusColorFn("\u2502 ") + line + pad + statusColorFn(" \u2502");
-    });
-
-    return [topBorder, ...middleLines, bottomBorder].map(line => "  " + line);
+    const headerLine = statusColorFn(connectorStr + this.toolName) + "  " + dimFn(statusSymbol + " " + statusLabel);
+    const contentLines = rawLines.map((line: string) => indent + contentPrefix + line);
+    return [indent + headerLine, ...contentLines];
   };
 }
 
@@ -1975,11 +1962,26 @@ function patchAssistantMessage(proto: any) {
     if (lines.length === 0) return lines;
 
     const modelStr = this.message?.model || "assistant";
-    const modelTag = theme && typeof theme.fg === "function"
-      ? theme.fg("muted", `\u2502 ${modelStr} \u2502`)
-      : `\x1b[90m\u2502 ${modelStr} \u2502\x1b[0m`;
+    const accentFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("accent", s)
+      : (s: string) => `\x1b[36m${s}\x1b[0m`;
+    const dimFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("muted", s)
+      : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-    return [modelTag, ...lines];
+    const idx = treeCtxActive ? treeCtx.index : 0;
+    const total = treeCtxActive ? treeCtx.total : 1;
+    const conn = treeConnector(idx, total);
+    const cont = treeContinuation(idx, total);
+
+    const result: string[] = [];
+    result.push(accentFn(conn) + dimFn(modelStr));
+
+    for (const line of lines) {
+      result.push(accentFn(cont) + line);
+    }
+
+    return result;
   };
 }
 
@@ -2076,6 +2078,15 @@ function applyLivePatches(tui: any, themeInstance: any) {
     );
     
     if (isChatContainer) {
+      // Count renderable children for tree connector context
+      const renderable = this.children.filter((c: any) =>
+        c && (c.constructor?.name === "UserMessageComponent" ||
+              c.constructor?.name === "AssistantMessageComponent" ||
+              c.constructor?.name === "ToolExecutionComponent")
+      );
+      treeCtx = { index: 0, total: renderable.length };
+      treeCtxActive = renderable.length > 0;
+
       renderedComponents = [];
       const lines: string[] = [];
       for (const child of this.children) {
@@ -2091,11 +2102,18 @@ function applyLivePatches(tui: any, themeInstance: any) {
             endLine,
           });
         }
+
+        // Only advance tree index for renderable children
+        if (renderable.includes(child)) {
+          treeCtx.index++;
+        }
         
         for (const line of childLines) {
           lines.push(line);
         }
       }
+
+      treeCtxActive = false;
       return lines;
     }
     
