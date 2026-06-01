@@ -1872,7 +1872,7 @@ function patchToolExecution(proto: any) {
       return [];
     }
 
-    const contentWidth = Math.max(10, width - 4);
+    const contentWidth = Math.max(10, width - 8);
     const rawLines = originalToolRender.call(this, contentWidth);
 
     if (rawLines.length === 0) {
@@ -1939,11 +1939,15 @@ function patchToolExecution(proto: any) {
         const w = visibleWidth(line);
         return w < maxW ? line + " ".repeat(maxW - w) : line;
       });
-      const headerLine = statusColorFn(connectorStr + this.toolName) + "  " + dimFn(statusSymbol + " " + statusLabel);
+      const maxNameW = Math.max(4, width - 20);
+      const nameTrunc = visibleWidth(this.toolName) > maxNameW ? truncateToWidth(this.toolName, maxNameW) + "\u2026" : this.toolName;
+      const headerLine = statusColorFn(connectorStr + nameTrunc) + "  " + dimFn(statusSymbol + " " + statusLabel);
       return [indent + headerLine, ...aligned.map((l: string) => indent + contentPrefix + l)];
     }
 
-    const headerLine = statusColorFn(connectorStr + this.toolName) + "  " + dimFn(statusSymbol + " " + statusLabel);
+    const maxNameW = Math.max(4, width - 20);
+    const nameTrunc = visibleWidth(this.toolName) > maxNameW ? truncateToWidth(this.toolName, maxNameW) + "\u2026" : this.toolName;
+    const headerLine = statusColorFn(connectorStr + nameTrunc) + "  " + dimFn(statusSymbol + " " + statusLabel);
     const contentLines = rawLines.map((line: string) => indent + contentPrefix + line);
     return [indent + headerLine, ...contentLines];
   };
@@ -1958,7 +1962,7 @@ function patchAssistantMessage(proto: any) {
 
   const originalRender = proto.render;
   proto.render = function (this: any, width: number) {
-    const lines = originalRender.call(this, width);
+    const lines = originalRender.call(this, width - 4);
     if (lines.length === 0) return lines;
 
     const modelStr = this.message?.model || "assistant";
