@@ -1906,77 +1906,59 @@ function patchToolExecution(proto: any) {
       return [];
     }
 
-    let statusColorFn = (s: string) => s;
-    let statusSymbol = "\u25d8";
-    let statusLabel = "RUNNING";
-
-    if (theme && typeof theme.fg === "function") {
-      if (this.isPartial) {
-        statusColorFn = (s: string) => theme.fg("accent", s);
-        statusSymbol = "\u25d8";
-        statusLabel = "running";
-      } else if (this.result?.isError) {
-        statusColorFn = (s: string) => theme.fg("error", s);
-        statusSymbol = "\u2717";
-        statusLabel = "failed";
-      } else {
-        statusColorFn = (s: string) => theme.fg("success", s);
-        statusSymbol = "\u2713";
-        statusLabel = "done";
-      }
-    } else {
-      if (this.isPartial) {
-        statusColorFn = (s: string) => `\x1b[36m${s}\x1b[0m`;
-        statusLabel = "running";
-      } else if (this.result?.isError) {
-        statusColorFn = (s: string) => `\x1b[31m${s}\x1b[0m`;
-        statusSymbol = "\u2717";
-        statusLabel = "failed";
-      } else {
-        statusColorFn = (s: string) => `\x1b[32m${s}\x1b[0m`;
-        statusSymbol = "\u2713";
-        statusLabel = "done";
-      }
-    }
-
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-    // Check if content already uses box-drawing chars
-    const hasOwnBorders = rawLines.some((l: string) =>
-      l.includes("\u2554") || l.includes("\u2557") || l.includes("\u255a") || l.includes("\u255d") || l.includes("\u2551")
-    );
+    // OpenClaude spinner states
+    const isRunning = this.isPartial;
+    const isError = this.result?.isError;
 
-    const indent = "  ";
-    const idx = treeCtxActive ? treeCtx.index : 0;
-    const total = treeCtxActive ? treeCtx.total : 1;
-    const conn = treeConnector(idx, total);
-    const cont = treeContinuation(idx, total);
-    const connectorStr = conn;
-    const contentPrefix = cont;
+    let statusSymbol: string;
+    let toolColor: (s: string) => string;
 
-    if (hasOwnBorders) {
-      let maxW = 1;
-      for (const line of rawLines) {
-        const w = visibleWidth(line);
-        if (w > maxW) maxW = w;
-      }
-      const aligned = rawLines.map((line: string) => {
-        const w = visibleWidth(line);
-        return w < maxW ? line + " ".repeat(maxW - w) : line;
-      });
-      const maxNameW = Math.max(4, width - 20);
-      const nameTrunc = visibleWidth(this.toolName) > maxNameW ? truncateToWidth(this.toolName, maxNameW) + "\u2026" : this.toolName;
-      const headerLine = statusColorFn(connectorStr + nameTrunc) + "  " + dimFn(statusSymbol + " " + statusLabel);
-      return [indent + headerLine, ...aligned.map((l: string) => indent + contentPrefix + l)];
+    if (isRunning) {
+      statusSymbol = "\u25d8"; // ◘ spinner
+      toolColor = (theme && typeof theme.fg === "function")
+        ? (s: string) => theme.fg("accent", s)
+        : (s: string) => `\x1b[36m${s}\x1b[0m`;
+    } else if (isError) {
+      statusSymbol = "\u2717"; // ✗
+      toolColor = (theme && typeof theme.fg === "function")
+        ? (s: string) => theme.fg("error", s)
+        : (s: string) => `\x1b[31m${s}\x1b[0m`;
+    } else {
+      statusSymbol = "\u2713"; // ✓
+      toolColor = (theme && typeof theme.fg === "function")
+        ? (s: string) => theme.fg("success", s)
+        : (s: string) => `\x1b[32m${s}\x1b[0m`;
     }
 
-    const maxNameW = Math.max(4, width - 20);
-    const nameTrunc = visibleWidth(this.toolName) > maxNameW ? truncateToWidth(this.toolName, maxNameW) + "\u2026" : this.toolName;
-    const headerLine = statusColorFn(connectorStr + nameTrunc) + "  " + dimFn(statusSymbol + " " + statusLabel);
-    const contentLines = rawLines.map((line: string) => indent + contentPrefix + line);
-    return [indent + headerLine, ...contentLines];
+    // Build parameter summary from tool arguments
+    let paramSummary = "";
+    if (this.args && typeof this.args === "object") {
+      const params: string[] = [];
+      for (const [key, val] of Object.entries(this.args)) {
+        const v = typeof val === "string" ? val.slice(0, 60) : JSON.stringify(val);
+        params.push(`${key}: ${v}`);
+      }
+      if (params.length > 0) {
+        paramSummary = " (" + params.join(", ") + ")";
+      }
+    }
+
+    // Truncate long parameter summary
+    const maxSummaryW = Math.max(10, width - 20);
+    const fullHeader = this.toolName + paramSummary;
+    const truncatedHeader = visibleWidth(fullHeader) > maxSummaryW
+      ? truncateToWidth(fullHeader, maxSummaryW) + "\u2026"
+      : fullHeader;
+
+    // OpenClaude style: tool name bold with spinner + params inline
+    const headerLine = toolColor(statusSymbol + " " + truncatedHeader);
+    const indent = "  ";
+    const contentLines = rawLines.map((line: string) => indent + line);
+    return [headerLine, ...contentLines];
   };
 }
 
