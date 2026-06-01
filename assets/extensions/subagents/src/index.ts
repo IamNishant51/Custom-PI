@@ -1781,12 +1781,14 @@ let renderedComponents: Array<{
 }> = [];
 let activeTuiInstance: any = null;
 
-// Write debug log to ~/.pi/agent/tui-click.log
-const debugLog = (msg: string) => {
-  try {
-    fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "tui-click.log"), `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
-};
+// Debug logging — active only when PI_DEBUG is set
+const debugLog = process.env.PI_DEBUG
+  ? (msg: string) => {
+      try {
+        fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "tui-click.log"), `[${new Date().toISOString()}] ${msg}\n`);
+      } catch {}
+    }
+  : () => {};
 
 let theme: any = null;
 

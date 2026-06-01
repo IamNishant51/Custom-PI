@@ -3522,7 +3522,7 @@ function flushAgentChatBuffer(agentId) {
 
 // ── Session Runtime ────────────────────────────────────────────────────────
 
-const OBSIDIAN_VAULT = "/home/nishant/Documents/Obsidian Vault";
+const OBSIDIAN_VAULT = process.env.OBSIDIAN_VAULT || path.join(os.homedir(), "Documents", "Obsidian Vault");
 
 function loadSystemPrompt() {
   const parts = [];
