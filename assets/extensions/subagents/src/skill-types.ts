@@ -1,5 +1,16 @@
 export type SkillAuthor = "agent" | "user";
 
+export interface SkillInputSchema {
+  type: "object" | "string" | "number" | "boolean" | "array";
+  properties?: Record<string, { type: string; description?: string }>;
+  description?: string;
+}
+
+export interface SkillOutputContract {
+  type: "string" | "object" | "number" | "boolean" | "array";
+  description?: string;
+}
+
 export interface SkillFrontmatter {
   name: string;
   description: string;
@@ -10,6 +21,9 @@ export interface SkillFrontmatter {
   tags: string[];
   complexity: number;
   dependencies?: string[];
+  prerequisites?: string[];
+  input_schema?: SkillInputSchema;
+  output_contract?: SkillOutputContract;
   example?: string;
 }
 

@@ -1,6 +1,6 @@
 import { completeSimple } from "@earendil-works/pi-ai";
 import { listSkills, getSkillUsage, deleteSkill, getAllUsage } from "./skill-store";
-import { SkillFile, SkillLifecycle, STALE_DAYS, ARCHIVE_DAYS } from "./skill-types";
+import { SkillFile, SkillLifecycle, STALE_DAYS, ARCHIVE_DAYS, type SkillInputSchema, type SkillOutputContract } from "./skill-types";
 
 export interface CuratorReport {
   archived: string[];
@@ -106,4 +106,64 @@ function getLifecycleString(skill: SkillFile, lastUsedStr?: string): SkillLifecy
   if (daysSince > ARCHIVE_DAYS) return "archived";
   if (daysSince > STALE_DAYS) return "stale";
   return "active";
+}
+
+// ── Skill Manifest Validation ──────────────────────────────────────────────
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export function validateSkillExecution(
+  skill: SkillFile,
+  input: Record<string, any>,
+  availableTools?: string[],
+): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const fm = skill.frontmatter;
+
+  // Check prerequisites
+  if (fm.prerequisites && fm.prerequisites.length > 0 && availableTools) {
+    for (const prereq of fm.prerequisites) {
+      if (!availableTools.includes(prereq)) {
+        errors.push(`Missing prerequisite tool: '${prereq}' (required by skill '${fm.name}')`);
+      }
+    }
+  }
+
+  // Check input schema
+  if (fm.input_schema) {
+    const schema = fm.input_schema;
+    if (schema.type === "object" && schema.properties) {
+      for (const [propName, propDef] of Object.entries(schema.properties)) {
+        if (input[propName] === undefined) {
+          errors.push(`Missing required input: '${propName}' (${propDef.description || "no description"})`);
+        } else if (propDef.type) {
+          const actualType = typeof input[propName];
+          if (actualType !== propDef.type) {
+            warnings.push(`Input '${propName}' expected ${propDef.type}, got ${actualType}`);
+          }
+        }
+      }
+    }
+  }
+
+  // Check output contract (informational only)
+  if (fm.output_contract && !errors.length) {
+    // output contract is for documentation / downstream consumers
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+export function validateAllSkills(availableTools?: string[]): Record<string, ValidationResult> {
+  const skills = listSkills();
+  const results: Record<string, ValidationResult> = {};
+  for (const skill of skills) {
+    results[skill.frontmatter.name] = validateSkillExecution(skill, {}, availableTools);
+  }
+  return results;
 }
