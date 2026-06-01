@@ -1,5 +1,4 @@
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
-import { theme } from "@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Container, TUI, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
@@ -1743,6 +1742,35 @@ const debugLog = (msg: string) => {
   } catch {}
 };
 
+let theme: any = null;
+
+function locateTheme() {
+  try {
+    const cliPath = process.argv[1] || "";
+    const distIndex = cliPath.lastIndexOf("dist");
+    if (distIndex !== -1) {
+      const packageDir = cliPath.substring(0, distIndex);
+      const themePath = path.join(packageDir, "dist", "modes", "interactive", "theme", "theme.js");
+      if (fs.existsSync(themePath)) {
+        return require(themePath).theme;
+      }
+    }
+  } catch {}
+
+  try {
+    for (const p of module.paths) {
+      const themePath = path.join(p, "@earendil-works", "pi-coding-agent", "dist", "modes", "interactive", "theme", "theme.js");
+      if (fs.existsSync(themePath)) {
+        return require(themePath).theme;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+theme = locateTheme();
+
 // Hook Container.prototype.render to capture chatContainer rendering details
 const originalContainerRender = Container.prototype.render;
 Container.prototype.render = function (this: any, width: number) {
@@ -1822,8 +1850,12 @@ UserMessageComponent.prototype.render = function (this: any, width: number) {
   }
 
   // Draw thin border lines using the theme colors (accent for borders, userMessageText for text)
-  const borderStyle = (str: string) => theme.fg("accent", str);
-  const textStyle = (str: string) => theme.fg("userMessageText", str);
+  const borderStyle = (str: string) => {
+    return (theme && typeof theme.fg === "function") ? theme.fg("accent", str) : `\x1b[36m${str}\x1b[0m`;
+  };
+  const textStyle = (str: string) => {
+    return (theme && typeof theme.fg === "function") ? theme.fg("userMessageText", str) : str;
+  };
 
   const topBorder = borderStyle("╭" + "─".repeat(maxLineW + 2) + "╮");
   const bottomBorder = borderStyle("╰" + "─".repeat(maxLineW + 2) + "╯");
