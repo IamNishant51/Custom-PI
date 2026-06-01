@@ -1303,6 +1303,15 @@ class SubAgentRuntime {
 
     // Context monitor: track every tool call for loop detection
     contextMonitor.recordToolCall(name, args);
+    contextMonitor.recordDecisionTrace(
+      this.ctx.sessionId || "unknown",
+      this.config.name,
+      `${this.config.name} → ${name}`,
+      `Sub-agent '${this.config.name}' invoking tool '${name}'`,
+      name,
+      JSON.stringify(args).slice(0, 200),
+      0,
+    );
 
     try {
       const MAX_OUT = SubAgentRuntime.MAX_TOOL_OUTPUT;
@@ -4026,12 +4035,35 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // ── Telemetry Command ───────────────────────────────────────────────────────
+  pi.registerCommand("telemetry", {
+    description: "Show telemetry snapshot: context, costs, memory, health.",
+    handler(args, ctx) {
+      try {
+        const snap = contextMonitor.getTelemetrySnapshot();
+        const traces = contextMonitor.getRecentDecisionTraces(3);
+        ctx.ui.notify(
+          `Telemetry: ctx=${snap.contextPercent}%, tools=${snap.totalToolCalls}, ` +
+          `files=${snap.filesModified}, cost=$${snap.costSummary.totalCostUsd.toFixed(4)}, ` +
+          `health=${snap.healthyEndpoints}/${snap.healthCount}, ` +
+          `traces=${traces.length}`,
+          "info"
+        );
+      } catch {
+        ctx.ui.notify("Failed to read telemetry snapshot.", "error");
+      }
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // Command: Show keybindings and commands
   pi.registerCommand("help", {
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /workflows, /plugins, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /workflows, /telemetry, /plugins, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );

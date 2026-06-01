@@ -2,6 +2,7 @@ import { runCurator, CuratorReport } from "./curator";
 import { closeDb } from "./state-db";
 import { memoryConsolidate as fileConsolidate } from "./memory-file-store";
 import { loadMcpServers, probeMcpServer, probeProvider } from "./mcp-catalog";
+import { contextMonitor } from "./context-monitor";
 
 // ── Cron Parser (zero-dependency) ──────────────────────────────────────────
 
@@ -183,6 +184,7 @@ export function startCronJobs(
         probeProvider("openai", process.env.OPENAI_API_KEY),
         probeProvider("google", process.env.GEMINI_API_KEY),
       ]);
+      contextMonitor.writeTelemetrySnapshot();
     } catch { /* silent */ }
   }, cfg.healthCheckIntervalMs);
 

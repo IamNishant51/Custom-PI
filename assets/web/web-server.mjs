@@ -4747,6 +4747,17 @@ async function main() {
   app.post("/api/budget/config", async (req) => { setBudgetConfig(req.body); return { ok: true }; });
   app.get("/api/budget/stats", async () => getCostSummary());
 
+  // Telemetry
+  app.get("/api/telemetry", async () => {
+    const p = path.join(PI_DIR, "telemetry.json");
+    try {
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, "utf8"));
+      }
+    } catch {}
+    return { status: "no_data", timestamp: Date.now() };
+  });
+
   // Work products
   app.get("/api/work-products", async (req) => {
     const url = new URL(req.url, `http://${req.hostname}`);
