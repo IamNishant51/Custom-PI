@@ -6,6 +6,14 @@ const COST_DIR = path.join(os.homedir(), ".pi", "agent", "costs");
 const BUDGET_FILE = path.join(COST_DIR, "budget.json");
 const SESSION_COST_FILE = path.join(COST_DIR, "session-costs.jsonl");
 
+// ── Cost Units ──────────────────────────────────────────────────────────────
+
+export const COST_UNITS = {
+  C_TOKEN: 1,
+  C_TOOL: 50_000,    // fixed token-equivalent cost for complex tool invocations
+  C_AGENT: 100_000,  // fixed token-equivalent per sub-agent execution step
+} as const;
+
 interface CostEvent {
   timestamp: string;
   sessionId: string;
@@ -173,6 +181,14 @@ export function trackCost(
   };
 }
 
+export function trackToolCost(sessionId: string, agent: string): CostResult {
+  return trackCost(sessionId, agent, "system", "tool-call", COST_UNITS.C_TOOL, 0);
+}
+
+export function trackAgentStepCost(sessionId: string, agent: string): CostResult {
+  return trackCost(sessionId, agent, "system", "agent-step", COST_UNITS.C_AGENT, 0);
+}
+
 export function getSessionCosts(sessionId: string): CostEvent[] {
   ensureCostDir();
   if (!fs.existsSync(SESSION_COST_FILE)) return [];
@@ -187,6 +203,38 @@ export function getSessionCosts(sessionId: string): CostEvent[] {
     }
   } catch {}
   return costs;
+}
+
+// ── CPUW (Cost Per Unit of Work) ────────────────────────────────────────────
+
+export interface CpuwResult {
+  totalCostUsd: number;
+  totalTokenEquiv: number;
+  stepCount: number;
+  cpuw: number;           // cost per step
+  tokenEquivPerStep: number;
+  efficiency: "low" | "medium" | "high";
+}
+
+export function calculateCpuw(sessionId: string): CpuwResult {
+  const events = getSessionCosts(sessionId);
+  if (events.length === 0) {
+    return { totalCostUsd: 0, totalTokenEquiv: 0, stepCount: 0, cpuw: 0, tokenEquivPerStep: 0, efficiency: "high" };
+  }
+
+  const totalCostUsd = events.reduce((s, e) => s + e.costUsd, 0);
+  const totalTokenEquiv = events.reduce((s, e) => s + e.totalTokens, 0);
+  const stepCount = events.length;
+
+  const cpuw = totalCostUsd / stepCount;
+  const tokenEquivPerStep = totalTokenEquiv / stepCount;
+
+  let efficiency: "low" | "medium" | "high";
+  if (cpuw > 0.05) efficiency = "low";
+  else if (cpuw > 0.01) efficiency = "medium";
+  else efficiency = "high";
+
+  return { totalCostUsd, totalTokenEquiv, stepCount, cpuw, tokenEquivPerStep, efficiency };
 }
 
 export function getBudgetConfig(): BudgetConfig {

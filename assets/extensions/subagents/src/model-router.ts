@@ -1,4 +1,4 @@
-import { trackCost } from "./cost-tracker";
+import { trackCost, calculateCpuw, COST_UNITS } from "./cost-tracker";
 import { isProviderHealthy } from "./mcp-catalog";
 
 export interface ModelRoute {
@@ -28,6 +28,8 @@ const MODELS: Record<string, ModelRoute> = {
   "gemini-2.5-pro": { tier: "capable", provider: "google", model: "gemini-2.5-pro" },
 };
 
+const TIER_COST_ORDER: ("cheap" | "balanced" | "capable" | "reasoning")[] = ["cheap", "balanced", "capable", "reasoning"];
+
 const DEFAULT_ROUTES: Record<string, string> = {
   cheap: "gpt-4o-mini",
   balanced: "gemini-2.5-flash",
@@ -40,6 +42,7 @@ let currentRoutes = { ...DEFAULT_ROUTES };
 export function resolveModelForTask(task: {
   complexity: "simple" | "moderate" | "complex" | "reasoning";
   estimatedTokens?: number;
+  budget?: "strict" | "normal" | "unlimited";
 }): ModelRoute {
   const tierMap: Record<string, "cheap" | "balanced" | "capable" | "reasoning"> = {
     simple: "cheap",
@@ -48,9 +51,42 @@ export function resolveModelForTask(task: {
     reasoning: "reasoning",
   };
 
-  const tier = tierMap[task.complexity] || "balanced";
+  let tier = tierMap[task.complexity] || "balanced";
+
+  // Budget-aware downgrade: if strict, try one tier cheaper
+  if (task.budget === "strict" && tier !== "cheap") {
+    const idx = TIER_COST_ORDER.indexOf(tier);
+    if (idx > 0) tier = TIER_COST_ORDER[idx - 1];
+  }
+
   const modelId = currentRoutes[tier];
   return resolveWithFallback(modelId);
+}
+
+export function resolveModelWithCpuw(
+  sessionId: string,
+  task: {
+    complexity: "simple" | "moderate" | "complex" | "reasoning";
+    estimatedTokens?: number;
+    budget?: "strict" | "normal" | "unlimited";
+  }
+): { route: ModelRoute; cpuw: ReturnType<typeof calculateCpuw> } {
+  const route = resolveModelForTask(task);
+  const cpuw = calculateCpuw(sessionId);
+
+  // If efficiency is low and budget is strict, downgrade further
+  if (task.budget === "strict" && cpuw.efficiency === "low") {
+    const currentTier = route.tier;
+    const idx = TIER_COST_ORDER.indexOf(currentTier);
+    if (idx > 0) {
+      const cheaperTier = TIER_COST_ORDER[idx - 1];
+      const cheaperId = currentRoutes[cheaperTier];
+      const cheaper = MODELS[cheaperId];
+      if (cheaper) return { route: cheaper, cpuw };
+    }
+  }
+
+  return { route, cpuw };
 }
 
 function resolveWithFallback(modelId: string): ModelRoute {
@@ -87,12 +123,28 @@ export function setModelRoute(tier: string, modelId: string): boolean {
   return true;
 }
 
-export function getAvailableModels(): { id: string; tier: string; label: string }[] {
+export function getAvailableModels(): { id: string; tier: string; label: string; estimatedCostPer1kTokens: number }[] {
   return Object.entries(MODELS).map(([id, route]) => ({
     id,
     tier: route.tier,
     label: `${route.provider}/${route.model}`,
+    estimatedCostPer1kTokens: getEstimatedCost(route),
   }));
+}
+
+function getEstimatedCost(route: ModelRoute): number {
+  const RATES: Record<string, { input: number; output: number }> = {
+    "anthropic/claude-sonnet-4": { input: 3.0 / 1_000_000, output: 15.0 / 1_000_000 },
+    "anthropic/claude-haiku-3.5": { input: 0.8 / 1_000_000, output: 4.0 / 1_000_000 },
+    "openai/gpt-4o": { input: 2.5 / 1_000_000, output: 10.0 / 1_000_000 },
+    "openai/gpt-4o-mini": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
+    "google/gemini-2.5-flash": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
+    "google/gemini-2.5-pro": { input: 1.25 / 1_000_000, output: 5.0 / 1_000_000 },
+  };
+  const key = `${route.provider}/${route.model}`;
+  const rate = RATES[key];
+  if (!rate) return 0;
+  return (rate.input + rate.output) * 1000; // per 1K tokens
 }
 
 export function getCurrentRouting(): Record<string, string> {
