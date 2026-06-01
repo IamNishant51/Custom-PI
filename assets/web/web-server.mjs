@@ -1768,13 +1768,18 @@ async function executeTool(name, args, cwd) {
       return `Successfully edited: ${args.path}`;
     }
     case "bash": {
-      return execSync(args.command, { cwd, encoding: "utf8", timeout: 30000 });
+      const result = spawnSync("bash", ["-c", args.command], { cwd, encoding: "utf8", timeout: 30000, shell: false, maxBuffer: 10 * 1024 * 1024 });
+      if (result.error) throw result.error;
+      return result.stdout || result.stderr || "";
     }
     case "glob": {
       const { globSync } = await import("glob");
       return globSync(args.pattern, { cwd }).join("\n");
     }
     case "grep": {
+      // Prevent ReDoS and flag injection
+      if (typeof args.pattern !== "string" || args.pattern.length > 200) return "Pattern must be a string under 200 chars";
+      if (args.pattern.startsWith("--")) return "Pattern cannot start with -- (flag injection prevention)";
       try {
         const grepArgs = ['--no-filename', '--color', 'never', args.pattern, args.path || cwd];
         const result = spawnSync('rg', grepArgs, { encoding: "utf8", timeout: 30000 });
@@ -1791,7 +1796,8 @@ async function executeTool(name, args, cwd) {
             else if (entry.isFile()) {
               try {
                 const lines = fs.readFileSync(full, "utf8").split("\n");
-                const regex = new RegExp(args.pattern, "i");
+                // Safe regex: wrap in try/catch, limit pattern complexity
+                const regex = new RegExp(args.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100), "i");
                 for (let i = 0; i < lines.length; i++) {
                   if (regex.test(lines[i])) results.push(`${full}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
                 }
@@ -2041,13 +2047,14 @@ Restored: ${result.restored.join(", ")}`;
     }
     case "text_to_speech": {
       try {
-        const { execSync } = await import('child_process');
         const voice = args.voice || "en-US-JennyNeural";
+        // Sanitize voice — only allow alphanumeric, hyphens, underscores
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(voice)) return "Invalid voice";
+        const safeText = (args.text || "").slice(0, 1000);
         const outFile = path.join(PI_DIR, "tts", `speech_${Date.now()}.mp3`);
         fs.mkdirSync(path.join(PI_DIR, "tts"), { recursive: true });
-        const result = execSync(`which edge-tts 2>/dev/null || which edge-tts.exe 2>/dev/null || python3 -m edge_tts --help 2>/dev/null`, { encoding: "utf8", timeout: 5000 });
-        if (result) {
-          execSync(`edge-tts --voice "${voice}" --text "${args.text.replace(/"/g, '\\"')}" --write-media "${outFile}"`, { timeout: 30000 });
+        const result = spawnSync("edge-tts", ["--voice", voice, "--text", safeText, "--write-media", outFile], { encoding: "utf8", timeout: 30000, shell: false });
+        if (result.status === 0) {
           const audioData = fs.readFileSync(outFile).toString("base64");
           return `Audio generated:\n[audio]data:audio/mp3;base64,${audioData}[/audio]`;
         }
@@ -2061,25 +2068,31 @@ Restored: ${result.restored.join(", ")}`;
       const timeout = (args.timeout || 30) * 1000;
       const sshKey = vaultGet("SSH_KEY");
       const sshPassword = vaultGet("SSH_PASSWORD");
-      let sshCmd;
-      if (sshKey) {
-        const keyFile = path.join(PI_DIR, ".ssh_temp_key");
-        fs.writeFileSync(keyFile, sshKey, { mode: 0o600 });
-        sshCmd = `ssh -i ${keyFile} -p ${port} -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${host} ${JSON.stringify(cmd)}`;
-      } else if (sshPassword) {
-        sshCmd = `sshpass -p ${JSON.stringify(sshPassword)} ssh -p ${port} -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${host} ${JSON.stringify(cmd)}`;
-      } else {
-        sshCmd = `ssh -p ${port} -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${host} ${JSON.stringify(cmd)}`;
+      // Validate host — only allow hostname/IP:port format
+      if (!host || typeof host !== "string" || host.length > 255 || /[;&|`$(){}!<>]/.test(host)) {
+        return "SSH Error: Invalid host";
       }
+      // Validate port
+      const validPort = Math.floor(Number(port)) || 22;
+      if (validPort < 1 || validPort > 65535) return "SSH Error: Invalid port";
       try {
-        const output = execSync(sshCmd, { encoding: "utf8", timeout, maxBuffer: 10 * 1024 * 1024 });
-        return output || "(Command executed successfully, no output)";
+        const sshArgs = ["-p", String(validPort), "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", host, cmd];
+        let result;
+        if (sshKey) {
+          const keyFile = path.join(PI_DIR, ".ssh_temp_key");
+          fs.writeFileSync(keyFile, sshKey, { mode: 0o600 });
+          sshArgs.unshift("-i", keyFile);
+          result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
+          try { fs.unlinkSync(keyFile); } catch {}
+        } else if (sshPassword) {
+          result = spawnSync("sshpass", ["-p", sshPassword, "ssh", ...sshArgs], { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
+        } else {
+          result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
+        }
+        if (result.error) throw result.error;
+        return result.stdout || result.stderr || "(Command executed successfully, no output)";
       } catch (e) {
         return `SSH Error: ${e.stderr || e.message || e}`;
-      } finally {
-        try {
-          if (sshKey) fs.unlinkSync(path.join(PI_DIR, ".ssh_temp_key"));
-        } catch {}
       }
     }
     case "plugin": {
@@ -3389,11 +3402,17 @@ async function resolveInternalUrl(url, cwd) {
           number = parts;
         }
         if (!number) return "Usage: issue://owner/repo/NUMBER or issue://NUMBER";
+        // Validate number is numeric — prevent shell injection
+        if (!/^\d+$/.test(number)) return "Error: Issue number must be numeric";
+        // Sanitize owner/repo — only allow alphanumeric, hyphens, dots
+        if (owner && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(owner)) return "Error: Invalid owner";
+        if (repo && !/^[a-zA-Z0-9_][a-zA-Z0-9._-]*$/.test(repo)) return "Error: Invalid repo";
         try {
-          const repoArg = owner ? `${owner}/${repo}` : "";
-          const cmd = `gh issue view ${number} ${repoArg ? `-R ${repoArg}` : ""} --json title,body,state,labels,assignees,createdAt,comments`;
-          const output = execSync(cmd, { encoding: "utf8", timeout: 10000 });
-          const data = JSON.parse(output);
+          const ghArgs = ["issue", "view", number, "--json", "title,body,state,labels,assignees,createdAt,comments"];
+          if (owner && repo) ghArgs.push("-R", `${owner}/${repo}`);
+          const result = spawnSync("gh", ghArgs, { encoding: "utf8", timeout: 10000, shell: false });
+          if (result.error) throw result.error;
+          const data = JSON.parse(result.stdout);
           if (data.title) {
             let result = `# ${data.title} [${data.state}]\n`;
             result += `Created: ${data.createdAt}\n`;
@@ -3419,11 +3438,17 @@ async function resolveInternalUrl(url, cwd) {
           number = parts;
         }
         if (!number) return "Usage: pr://owner/repo/NUMBER or pr://NUMBER";
+        // Validate number is numeric — prevent shell injection
+        if (!/^\d+$/.test(number)) return "Error: PR number must be numeric";
+        // Sanitize owner/repo
+        if (owner && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(owner)) return "Error: Invalid owner";
+        if (repo && !/^[a-zA-Z0-9_][a-zA-Z0-9._-]*$/.test(repo)) return "Error: Invalid repo";
         try {
-          const repoArg = owner ? `${owner}/${repo}` : "";
-          const cmd = `gh pr view ${number} ${repoArg ? `-R ${repoArg}` : ""} --json title,body,state,headRefName,baseRefName,additions,deletions,mergedAt,createdAt,author,comments,reviews`;
-          const output = execSync(cmd, { encoding: "utf8", timeout: 10000 });
-          const data = JSON.parse(output);
+          const ghArgs = ["pr", "view", number, "--json", "title,body,state,headRefName,baseRefName,additions,deletions,mergedAt,createdAt,author,comments,reviews"];
+          if (owner && repo) ghArgs.push("-R", `${owner}/${repo}`);
+          const result = spawnSync("gh", ghArgs, { encoding: "utf8", timeout: 10000, shell: false });
+          if (result.error) throw result.error;
+          const data = JSON.parse(result.stdout);
           if (data.title) {
             let result = `# ${data.title} [${data.state}]\n`;
             result += `Branch: ${data.headRefName} → ${data.baseRefName}\n`;
@@ -4715,6 +4740,12 @@ async function main() {
   });
   app.post("/api/mcp/test", async (req) => {
     const { name, command, args } = req.body;
+    // Whitelist: only allow known MCP server commands (no arbitrary shell execution)
+    const allowedPrefixes = ["./", "../", "/", "npx ", "node ", "uvx ", "python ", "deno "];
+    const isAllowed = allowedPrefixes.some(p => typeof command === "string" && command.startsWith(p));
+    if (!command || typeof command !== "string" || !isAllowed) {
+      return { ok: false, output: "Command not allowed for security. Must be a path, npx, node, uvx, python, or deno command." };
+    }
     try {
       const testArgs = [...(args || []), '--version'];
       const result = spawnSync(command, testArgs, { timeout: 5000, encoding: "utf8", shell: false });
