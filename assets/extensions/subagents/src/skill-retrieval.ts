@@ -6,6 +6,7 @@ export interface RetrievedSkill {
   lifecycle: SkillLifecycle;
   relevanceScore: number;
   useCount: number;
+  confidence: number;
 }
 
 const LEVEL0_DISPLAY_CHARS = 200;
@@ -37,13 +38,17 @@ export function retrieveSkills(query: string, topK: number = 5): RetrievedSkill[
     // Boost for frequently used skills
     score += Math.min(useCount * 0.5, 5);
 
-    return { skill: s, lifecycle, relevanceScore: score, useCount };
+    return { skill: s, lifecycle, relevanceScore: score, useCount, confidence: Math.min(1, score / 20) };
   });
 
   return scored
     .filter(s => s.relevanceScore > 0)
     .sort((a, b) => b.relevanceScore - a.relevanceScore)
     .slice(0, topK);
+}
+
+export function retrieveSkillsWithConfidence(query: string, topK: number = 5, minConfidence: number = 0.7): RetrievedSkill[] {
+  return retrieveSkills(query, topK).filter(s => s.confidence >= minConfidence);
 }
 
 export function retrieveAllSkills(): RetrievedSkill[] {
@@ -53,6 +58,7 @@ export function retrieveAllSkills(): RetrievedSkill[] {
     lifecycle: computeLifecycle(s),
     relevanceScore: 0,
     useCount: (getAllUsage()[s.frontmatter.name]?.useCount || 0),
+    confidence: 0,
   }));
 }
 
@@ -81,8 +87,9 @@ export function formatSkillsContextBlock(skills: RetrievedSkill[]): string {
   const lines = skills.map((s, i) => {
     const tags = s.skill.frontmatter.tags.length ? ` [${s.skill.frontmatter.tags.join(", ")}]` : "";
     const usage = s.useCount > 0 ? ` (used ${s.useCount}x)` : "";
+    const confidence = s.confidence > 0 ? ` [confidence: ${(s.confidence * 100).toFixed(0)}%]` : "";
     const preview = s.skill.body.slice(0, 100).replace(/\n/g, " ");
-    return `  ${i + 1}. **${s.skill.frontmatter.name}**: ${preview}${tags}${usage}`;
+    return `  ${i + 1}. **${s.skill.frontmatter.name}**: ${preview}${tags}${usage}${confidence}`;
   });
   return `\n# 🔧 RELEVANT SKILLS\n${lines.join("\n")}\n`;
 }

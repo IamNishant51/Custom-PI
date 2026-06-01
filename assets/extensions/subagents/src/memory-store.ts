@@ -722,3 +722,152 @@ export async function flush(): Promise<void> {
   }
   await writeQueue;
 }
+
+// ── Three-Tier Cache Architecture ──────────────────────────────────────────
+
+export interface CachedResult {
+  content: string;
+  source: "tier1" | "tier2" | "tier3";
+  confidence: number;
+  timestamp: number;
+}
+
+// Tier 1: Ephemeral Context — recent tool outputs and chat turns
+const TIER1_TTL = 600_000; // 10 min
+const tier1Store = new Map<string, { content: string; timestamp: number }>();
+
+export function storeEphemeral(key: string, content: string): void {
+  tier1Store.set(key, { content, timestamp: Date.now() });
+}
+
+export function getEphemeral(key: string): string | null {
+  const entry = tier1Store.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > TIER1_TTL) {
+    tier1Store.delete(key);
+    return null;
+  }
+  return entry.content;
+}
+
+export function searchEphemeral(query: string): CachedResult[] {
+  const results: CachedResult[] = [];
+  const q = query.toLowerCase();
+  for (const [key, entry] of tier1Store) {
+    if (Date.now() - entry.timestamp > TIER1_TTL) {
+      tier1Store.delete(key);
+      continue;
+    }
+    if (key.toLowerCase().includes(q) || entry.content.toLowerCase().includes(q)) {
+      results.push({
+        content: entry.content,
+        source: "tier1",
+        confidence: 0.95,
+        timestamp: entry.timestamp,
+      });
+    }
+  }
+  return results.sort((a, b) => b.timestamp - a.timestamp).slice(0, 3);
+}
+
+export function clearEphemeral(): void {
+  tier1Store.clear();
+}
+
+// Tier 3: Systemic Metadata — static project knowledge
+let tier3Index: { path: string; content: string }[] | null = null;
+let tier3IndexTime = 0;
+const TIER3_TTL = 300_000; // 5 min for re-indexing
+
+function ensureTier3Index(): { path: string; content: string }[] {
+  const now = Date.now();
+  if (tier3Index && now - tier3IndexTime < TIER3_TTL) return tier3Index;
+  tier3Index = [];
+  tier3IndexTime = now;
+
+  const projectRoot = process.env.PI_PROJECT_ROOT || process.cwd();
+  const files = [
+    "AGENT.md",
+    "package.json",
+    "README.md",
+    ".opencode/rules.md",
+    "assets/extensions/subagents/AGENT.md",
+  ];
+  for (const rel of files) {
+    const p = path.join(projectRoot, rel);
+    try {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, "utf8").slice(0, 5000);
+        tier3Index.push({ path: rel, content });
+      }
+    } catch {}
+  }
+  return tier3Index!;
+}
+
+export function searchSystemic(query: string): CachedResult[] {
+  const index = ensureTier3Index();
+  const q = query.toLowerCase();
+  const results: CachedResult[] = [];
+  for (const entry of index) {
+    const content = entry.content;
+    const lower = content.toLowerCase();
+    if (!lower.includes(q)) {
+      const tokens = q.split(/\s+/).filter(t => t.length > 2);
+      const matchCount = tokens.filter(t => lower.includes(t)).length;
+      if (matchCount < Math.max(1, tokens.length * 0.5)) continue;
+    }
+    results.push({
+      content: `[${entry.path}]\n${content.slice(0, 1000)}`,
+      source: "tier3",
+      confidence: 0.70,
+      timestamp: Date.now(),
+    });
+  }
+  return results.slice(0, 3);
+}
+
+// Unified retrieval: Tier 1 -> Tier 2 -> Tier 3 with confidence threshold
+export async function retrieveAll(query: string, opts?: {
+  k?: number;
+  project?: string;
+  minConfidence?: number;
+}): Promise<CachedResult[]> {
+  const k = opts?.k ?? 5;
+  const minConfidence = opts?.minConfidence ?? 0.70;
+  const results: CachedResult[] = [];
+
+  // Tier 1
+  const t1 = searchEphemeral(query);
+  for (const r of t1) {
+    if (r.confidence >= minConfidence) results.push(r);
+  }
+
+  // Tier 2 (semantic)
+  if (results.length < k) {
+    const sem = await search(query, k, opts?.project, false);
+    for (const s of sem) {
+      const confidence = s.score;
+      if (confidence >= minConfidence) {
+        results.push({
+          content: s.entry.content.slice(0, 2000),
+          source: "tier2",
+          confidence,
+          timestamp: new Date(s.entry.lastAccessed).getTime(),
+        });
+      }
+    }
+  }
+
+  // Tier 3 (systemic)
+  if (results.length < k) {
+    const t3 = searchSystemic(query);
+    for (const r of t3) {
+      if (r.confidence >= minConfidence && !results.find(ex => ex.content === r.content)) {
+        results.push(r);
+      }
+    }
+  }
+
+  return results.sort((a, b) => b.confidence - a.confidence).slice(0, k);
+}
