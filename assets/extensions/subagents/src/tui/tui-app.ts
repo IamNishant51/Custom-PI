@@ -1,7 +1,7 @@
 import { TuiManager } from "./tui-manager";
 import { SPINNERS, BOX } from "./types";
 import type { AgentState, PulseConfig } from "./types";
-import { stripAnsi } from "./utils/measure-text";
+import { stripAnsi, measureWidth } from "./utils/measure-text";
 import { activeTrackers as globalTrackers } from "../animations";
 
 interface TrackerData {
@@ -25,12 +25,24 @@ export class TuiApp {
   private cursorPos = 0;
   private trackers: Map<string, TrackerData> = new Map();
   private messageLog: Array<{ role: string; content: string; timestamp: number }> = [];
+  private collapsedThinkingIndices: Set<number> = new Set();
+  private renderedElements: Array<{ index: number; role: string; startY: number; endY: number }> = [];
   private memoryCount = 0;
   private vaultCount = 0;
   private _onSubmit: ((text: string) => void) | null = null;
+  private ctx: any;
+  private pi: any;
 
-  constructor() {
+  constructor(ctx?: any, pi?: any) {
+    this.ctx = ctx;
+    this.pi = pi;
     this.tui = new TuiManager({ useAltScreen: true });
+    
+    if (this.pi) {
+      this.onSubmit = (text) => {
+        this.pi.sendMessage({ role: "user", content: [{ type: "text", text }] });
+      };
+    }
   }
 
   get onSubmit(): ((text: string) => void) | null { return this._onSubmit; }
@@ -52,7 +64,8 @@ export class TuiApp {
       this.tui.renderer.pulse.getState();
     }, 16);
 
-    process.stdout.write("\x1b[?1002h");
+    // Enable SGR Mouse tracking (1002h for drag, 1006h for SGR coordinates)
+    process.stdout.write("\x1b[?1002h\x1b[?1006h");
 
     this.stdinHandler = (data: Buffer) => this.handleInput(data.toString());
     process.stdin.on("data", this.stdinHandler);
@@ -68,7 +81,8 @@ export class TuiApp {
       process.stdin.off("data", this.stdinHandler);
       this.stdinHandler = null;
     }
-    process.stdout.write("\x1b[?1002l");
+    // Disable mouse tracking
+    process.stdout.write("\x1b[?1002l\x1b[?1006l");
     this.tui.stop();
   }
 
@@ -102,8 +116,65 @@ export class TuiApp {
     return `${Math.floor(sec / 60)}m ${sec % 60}s`;
   }
 
+  private syncMessages(): void {
+    if (!this.ctx?.sessionManager) return;
+    try {
+      const branch = this.ctx.sessionManager.getBranch();
+      if (!branch) return;
+      const messages = branch
+        .filter((e: any) => e.type === "message")
+        .map((e: any) => e.message);
+      
+      const newLogs: Array<{ role: string; content: string; timestamp: number }> = [];
+      for (const m of messages) {
+        let contentStr = "";
+        if (typeof m.content === "string") {
+          contentStr = m.content;
+        } else if (Array.isArray(m.content)) {
+          contentStr = m.content
+            .map((c: any) => {
+              if (typeof c === "string") return c;
+              if (c && typeof c === "object") {
+                if (c.type === "text") return c.text || "";
+              }
+              return "";
+            })
+            .join("\n");
+        }
+        
+        let thinkingContent = "";
+        let textContent = contentStr;
+        if (Array.isArray(m.content)) {
+          const thinkingBlock = m.content.find((c: any) => c.type === "thinking");
+          const textBlock = m.content.find((c: any) => c.type === "text");
+          if (thinkingBlock) {
+            thinkingContent = thinkingBlock.thinking || thinkingBlock.text || "";
+          }
+          if (textBlock) {
+            textContent = textBlock.text || "";
+          }
+        }
+        
+        const timestamp = m.timestamp || Date.now();
+        
+        if (m.role === "assistant" && thinkingContent) {
+          newLogs.push({ role: "thinking", content: thinkingContent, timestamp });
+          newLogs.push({ role: "assistant", content: textContent, timestamp });
+        } else {
+          newLogs.push({ role: m.role, content: textContent, timestamp });
+        }
+      }
+      
+      this.messageLog = newLogs;
+    } catch (e) {
+      // ignore
+    }
+  }
+
   private renderFrame(): void {
     if (!this.active) return;
+    this.syncMessages();
+
     const renderer = this.tui.renderer;
     const cols = renderer.screen.getCols();
     const rows = renderer.screen.getRows();
@@ -145,12 +216,31 @@ export class TuiApp {
     // Messages (reversed, newest first)
     const visibleMessages = this.messageLog.slice(-10);
     const msgWidth = Math.min(cols - 4, 100);
-    for (const msg of visibleMessages) {
+    this.renderedElements = [];
+
+    for (let i = 0; i < visibleMessages.length; i++) {
+      const msg = visibleMessages[i];
+      const startY = y;
       const ts = new Date(msg.timestamp).toLocaleTimeString();
-      y = renderer.drawMessageBubble(y, msgWidth, msg.role, msg.content.slice(0, 200), ts, {
-        agentName: msg.role === "assistant" ? "Assistant" : undefined,
-        isStreaming: false,
+      
+      if (msg.role === "thinking") {
+        const isCollapsed = this.collapsedThinkingIndices.has(i);
+        y = renderer.drawThinkingBlock(y, msgWidth, msg.content.slice(0, 200), isCollapsed, ts);
+      } else {
+        y = renderer.drawMessageBubble(y, msgWidth, msg.role, msg.content.slice(0, 200), ts, {
+          agentName: msg.role === "assistant" ? "Assistant" : undefined,
+          isStreaming: false,
+        });
+      }
+      
+      const endY = y;
+      this.renderedElements.push({
+        index: i,
+        role: msg.role,
+        startY,
+        endY
       });
+      
       y++;
       if (y >= rows - 6) break;
     }
@@ -213,8 +303,46 @@ export class TuiApp {
     renderer.render();
   }
 
+  private handleMouseClick(x: number, y: number): void {
+    const element = this.renderedElements.find(el => y >= el.startY && y < el.endY);
+    if (!element) return;
+
+    if (element.role === "user") {
+      const thinkingEl = this.renderedElements.find(
+        el => el.index > element.index && el.role === "thinking"
+      );
+      if (thinkingEl) {
+        this.toggleThinkingCollapse(thinkingEl.index);
+      }
+    } else if (element.role === "thinking") {
+      this.toggleThinkingCollapse(element.index);
+    }
+  }
+
+  private toggleThinkingCollapse(index: number): void {
+    if (this.collapsedThinkingIndices.has(index)) {
+      this.collapsedThinkingIndices.delete(index);
+    } else {
+      this.collapsedThinkingIndices.add(index);
+    }
+    this.tui.requestFrame();
+  }
+
   private handleInput(data: string): void {
     if (!this.active) return;
+
+    // Check for SGR Mouse Event
+    const mouseMatch = data.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+    if (mouseMatch) {
+      const button = parseInt(mouseMatch[1], 10);
+      const x = parseInt(mouseMatch[2], 10);
+      const y = parseInt(mouseMatch[3], 10);
+      const isRelease = mouseMatch[4] === "m";
+      if (!isRelease && button === 0) {
+        this.handleMouseClick(x, y);
+      }
+      return;
+    }
 
     const result = this.tui.vimInput.handleData(data, this.inputText, this.cursorPos);
     this.inputText = result.text;

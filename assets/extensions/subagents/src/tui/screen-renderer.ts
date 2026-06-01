@@ -203,13 +203,11 @@ export class ScreenRenderer {
     isStreaming?: boolean;
   }): number {
     const cols = this.screen.getCols();
-    const w = Math.min(width - 4, cols - 6);
+    const maxCols = Math.min(width - 4, cols - 6);
     const isUser = role === "user";
     const borderColor = isUser ? this.theme.userBubbleBorder : this.theme.assistantBubbleBorder;
-    const bubbleBg = isUser ? this.theme.userBubble : this.theme.assistantBubble;
     const bStyle = this.style({ fg: borderColor });
     const headerStyle = this.style({ fg: this.theme.muted, dim: true });
-    const nameStyle = this.style({ fg: isUser ? this.theme.accent : this.theme.info, bold: true });
     const canvasStyle = this.style({ bg: this.theme.canvas });
     const contentStyle = this.style({ fg: this.theme.ink });
 
@@ -221,26 +219,35 @@ export class ScreenRenderer {
     if (opts?.isStreaming) metaParts.push("◌ streaming");
     const meta = metaParts.length > 0 ? `  ·  ${metaParts.join("  ·  ")}` : "";
     const headerText = `${agentIcon} ${name}${meta}  ${timestamp}`;
+    const headerW = measureWidth(headerText);
 
-    const lines = wordWrap(content, w - 4);
+    const lines = wordWrap(content, maxCols - 4);
+    let maxLineW = 0;
+    for (const line of lines) {
+      const lineW = measureWidth(stripAnsi(line.trimEnd()));
+      if (lineW > maxLineW) maxLineW = lineW;
+    }
+
+    const w = Math.min(maxCols, Math.max(headerW + 4, maxLineW + 4));
+    const startX = isUser ? Math.max(2, cols - w - 4) : 2;
 
     // Top border
     if (y >= this.screen.getRows() - 2) return y;
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(2, y, "╭" + BOX.h.repeat(w - 2) + "╮", bStyle);
+    this.screen.writeString(startX, y, "╭" + BOX.h.repeat(w - 2) + "╮", bStyle);
     y++;
 
     // Header
     if (y >= this.screen.getRows() - 3) return y;
     this.screen.clearLine(y, canvasStyle);
     const trimmedHeader = headerText.length > w - 4 ? headerText.slice(0, w - 6) + "…" : headerText;
-    this.screen.writeString(3, y, trimmedHeader, headerStyle);
+    this.screen.writeString(startX + 2, y, trimmedHeader, headerStyle);
     y++;
 
     // Divider
     if (y >= this.screen.getRows() - 3) return y;
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(2, y, "│" + " ".repeat(w - 2) + "│", bStyle);
+    this.screen.writeString(startX, y, "│" + " ".repeat(w - 2) + "│", bStyle);
     y++;
 
     // Content
@@ -249,18 +256,49 @@ export class ScreenRenderer {
       this.screen.clearLine(y, canvasStyle);
       const clean = line.trimEnd();
       const pad = Math.max(0, w - 4 - measureWidth(stripAnsi(clean)));
-      this.screen.writeString(3, y, clean + " ".repeat(pad), contentStyle);
+      this.screen.writeString(startX + 2, y, clean + " ".repeat(pad), contentStyle);
+      this.screen.writeString(startX, y, "│", bStyle);
+      this.screen.writeString(startX + w - 1, y, "│", bStyle);
       y++;
     }
 
     // Bottom border
     if (y < this.screen.getRows() - 2) {
       this.screen.clearLine(y, canvasStyle);
-      this.screen.writeString(2, y, "╰" + BOX.h.repeat(w - 2) + "╯", bStyle);
+      this.screen.writeString(startX, y, "╰" + BOX.h.repeat(w - 2) + "╯", bStyle);
       y++;
     }
 
     return y + 1;
+  }
+
+  drawThinkingBlock(y: number, width: number, content: string, isCollapsed: boolean, timestamp: string): number {
+    const cols = this.screen.getCols();
+    const w = Math.min(width - 4, cols - 6);
+    const canvasStyle = this.style({ bg: this.theme.canvas });
+    const headerStyle = this.style({ fg: this.theme.muted, dim: true });
+    const lineStyle = this.style({ fg: this.theme.hairline });
+    const contentStyle = this.style({ fg: this.theme.muted, italic: true });
+
+    if (y >= this.screen.getRows() - 2) return y;
+    this.screen.clearLine(y, canvasStyle);
+
+    const chevron = isCollapsed ? "▸" : "▾";
+    const headerText = `${chevron} Reasoning  ${timestamp}`;
+    this.screen.writeString(2, y, headerText, headerStyle);
+    y++;
+
+    if (!isCollapsed && content) {
+      const lines = wordWrap(content, w - 6);
+      for (const line of lines) {
+        if (y >= this.screen.getRows() - 2) break;
+        this.screen.clearLine(y, canvasStyle);
+        this.screen.writeString(2, y, "│", lineStyle);
+        this.screen.writeString(4, y, line, contentStyle);
+        y++;
+      }
+    }
+    return y;
   }
 
   drawInputArea(y: number, width: number, text: string, cursorPos: number, vimMode?: string): number {

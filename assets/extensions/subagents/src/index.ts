@@ -14,7 +14,7 @@ import { store as storeMemory, search as searchMemory, remove as deleteMemory, s
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
-import { TuiManager } from "./tui/tui-manager";
+import { TuiManager, TuiApp } from "./tui";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
 import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate as fileConsolidate, getMemoryStats } from "./memory-file-store";
@@ -1763,6 +1763,7 @@ function teardownWidget(ctx: ExtensionContext) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function (pi: ExtensionAPI) {
+  let globalTuiApp: TuiApp | null = null;
 
   // ── MCP Server Client Integration ─────────────────────────────────────────
   const PI_DIR_GLOBAL = path.join(os.homedir(), ".pi", "agent");
@@ -3150,10 +3151,38 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help." +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help, /tui. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
+  // Command: Toggle fullscreen TUI mode
+  pi.registerCommand("tui", {
+    description: "Toggle fullscreen TUI mode with animated rendering (/tui fullscreen, /tui default)",
+    handler(args, ctx) {
+      const mode = (args as string || "").trim().toLowerCase();
+      if (mode === "fullscreen" || mode === "fs") {
+        if (globalTuiApp?.isActive) {
+          ctx.ui.notify("Fullscreen TUI already active", "info");
+          return;
+        }
+        globalTuiApp = new TuiApp(ctx, pi);
+        globalTuiApp.start();
+        ctx.ui.notify("Fullscreen TUI activated. Run /tui default to switch back.", "info");
+      } else {
+        if (globalTuiApp?.isActive) {
+          globalTuiApp.stop();
+          globalTuiApp = null;
+          ctx.ui.notify("Switched to default TUI", "info");
+        } else {
+          ctx.ui.notify("Usage: /tui fullscreen — switch to animated fullscreen TUI. /tui default — switch back.", "info");
+        }
+      }
     },
     execute(args, ctx) {
       return (this as any).handler(args, ctx);
@@ -3246,6 +3275,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         // }
       });
     }
+    ctx.ui.notify("Fullscreen TUI available: /tui fullscreen", "info");
   });
 
   // Event Hook: Inject task memory into system prompt
