@@ -1,0 +1,90 @@
+import { execSync } from "node:child_process";
+import path from "node:path";
+import fs from "node:fs";
+
+export type PipelineStageName =
+  | "pr_created" | "build_started" | "unit_tests" | "staging_deploy"
+  | "smoke_tests" | "prod_deploy" | "completed" | "failed" | "rolled_back";
+
+export interface PipelineStage {
+  name: PipelineStageName;
+  status: "pending" | "running" | "passed" | "failed";
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface DeploymentState {
+  id: string;
+  prUrl?: string;
+  branch: string;
+  target: string;
+  stages: PipelineStage[];
+  currentStage: number;
+  rollbackSha?: string;
+  stableSha?: string;
+  createdAt: number;
+}
+
+const deployments = new Map<string, DeploymentState>();
+
+export function createDeployment(branch: string, target: string, stableSha?: string): DeploymentState {
+  const id = `deploy_${Date.now()}`;
+  const stageNames: PipelineStageName[] = ["pr_created", "build_started", "unit_tests", "staging_deploy", "smoke_tests", "prod_deploy"];
+  const state: DeploymentState = {
+    id, branch, target,
+    stages: stageNames.map(n => ({ name: n, status: "pending" as const })),
+    currentStage: 0,
+    rollbackSha: stableSha,
+    createdAt: Date.now(),
+  };
+  deployments.set(id, state);
+  return state;
+}
+
+export function advanceStage(id: string, status: "passed" | "failed"): DeploymentState | null {
+  const state = deployments.get(id);
+  if (!state) return null;
+  const stage = state.stages[state.currentStage];
+  if (!stage) return null;
+  stage.status = status;
+  stage.completedAt = Date.now();
+  if (status === "failed") return state;
+  state.currentStage++;
+  if (state.currentStage < state.stages.length) {
+    state.stages[state.currentStage].status = "running";
+    state.stages[state.currentStage].startedAt = Date.now();
+  }
+  return state;
+}
+
+export function getDeployment(id: string): DeploymentState | null {
+  return deployments.get(id) || null;
+}
+
+export function listDeployments(): DeploymentState[] {
+  return Array.from(deployments.values());
+}
+
+export function executeRollback(deploymentId: string, workDir: string): { ok: boolean; output: string } {
+  const state = deployments.get(deploymentId);
+  if (!state || !state.rollbackSha) return { ok: false, output: "No rollback SHA available" };
+  try {
+    const output = execSync(`git stash && git checkout ${state.rollbackSha}`, {
+      cwd: workDir, encoding: "utf8", timeout: 30000,
+    });
+    state.stages.forEach(s => { if (s.status === "running") s.status = "pending"; });
+    return { ok: true, output: output.trim() };
+  } catch (e: any) {
+    return { ok: false, output: e.message || String(e) };
+  }
+}
+
+export function runVerificationScript(scriptPath: string): { passed: boolean; output: string } {
+  if (!fs.existsSync(scriptPath)) return { passed: false, output: `Script not found: ${scriptPath}` };
+  try {
+    const output = execSync(`bash ${scriptPath}`, { encoding: "utf8", timeout: 60000 });
+    return { passed: true, output: output.trim() };
+  } catch (e: any) {
+    return { passed: false, output: e.message || String(e) };
+  }
+}

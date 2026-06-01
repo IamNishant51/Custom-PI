@@ -87,6 +87,55 @@ function initializeSchema(): void {
       last_updated INTEGER,
       source_session TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS failure_triplets (
+      id TEXT PRIMARY KEY,
+      component_id TEXT NOT NULL,
+      component_label TEXT NOT NULL,
+      error_code TEXT NOT NULL,
+      error_message TEXT,
+      severity TEXT DEFAULT 'medium',
+      source TEXT DEFAULT 'unknown',
+      raw_log TEXT,
+      created_at INTEGER,
+      acknowledged INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS incidents (
+      id TEXT PRIMARY KEY,
+      summary TEXT NOT NULL,
+      component TEXT,
+      error_code TEXT,
+      count INTEGER DEFAULT 1,
+      first_seen INTEGER,
+      last_seen INTEGER,
+      severity TEXT DEFAULT 'medium',
+      status TEXT DEFAULT 'open',
+      triage_task_id TEXT,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS service_health (
+      service_name TEXT PRIMARY KEY,
+      endpoint TEXT,
+      status TEXT DEFAULT 'unknown',
+      latency_ms REAL DEFAULT 0,
+      jitter_ms REAL DEFAULT 0,
+      last_ok INTEGER,
+      last_fail INTEGER,
+      consecutive_failures INTEGER DEFAULT 0,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      service TEXT PRIMARY KEY,
+      remaining INTEGER DEFAULT 60,
+      limit_total INTEGER DEFAULT 60,
+      reset_at INTEGER,
+      breached INTEGER DEFAULT 0,
+      backoff_delay_ms REAL DEFAULT 1000,
+      last_checked INTEGER
+    );
   `);
 
   // Triggers to keep FTS index in sync
@@ -559,4 +608,134 @@ export function getLatestCheckpoint(): Checkpoint | null {
     }
   }
   return latest;
+}
+
+// ── Failure Triplets & Incidents ────────────────────────────────────────────
+
+export interface FailureTripletRecord {
+  id: string;
+  componentId: string;
+  componentLabel: string;
+  errorCode: string;
+  errorMessage?: string;
+  severity: string;
+  source: string;
+  rawLog?: string;
+  createdAt: number;
+  acknowledged: number;
+}
+
+export function insertFailureTriplet(record: FailureTripletRecord): void {
+  const d = openDb();
+  d.prepare(`
+    INSERT INTO failure_triplets (id, component_id, component_label, error_code, error_message, severity, source, raw_log, created_at, acknowledged)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(record.id, record.componentId, record.componentLabel, record.errorCode, record.errorMessage || "", record.severity, record.source, record.rawLog || "", record.createdAt, record.acknowledged);
+}
+
+export function queryFailureTriplets(filter: { severity?: string; component?: string; limit?: number }): FailureTripletRecord[] {
+  const d = openDb();
+  let sql = "SELECT id, component_id as componentId, component_label as componentLabel, error_code as errorCode, error_message as errorMessage, severity, source, raw_log as rawLog, created_at as createdAt, acknowledged FROM failure_triplets WHERE 1=1";
+  const params: any[] = [];
+  if (filter.severity) { sql += " AND severity = ?"; params.push(filter.severity); }
+  if (filter.component) { sql += " AND component_id = ?"; params.push(filter.component); }
+  sql += " ORDER BY created_at DESC LIMIT ?";
+  params.push(filter.limit || 50);
+  return d.prepare(sql).all(...params) as FailureTripletRecord[];
+}
+
+export function insertIncident(record: {
+  id: string; summary: string; component?: string; errorCode?: string;
+  severity?: string; triageTaskId?: string;
+}): void {
+  const d = openDb();
+  const now = Date.now();
+  d.prepare(`
+    INSERT INTO incidents (id, summary, component, error_code, count, first_seen, last_seen, severity, status, triage_task_id, created_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?, ?, 'open', ?, ?)
+    ON CONFLICT(id) DO UPDATE SET count = count + 1, last_seen = ?, severity = ?
+  `).run(record.id, record.summary, record.component || "", record.errorCode || "", now, now, record.severity || "medium", record.triageTaskId || "", now, now, record.severity || "medium");
+}
+
+export function queryOpenIncidents(): any[] {
+  const d = openDb();
+  return d.prepare("SELECT * FROM incidents WHERE status = 'open' ORDER BY last_seen DESC").all();
+}
+
+// ── Service Health ──────────────────────────────────────────────────────────
+
+export interface ServiceHealthRecord {
+  serviceName: string;
+  endpoint: string;
+  status: string;
+  latencyMs: number;
+  jitterMs: number;
+  lastOk: number;
+  lastFail: number;
+  consecutiveFailures: number;
+  updatedAt: number;
+}
+
+export function upsertServiceHealth(record: ServiceHealthRecord): void {
+  const d = openDb();
+  d.prepare(`
+    INSERT INTO service_health (service_name, endpoint, status, latency_ms, jitter_ms, last_ok, last_fail, consecutive_failures, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(service_name) DO UPDATE SET
+      status = ?, endpoint = ?, latency_ms = ?, jitter_ms = ?,
+      last_ok = ?, last_fail = ?, consecutive_failures = ?, updated_at = ?
+  `).run(
+    record.serviceName, record.endpoint, record.status, record.latencyMs, record.jitterMs,
+    record.lastOk, record.lastFail, record.consecutiveFailures, record.updatedAt,
+    record.status, record.endpoint, record.latencyMs, record.jitterMs,
+    record.lastOk, record.lastFail, record.consecutiveFailures, record.updatedAt
+  );
+}
+
+export function getServiceHealth(name: string): ServiceHealthRecord | null {
+  const d = openDb();
+  return d.prepare("SELECT service_name as serviceName, endpoint, status, latency_ms as latencyMs, jitter_ms as jitterMs, last_ok as lastOk, last_fail as lastFail, consecutive_failures as consecutiveFailures, updated_at as updatedAt FROM service_health WHERE service_name = ?").get(name) as any || null;
+}
+
+export function getAllServiceHealth(): ServiceHealthRecord[] {
+  const d = openDb();
+  return d.prepare("SELECT service_name as serviceName, endpoint, status, latency_ms as latencyMs, jitter_ms as jitterMs, last_ok as lastOk, last_fail as lastFail, consecutive_failures as consecutiveFailures, updated_at as updatedAt FROM service_health ORDER BY status").all() as ServiceHealthRecord[];
+}
+
+// ── Rate Limits ─────────────────────────────────────────────────────────────
+
+export interface RateLimitRecord {
+  service: string;
+  remaining: number;
+  limitTotal: number;
+  resetAt: number;
+  breached: number;
+  backoffDelayMs: number;
+  lastChecked: number;
+}
+
+export function upsertRateLimit(record: RateLimitRecord): void {
+  const d = openDb();
+  d.prepare(`
+    INSERT INTO rate_limits (service, remaining, limit_total, reset_at, breached, backoff_delay_ms, last_checked)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(service) DO UPDATE SET
+      remaining = ?, limit_total = ?, reset_at = ?, breached = ?,
+      backoff_delay_ms = ?, last_checked = ?
+  `).run(
+    record.service, record.remaining, record.limitTotal, record.resetAt,
+    record.breached ? 1 : 0, record.backoffDelayMs, record.lastChecked,
+    record.remaining, record.limitTotal, record.resetAt, record.breached ? 1 : 0,
+    record.backoffDelayMs, record.lastChecked
+  );
+}
+
+export function getRateLimit(service: string): RateLimitRecord | null {
+  const d = openDb();
+  return d.prepare("SELECT service, remaining, limit_total as limitTotal, reset_at as resetAt, breached, backoff_delay_ms as backoffDelayMs, last_checked as lastChecked FROM rate_limits WHERE service = ?").get(service) as any || null;
+}
+
+export function getAllBreachedRateLimits(): RateLimitRecord[] {
+  const d = openDb();
+  return d.prepare("SELECT service, remaining, limit_total as limitTotal, reset_at as resetAt, breached, backoff_delay_ms as backoffDelayMs, last_checked as lastChecked FROM rate_limits WHERE breached = 1").all() as RateLimitRecord[];
 }

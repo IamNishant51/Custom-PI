@@ -1,0 +1,66 @@
+import { useState, useEffect } from "react";
+
+export default function HealthPanel() {
+  const [services, setServices] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<any>(null);
+  const [rateLimits, setRateLimits] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("/api/health/services").then(r => r.json()).then(d => setServices(d.services || [])).catch(() => {});
+    fetch("/api/system/resources").then(r => r.json()).then(setMetrics).catch(() => {});
+    fetch("/api/system/rate-limits").then(r => r.json()).then(d => setRateLimits(d.limits || [])).catch(() => {});
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <div className="stat-card">
+          <div className="stat-label">CPU</div>
+          <div className="stat-value" style={{ fontSize: 20 }}>{metrics?.cpu?.percent ?? "—"}%</div>
+          <div style={{ fontSize: 11, color: "var(--mute)", marginTop: 4 }}>{metrics?.cpu?.cores ?? "—"} cores</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Memory</div>
+          <div className="stat-value" style={{ fontSize: 20 }}>{metrics?.memory?.percent ?? "—"}%</div>
+          <div style={{ fontSize: 11, color: "var(--mute)", marginTop: 4 }}>{metrics?.memory?.used ?? "—"}/{metrics?.memory?.total ?? "—"} MB</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Rate Limited</div>
+          <div className="stat-value" style={{ fontSize: 20, color: rateLimits.some(r => r.breached) ? "var(--danger)" : "var(--success)" }}>
+            {rateLimits.filter(r => r.breached).length}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mute)", marginTop: 4 }}>{rateLimits.length} services tracked</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">External Service Health</div>
+        {services.length === 0 ? (
+          <div style={{ padding: 20, textAlign: "center", color: "var(--mute)" }}>No services monitored yet.</div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr><th>Service</th><th>Status</th><th>Latency</th><th>Jitter</th><th>Consecutive Failures</th></tr>
+            </thead>
+            <tbody>
+              {services.map((s: any) => (
+                <tr key={s.service_name}>
+                  <td style={{ fontWeight: 500 }}>{s.service_name}</td>
+                  <td>
+                    <span className={`badge ${s.status === "healthy" ? "badge-green" : "badge-gray"}`}
+                      style={{ color: s.status === "healthy" ? "var(--success)" : "var(--danger)" }}>
+                      {s.status}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{(s.latency_ms || 0).toFixed(0)}ms</td>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{(s.jitter_ms || 0).toFixed(0)}ms</td>
+                  <td>{s.consecutive_failures || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

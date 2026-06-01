@@ -5010,6 +5010,162 @@ async function main() {
     }
   });
 
+  // ── Webhook Endpoints ──────────────────────────────────────────────────
+  app.post("/api/webhooks/:source", async (req) => {
+    try {
+      const source = req.params.source;
+      const { normalizeEvent } = await import("./listener.js");
+      const event = normalizeEvent(source, req.body);
+      // Store webhook event to JSON file for processing
+      const webhookDir = path.join(PI_DIR, "webhooks");
+      fs.mkdirSync(webhookDir, { recursive: true });
+      const filePath = path.join(webhookDir, `event_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.json`);
+      fs.writeFileSync(filePath, JSON.stringify(event));
+      return { ok: true, eventId: path.basename(filePath, ".json") };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
+  app.get("/api/webhooks/events", async () => {
+    const webhookDir = path.join(PI_DIR, "webhooks");
+    try {
+      if (!fs.existsSync(webhookDir)) return { events: [] };
+      const files = fs.readdirSync(webhookDir).sort().reverse().slice(0, 50);
+      const events = files.map(f => {
+        try { return JSON.parse(fs.readFileSync(path.join(webhookDir, f), "utf8")); }
+        catch { return null; }
+      }).filter(Boolean);
+      return { events };
+    } catch { return { events: [] }; }
+  });
+
+  // ── Service Health API ─────────────────────────────────────────────────
+  app.get("/api/health/services", async () => {
+    try {
+      const Database = _require("better-sqlite3");
+      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const rows = db.prepare("SELECT service_name, endpoint, status, latency_ms, jitter_ms, consecutive_failures, updated_at FROM service_health ORDER BY status").all();
+      db.close();
+      return { services: rows };
+    } catch { return { services: [] }; }
+  });
+
+  app.get("/api/health/endpoints", async () => {
+    // Return configured endpoints that the health monitor checks
+    const endpoints = [
+      { name: "llm-anthropic", url: "https://api.anthropic.com/v1/health", method: "GET" },
+      { name: "llm-openai", url: "https://api.openai.com/v1/health", method: "GET" },
+      { name: "github-api", url: "https://api.github.com", method: "GET" },
+    ];
+    return { endpoints };
+  });
+
+  // ── Pipeline API ───────────────────────────────────────────────────────
+  const PIPELINE_FILE = path.join(PI_DIR, "pipeline-state.json");
+  function readPipeline() {
+    try { return JSON.parse(fs.readFileSync(PIPELINE_FILE, "utf8")); }
+    catch { return { deployments: [], current: null }; }
+  }
+  function writePipeline(data) {
+    fs.mkdirSync(path.dirname(PIPELINE_FILE), { recursive: true });
+    fs.writeFileSync(PIPELINE_FILE, JSON.stringify(data, null, 2));
+  }
+
+  app.post("/api/pipeline/deploy", async (req) => {
+    try {
+      const { branch, target, stableSha } = req.body || {};
+      const data = readPipeline();
+      const id = `deploy_${Date.now()}`;
+      const deploy = {
+        id, branch: branch || "main", target: target || "staging",
+        stages: ["pr_created","build_started","unit_tests","staging_deploy","smoke_tests","prod_deploy"],
+        currentStage: 0, stageStatus: "running",
+        rollbackSha: stableSha || req.body?.rollbackSha,
+        createdAt: Date.now(),
+      };
+      data.deployments = [deploy, ...(data.deployments || [])].slice(0, 20);
+      data.current = deploy;
+      writePipeline(data);
+      return { deployment: deploy };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  app.post("/api/pipeline/advance", async (req) => {
+    try {
+      const { id, status } = req.body || {};
+      const data = readPipeline();
+      const dep = (data.deployments || []).find(d => d.id === id);
+      if (!dep) return { error: "Deployment not found" };
+      dep.stageStatus = status || "passed";
+      dep.currentStage = (dep.currentStage || 0) + 1;
+      if (dep.currentStage >= dep.stages.length) dep.stageStatus = "completed";
+      writePipeline(data);
+      return { deployment: dep };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  app.get("/api/pipeline/status", async () => readPipeline());
+
+  app.post("/api/pipeline/rollback", async (req) => {
+    try {
+      const { id } = req.body || {};
+      const data = readPipeline();
+      const dep = (data.deployments || []).find(d => d.id === id);
+      if (!dep) return { error: "Deployment not found" };
+      dep.stageStatus = "rolled_back";
+      dep.currentStage = 0;
+      writePipeline(data);
+      return { deployment: dep, message: `Rolled back to ${dep.rollbackSha || "previous stable"}` };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  // ── Resource / Host Metrics API ────────────────────────────────────────
+  app.get("/api/system/resources", async () => {
+    try {
+      const fs2 = await import("node:fs");
+      const os2 = await import("node:os");
+      const cpus = os2.cpus().length;
+      let cpuPercent = 0;
+      let memInfo = { total: 0, used: 0, percent: 0 };
+      try {
+        if (fs2.existsSync("/proc/stat")) {
+          const stat = fs2.readFileSync("/proc/stat", "utf8");
+          const cpuLine = stat.split("\n").find(l => l.startsWith("cpu "));
+          if (cpuLine) {
+            const parts = cpuLine.trim().split(/\s+/).slice(1).map(Number);
+            const total = parts.reduce((a, b) => a + b, 0);
+            const idle = parts[3] || 0;
+            cpuPercent = total > 0 ? Math.round((1 - idle / total) * 100) : 0;
+          }
+        }
+      } catch {}
+      try {
+        if (fs2.existsSync("/proc/meminfo")) {
+          const text = fs2.readFileSync("/proc/meminfo", "utf8");
+          const tMatch = text.match(/MemTotal:\s+(\d+)/);
+          const aMatch = text.match(/MemAvailable:\s+(\d+)/);
+          if (tMatch) {
+            const totalKb = parseInt(tMatch[1], 10);
+            const availKb = aMatch ? parseInt(aMatch[1], 10) : totalKb;
+            memInfo = { total: Math.round(totalKb / 1024), used: Math.round((totalKb - availKb) / 1024), percent: Math.round((totalKb - availKb) / totalKb * 100) };
+          }
+        }
+      } catch {}
+      return { cpu: { percent: cpuPercent, cores: cpus }, memory: memInfo };
+    } catch { return { cpu: { percent: 0, cores: 0 }, memory: { total: 0, used: 0, percent: 0 } }; }
+  });
+
+  app.get("/api/system/rate-limits", async () => {
+    try {
+      const Database = _require("better-sqlite3");
+      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const rows = db.prepare("SELECT * FROM rate_limits ORDER BY breached DESC, last_checked DESC").all();
+      db.close();
+      return { limits: rows };
+    } catch { return { limits: [] }; }
+  });
+
   // ── WebSocket ──────────────────────────────────────────────────────────
 
   app.get("/ws", { websocket: true }, (socket, req) => {

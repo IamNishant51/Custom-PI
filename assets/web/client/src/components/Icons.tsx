@@ -2,7 +2,7 @@ import {
   MessageSquare, LayoutDashboard, KeyRound, BarChart3,
   Brain, FileText, Users, Puzzle, Settings, Menu,
   Zap, ArrowRight, Send, Play, Check, X, Plus, Trash2,
-  Eye, RefreshCw, Share2, type LucideIcon,
+  Eye, RefreshCw, Share2, GitBranch, Activity, type LucideIcon,
 } from "lucide-react";
 
 interface IconProps {
@@ -156,3 +156,5 @@ export function AsciiPlus() { return <Plus size={14} />; }
 export function AsciiCheck() { return <Check size={14} />; }
 export function AsciiX() { return <X size={14} />; }
 export function AsciiPlay() { return <Play size={14} />; }
+export function AsciiGitBranch() { return <GitBranch size={14} />; }
+export function AsciiActivity() { return <Activity size={14} />; }
