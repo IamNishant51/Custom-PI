@@ -165,6 +165,12 @@ const cpuModel = os.cpus()[0]?.model || 'Unknown';
 const nodeVersion = process.version;
 const platform = process.platform + '-' + os.arch();
 
+const termWidth = process.stdout.columns || 120;
+const topPad = 3;
+const leftPad = Math.max(0, Math.floor((termWidth - 74) / 2));
+const pad = ' '.repeat(leftPad);
+const topPadding = '\n'.repeat(topPad);
+
 const banner = [
   "\x1b[38;5;198m  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗\x1b[0m",
   "\x1b[38;5;201m ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║\x1b[0m",
@@ -172,9 +178,9 @@ const banner = [
   "\x1b[38;5;57m ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║\x1b[0m",
   "\x1b[38;5;51m ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║\x1b[0m",
   "\x1b[38;5;45m  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝\x1b[0m",
-].join("\n");
+].map(line => pad + line).join("\n");
 
-console.log(banner);
+console.log(topPadding + banner);
 
 const innerWidth = 72;
 function printBoxLine(content) {
@@ -182,18 +188,18 @@ function printBoxLine(content) {
   const visibleLen = stripAnsi(content).length;
   const paddingNeeded = innerWidth - visibleLen;
   const padding = ' '.repeat(Math.max(0, paddingNeeded));
-  console.log(`\x1b[38;5;135m│\x1b[0m${content}${padding}\x1b[38;5;135m│\x1b[0m`);
+  console.log(pad + `\x1b[38;5;135m│\x1b[0m${content}${padding}\x1b[38;5;135m│\x1b[0m`);
 }
 
-console.log("\x1b[38;5;135m┌────────────────────────────────────────────────────────────────────────┐\x1b[0m");
+console.log(pad + "\x1b[38;5;135m┌────────────────────────────────────────────────────────────────────────┐\x1b[0m");
 printBoxLine(`  \x1b[38;5;51mCUSTOM-PI ADVANCED DEVELOPER CONSOLE\x1b[0m \x1b[38;5;121mv${customPiVersion}\x1b[0m`);
-console.log(`\x1b[38;5;135m├────────────────────────────────────────────────────────────────────────┤\x1b[0m`);
+console.log(pad + `\x1b[38;5;135m├────────────────────────────────────────────────────────────────────────┤\x1b[0m`);
 printBoxLine(`  \x1b[38;5;226mEngine:\x1b[0m custom-pi core      \x1b[38;5;226mNode.js:\x1b[0m ${nodeVersion.padEnd(8)}     \x1b[38;5;226mPlatform:\x1b[0m ${platform}`);
 printBoxLine(`  \x1b[38;5;226mMemory:\x1b[0m ~/.pi/agent/memory/semantic.json  \x1b[38;5;226mTheme:\x1b[0m custom-pi-quantum`);
 printBoxLine(`  \x1b[38;5;226mSwarm Status:\x1b[0m online (builder/researcher/reviewer)`);
 printBoxLine(`  \x1b[38;5;226mHardware:\x1b[0m ${cpuModel.slice(0, 56)}`);
-console.log("\x1b[38;5;135m└────────────────────────────────────────────────────────────────────────┘\x1b[0m\n");
-console.log('\x1b[38;5;121m⚡ Starting custom-pi core console...\x1b[0m\n');
+console.log(pad + "\x1b[38;5;135m└────────────────────────────────────────────────────────────────────────┘\x1b[0m\n");
+console.log(pad + '\x1b[38;5;121m⚡ Starting custom-pi core console...\x1b[0m\n');
 
 // Spawn the globally installed 'pi' binary, forwarding args and pipes without deprecation shell warning on Unix
 const piProcess = spawn('pi', args, {
