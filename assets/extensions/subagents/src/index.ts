@@ -2036,7 +2036,7 @@ function patchAssistantMessage(proto: any) {
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
     // Branded prefix for assistant: ✦ C-P (Custom-PI)
-    const assistantLabel = "C-P";
+    const assistantLabel = "C-PI";
     const prefix = "\u2726 "; // ✦
 
     const result: string[] = [];
