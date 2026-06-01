@@ -1,7 +1,7 @@
 import { ScreenRenderer } from "./screen-renderer";
 import { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
 import { VimInputHandler } from "./input/vim-input";
-import { THEME, type PulseConfig } from "./types";
+import { THEME, SPACING, type PulseConfig, type ConversationHeader, type ScrollIndicator } from "./types";
 import { PulseController } from "./app/pulse-controller";
 
 export interface TuiManagerOptions {
@@ -95,6 +95,20 @@ export class TuiManager {
         this.renderer.render();
       });
     }
+  }
+
+  // ── Layout system ────────────────────────────────────────────────────────
+
+  updateLayout(): void {
+    this.renderer.updateLayout();
+  }
+
+  drawConversationHeader(y: number, opts: ConversationHeader): number {
+    return this.renderer.drawConversationHeader(y, opts);
+  }
+
+  drawScrollIndicator(y: number, opts: ScrollIndicator): number {
+    return this.renderer.drawScrollIndicator(y, opts);
   }
 
   // High-level layout helpers

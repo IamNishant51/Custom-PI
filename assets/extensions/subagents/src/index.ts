@@ -16,7 +16,7 @@ import { store as storeMemory, search as searchMemory, remove as deleteMemory, s
 import { buildMemoryContextBlock } from "./memory-retrieval";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
-import { TuiManager, TuiApp } from "./tui";
+import { TuiManager, TuiApp, SPACING as TUI_SPACING } from "./tui";
 import { logger } from "./logger";
 import { loadSoul, ensureSoulFile, getSoulPath } from "./soul-loader";
 import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate as fileConsolidate, getMemoryStats } from "./memory-file-store";
@@ -1771,119 +1771,277 @@ function locateTheme() {
 
 theme = locateTheme();
 
-// Hook Container.prototype.render to capture chatContainer rendering details
-const originalContainerRender = Container.prototype.render;
-Container.prototype.render = function (this: any, width: number) {
-  const isChatContainer = this.children && this.children.some((child: any) => 
-    child instanceof UserMessageComponent || child instanceof AssistantMessageComponent
-  );
-  
-  if (isChatContainer) {
-    renderedComponents = [];
-    const lines: string[] = [];
-    for (const child of this.children) {
-      const startLine = lines.length;
-      const childLines = child.render(width);
-      const endLine = startLine + childLines.length;
-      
-      if (child instanceof UserMessageComponent || child instanceof AssistantMessageComponent) {
-        renderedComponents.push({
-          component: child,
-          startLine,
-          endLine,
-        });
-      }
-      
-      for (const line of childLines) {
-        lines.push(line);
-      }
-    }
-    return lines;
-  }
-  
-  return originalContainerRender.call(this, width);
-};
-
-// Hook TUI.prototype.render to capture the starting line of chatContainer in the layout
-const originalTuiRender = TUI.prototype.render;
-TUI.prototype.render = function (this: any, width: number) {
-  let offset = 0;
-  for (const child of this.children) {
-    const isChat = child.children && child.children.some((c: any) => 
-      c instanceof UserMessageComponent || c.children?.some((cc: any) => cc instanceof UserMessageComponent)
-    );
-    if (isChat) {
-      chatContainerStartLine = offset;
-      break;
-    }
-    const childLines = child.render(width);
-    offset += childLines.length;
-  }
-  return originalTuiRender.call(this, width);
-};
+// Helper functions to dynamically apply prototype patches on the live ESM TUI and components
+let livePatchesApplied = false;
+let userMessagePatched = false;
+let toolExecutionPatched = false;
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
-// Hook UserMessageComponent.prototype.render for right-aligned shrink-to-fit bubble with thin border
-UserMessageComponent.prototype.render = function (this: any, width: number) {
-  // Max width of the user bubble is 75% of terminal width
-  const maxBubbleWidth = Math.max(20, Math.min(width - 6, Math.max(40, Math.floor(width * 0.75))));
+function patchUserMessage(proto: any) {
+  if (userMessagePatched) return;
+  userMessagePatched = true;
+  debugLog("PATCHING USER MESSAGE PROTOTYPE");
 
-  const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
-  if (!markdownComponent) {
-    return [];
-  }
+  proto.render = function (this: any, width: number) {
+    // Max width of the user bubble is 75% of terminal width
+    const maxBubbleWidth = Math.max(20, Math.min(width - 6, Math.max(40, Math.floor(width * 0.75))));
 
-  // Render markdown content to determine text line wrapping
-  const markdownContentWidth = Math.max(1, maxBubbleWidth - 4); // 4 columns for border: `│ ` and ` │`
-  const mdLines = markdownComponent.render(markdownContentWidth);
-
-  // Find the maximum visible width across all wrapped lines
-  let maxLineW = 1;
-  for (const line of mdLines) {
-    const w = visibleWidth(line);
-    if (w > maxLineW) {
-      maxLineW = w;
+    const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
+    if (!markdownComponent) {
+      return [];
     }
-  }
 
-  // Draw thin border lines using the theme colors (accent for borders, userMessageText for text)
-  const borderStyle = (str: string) => {
-    return (theme && typeof theme.fg === "function") ? theme.fg("accent", str) : `\x1b[36m${str}\x1b[0m`;
+    // Render markdown content to determine text line wrapping
+    const markdownContentWidth = Math.max(1, maxBubbleWidth - 4); // 4 columns for border: `│ ` and ` │`
+    const mdLines = markdownComponent.render(markdownContentWidth);
+
+    // Find the maximum visible width across all wrapped lines
+    let maxLineW = 1;
+    for (const line of mdLines) {
+      const w = visibleWidth(line);
+      if (w > maxLineW) {
+        maxLineW = w;
+      }
+    }
+
+    // Draw thin border lines using the theme colors (accent for borders, userMessageText for text)
+    const borderStyle = (str: string) => {
+      return (theme && typeof theme.fg === "function") ? theme.fg("accent", str) : `\x1b[36m${str}\x1b[0m`;
+    };
+    const textStyle = (str: string) => {
+      return (theme && typeof theme.fg === "function") ? theme.fg("userMessageText", str) : str;
+    };
+
+    const topBorder = borderStyle("╭" + "─".repeat(maxLineW + 2) + "╮");
+    const bottomBorder = borderStyle("╰" + "─".repeat(maxLineW + 2) + "╯");
+
+    const bubbleLines: string[] = [];
+    bubbleLines.push(topBorder);
+
+    for (const line of mdLines) {
+      const w = visibleWidth(line);
+      const pad = " ".repeat(Math.max(0, maxLineW - w));
+      const content = textStyle(line) + pad;
+      bubbleLines.push(borderStyle("│ ") + content + borderStyle(" │"));
+    }
+
+    bubbleLines.push(bottomBorder);
+
+    // LEFT-align by adding a small left padding/margin (e.g. 2 spaces) to align with other chat messages
+    const leftPad = "  ";
+    const lines = bubbleLines.map((line: string) => leftPad + line);
+
+    // Apply OSC 133 sequences for shell integration
+    lines[0] = OSC133_ZONE_START + lines[0];
+    lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
+
+    return lines;
   };
-  const textStyle = (str: string) => {
-    return (theme && typeof theme.fg === "function") ? theme.fg("userMessageText", str) : str;
+}
+
+function patchToolExecution(proto: any) {
+  if (toolExecutionPatched) return;
+  toolExecutionPatched = true;
+  debugLog("PATCHING TOOL EXECUTION PROTOTYPE");
+
+  // Neutralize solid backgrounds in updateDisplay
+  const originalUpdateDisplay = proto.updateDisplay;
+  proto.updateDisplay = function (this: any) {
+    originalUpdateDisplay.call(this);
+    const noopBgFn = (text: string) => text;
+    if (this.contentBox && typeof this.contentBox.setBgFn === "function") {
+      this.contentBox.setBgFn(noopBgFn);
+    }
+    if (this.contentText && typeof this.contentText.setCustomBgFn === "function") {
+      this.contentText.setCustomBgFn(noopBgFn);
+    }
   };
 
-  const topBorder = borderStyle("╭" + "─".repeat(maxLineW + 2) + "╮");
-  const bottomBorder = borderStyle("╰" + "─".repeat(maxLineW + 2) + "╯");
+  // Add interesting bordered layout to render
+  const originalToolRender = proto.render;
+  proto.render = function (this: any, width: number) {
+    if (this.hideComponent) {
+      return [];
+    }
 
-  const bubbleLines: string[] = [];
-  bubbleLines.push(topBorder);
+    const maxLineW = Math.max(10, width - 6);
+    const rawLines = originalToolRender.call(this, maxLineW);
 
-  for (const line of mdLines) {
-    const w = visibleWidth(line);
-    const pad = " ".repeat(Math.max(0, maxLineW - w));
-    const content = textStyle(line) + pad;
-    bubbleLines.push(borderStyle("│ ") + content + borderStyle(" │"));
-  }
+    if (rawLines.length === 0) {
+      return [];
+    }
 
-  bubbleLines.push(bottomBorder);
+    let statusColorFn = (str: string) => str;
+    let statusSymbol = "⚙";
+    let statusLabel = "RUNNING";
 
-  // Right-align by adding leading spaces
-  const bubbleWidth = maxLineW + 4;
-  const padCount = Math.max(0, width - bubbleWidth);
-  const leftPad = " ".repeat(padCount);
-  const lines = bubbleLines.map((line: string) => leftPad + line);
+    if (theme && typeof theme.fg === "function") {
+      if (this.isPartial) {
+        statusColorFn = (str: string) => theme.fg("accent", str);
+        statusSymbol = "🔧";
+        statusLabel = "PENDING";
+      } else if (this.result?.isError) {
+        statusColorFn = (str: string) => theme.fg("error", str);
+        statusSymbol = "✗";
+        statusLabel = "FAILED";
+      } else {
+        statusColorFn = (str: string) => theme.fg("success", str);
+        statusSymbol = "✓";
+        statusLabel = "SUCCESS";
+      }
+    } else {
+      if (this.isPartial) {
+        statusColorFn = (str: string) => `\x1b[36m${str}\x1b[0m`;
+        statusSymbol = "🔧";
+        statusLabel = "PENDING";
+      } else if (this.result?.isError) {
+        statusColorFn = (str: string) => `\x1b[31m${str}\x1b[0m`;
+        statusSymbol = "✗";
+        statusLabel = "FAILED";
+      } else {
+        statusColorFn = (str: string) => `\x1b[32m${str}\x1b[0m`;
+        statusSymbol = "✓";
+        statusLabel = "SUCCESS";
+      }
+    }
 
-  // Apply OSC 133 sequences for shell integration
-  lines[0] = OSC133_ZONE_START + lines[0];
-  lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
+    const titleText = `${statusSymbol} ${this.toolName} (${statusLabel})`;
+    const titleW = visibleWidth(titleText);
+    const rightDashes = Math.max(2, maxLineW - titleW - 3);
+    const topBorder = statusColorFn("╭─ " + titleText + " " + "─".repeat(rightDashes) + "╮");
+    const bottomBorder = statusColorFn("╰" + "─".repeat(maxLineW + 2) + "╯");
 
-  return lines;
-};
+    const middleLines = rawLines.map((line: string) => {
+      const w = visibleWidth(line);
+      const pad = " ".repeat(Math.max(0, maxLineW - w));
+      return statusColorFn("│ ") + line + pad + statusColorFn(" │");
+    });
+
+    const finalLines = [topBorder, ...middleLines, bottomBorder];
+    return finalLines.map(line => "  " + line);
+  };
+}
+
+function applyLivePatches(tui: any, themeInstance: any) {
+  if (livePatchesApplied) return;
+  livePatchesApplied = true;
+  debugLog("APPLYING LIVE ESM PATCHES");
+
+  theme = themeInstance;
+
+  const TuiPrototype = Object.getPrototypeOf(tui);
+  const ContainerPrototype = Object.getPrototypeOf(TuiPrototype);
+
+  // Hook TUI.prototype.render
+  const originalTuiRender = TuiPrototype.render;
+  TuiPrototype.render = function (this: any, width: number) {
+    let offset = 0;
+    for (const child of this.children) {
+      if (!child) continue;
+      const isChat = child.children && child.children.some((c: any) => 
+        c.constructor?.name === "UserMessageComponent" || c.children?.some((cc: any) => cc.constructor?.name === "UserMessageComponent")
+      );
+      if (isChat) {
+        chatContainerStartLine = offset;
+        break;
+      }
+      const childLines = child.render(width);
+      offset += childLines.length;
+    }
+    return originalTuiRender.call(this, width);
+  };
+
+  // Hook TUI.prototype.start to enable mouse tracking
+  const originalTuiStart = TuiPrototype.start;
+  TuiPrototype.start = function (this: any) {
+    activeTuiInstance = this;
+    originalTuiStart.call(this);
+    process.stdout.write("\x1b[?1000h\x1b[?1006h");
+    
+    const originalEmit = process.stdin.emit;
+    (process.stdin as any)._originalEmit = originalEmit;
+    process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
+      if (event === "data" && Buffer.isBuffer(data)) {
+        const str = data.toString("utf8");
+        debugLog(`STDIN DATA: ${JSON.stringify(str)}`);
+        const mouseMatch = str.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+        if (mouseMatch) {
+          const button = parseInt(mouseMatch[1], 10);
+          const col = parseInt(mouseMatch[2], 10);
+          const row = parseInt(mouseMatch[3], 10);
+          const isRelease = mouseMatch[4] === "m";
+          debugLog(`MATCHED MOUSE: button=${button}, col=${col}, row=${row}, isRelease=${isRelease}`);
+          if (!isRelease && button === 0) {
+            handleTerminalMouseClick(col, row);
+          }
+          return true;
+        }
+      }
+      return originalEmit.call(this, event, data, ...args);
+    };
+  };
+
+  // Hook TUI.prototype.stop to disable mouse tracking
+  const originalTuiStop = TuiPrototype.stop;
+  TuiPrototype.stop = function (this: any) {
+    process.stdout.write("\x1b[?1000l\x1b[?1006l");
+    if ((process.stdin as any)._originalEmit) {
+      process.stdin.emit = (process.stdin as any)._originalEmit;
+      delete (process.stdin as any)._originalEmit;
+    }
+    activeTuiInstance = null;
+    originalTuiStop.call(this);
+  };
+
+  // Hook Container.prototype.render to dynamically patch children prototype when they are encountered
+  const originalContainerRender = ContainerPrototype.render;
+  ContainerPrototype.render = function (this: any, width: number) {
+    if (this.children) {
+      for (const child of this.children) {
+        if (!child) continue;
+        const className = child.constructor?.name;
+        if (className === "UserMessageComponent") {
+          patchUserMessage(Object.getPrototypeOf(child));
+        } else if (className === "ToolExecutionComponent") {
+          patchToolExecution(Object.getPrototypeOf(child));
+        }
+      }
+    }
+
+    const isChatContainer = this.children && this.children.some((child: any) => 
+      child.constructor?.name === "UserMessageComponent" || child.constructor?.name === "AssistantMessageComponent"
+    );
+    
+    if (isChatContainer) {
+      renderedComponents = [];
+      const lines: string[] = [];
+      for (const child of this.children) {
+        if (!child) continue;
+        const startLine = lines.length;
+        const childLines = child.render(width);
+        const endLine = startLine + childLines.length;
+        
+        if (child.constructor?.name === "UserMessageComponent" || child.constructor?.name === "AssistantMessageComponent") {
+          renderedComponents.push({
+            component: child,
+            startLine,
+            endLine,
+          });
+        }
+        
+        for (const line of childLines) {
+          lines.push(line);
+        }
+      }
+      return lines;
+    }
+    
+    return originalContainerRender.call(this, width);
+  };
+}
 
 // Handle mouse clicks on the scrolling TUI messages
 function handleTerminalMouseClick(col: number, row: number) {
@@ -1900,7 +2058,7 @@ function handleTerminalMouseClick(col: number, row: number) {
   
   debugLog(`viewportTop=${viewportTop}, lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
   debugLog(`renderedComponents: ${JSON.stringify(renderedComponents.map(rc => ({
-    role: rc.component instanceof UserMessageComponent ? 'user' : 'assistant',
+    role: rc.component.constructor?.name === "UserMessageComponent" ? 'user' : 'assistant',
     start: chatContainerStartLine + rc.startLine,
     end: chatContainerStartLine + rc.endLine
   })))}`);
@@ -1916,11 +2074,11 @@ function handleTerminalMouseClick(col: number, row: number) {
     return;
   }
   
-  debugLog(`Clicked component role: ${clicked.component instanceof UserMessageComponent ? 'user' : 'assistant'}`);
+  debugLog(`Clicked component role: ${clicked.component.constructor?.name === "UserMessageComponent" ? 'user' : 'assistant'}`);
   
-  if (clicked.component instanceof UserMessageComponent) {
+  if (clicked.component.constructor?.name === "UserMessageComponent") {
     const idx = renderedComponents.indexOf(clicked);
-    const nextRc = renderedComponents.slice(idx + 1).find(rc => rc.component instanceof AssistantMessageComponent);
+    const nextRc = renderedComponents.slice(idx + 1).find(rc => rc.component.constructor?.name === "AssistantMessageComponent");
     if (nextRc) {
       const assistant = nextRc.component;
       debugLog(`Toggling reasoning for Assistant message, currently hidden=${assistant.hideThinkingBlock}`);
@@ -1929,61 +2087,13 @@ function handleTerminalMouseClick(col: number, row: number) {
     } else {
       debugLog(`No Assistant message found after clicked UserMessage`);
     }
-  } else if (clicked.component instanceof AssistantMessageComponent) {
+  } else if (clicked.component.constructor?.name === "AssistantMessageComponent") {
     const assistant = clicked.component;
     debugLog(`Toggling reasoning for clicked Assistant message, currently hidden=${assistant.hideThinkingBlock}`);
     assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
     activeTuiInstance.requestRender();
   }
 }
-
-// Hook TUI.prototype.start and stop to toggle mouse tracking and intercept stdin data events
-const originalTuiStart = TUI.prototype.start;
-TUI.prototype.start = function (this: any) {
-  activeTuiInstance = this;
-  originalTuiStart.call(this);
-  
-  // Enable mouse tracking (1000h = report clicks, 1006h = SGR coordinate format)
-  process.stdout.write("\x1b[?1000h\x1b[?1006h");
-  
-  // Intercept stdin events to capture and swallow mouse reports
-  const originalEmit = process.stdin.emit;
-  (process.stdin as any)._originalEmit = originalEmit;
-  process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
-    if (event === "data" && Buffer.isBuffer(data)) {
-      const str = data.toString("utf8");
-      debugLog(`STDIN DATA: ${JSON.stringify(str)}`);
-      const mouseMatch = str.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-      if (mouseMatch) {
-        const button = parseInt(mouseMatch[1], 10);
-        const col = parseInt(mouseMatch[2], 10);
-        const row = parseInt(mouseMatch[3], 10);
-        const isRelease = mouseMatch[4] === "m";
-        debugLog(`MATCHED MOUSE: button=${button}, col=${col}, row=${row}, isRelease=${isRelease}`);
-        if (!isRelease && button === 0) {
-          handleTerminalMouseClick(col, row);
-        }
-        return true; // swallow the mouse data chunk
-      }
-    }
-    return originalEmit.call(this, event, data, ...args);
-  };
-};
-
-const originalTuiStop = TUI.prototype.stop;
-TUI.prototype.stop = function (this: any) {
-  // Disable mouse tracking
-  process.stdout.write("\x1b[?1000l\x1b[?1006l");
-  
-  // Restore original stdin emit
-  if ((process.stdin as any)._originalEmit) {
-    process.stdin.emit = (process.stdin as any)._originalEmit;
-    delete (process.stdin as any)._originalEmit;
-  }
-  
-  activeTuiInstance = null;
-  originalTuiStop.call(this);
-};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  WIDGET MANAGEMENT — Persistent Dashboard
@@ -2004,9 +2114,11 @@ function setupWidget(ctx: ExtensionContext) {
   };
   activeInvalidators.set(key, invalidator);
 
-  ctx.ui.setWidget("subagent-dashboard", (tui: any, theme: any) => {
+  ctx.ui.setWidget("subagent-dashboard", (tui: any, themeInstance: any) => {
     activeTuiInstance = tui;
-    widgetInstance!.setTheme(theme);
+    theme = themeInstance;
+    applyLivePatches(tui, themeInstance);
+    widgetInstance!.setTheme(themeInstance);
     return widgetInstance!;
   }, { placement: "aboveEditor" });
 }

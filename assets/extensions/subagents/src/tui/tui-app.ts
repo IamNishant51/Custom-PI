@@ -1,6 +1,6 @@
 import { TuiManager } from "./tui-manager";
-import { SPINNERS, BOX } from "./types";
-import type { AgentState, PulseConfig } from "./types";
+import { SPINNERS, BOX, SPACING } from "./types";
+import type { AgentState, PulseConfig, ConversationHeader, ScrollIndicator } from "./types";
 import { stripAnsi, measureWidth } from "./utils/measure-text";
 import { activeTrackers as globalTrackers } from "../animations";
 
@@ -33,11 +33,16 @@ export class TuiApp {
   private ctx: any;
   private pi: any;
 
+  private sessionModel = "unknown";
+  private sessionId = "session-1";
+  private messageLimit = 100;
+  private scrollOffset = 0;
+
   constructor(ctx?: any, pi?: any) {
     this.ctx = ctx;
     this.pi = pi;
     this.tui = new TuiManager({ useAltScreen: true });
-    
+
     if (this.pi) {
       this.onSubmit = (text) => {
         this.pi.sendMessage({ role: "user", content: [{ type: "text", text }] });
@@ -48,11 +53,17 @@ export class TuiApp {
   get onSubmit(): ((text: string) => void) | null { return this._onSubmit; }
   set onSubmit(cb: ((text: string) => void) | null) { this._onSubmit = cb; }
 
+  setSessionInfo(model: string, id: string): void {
+    this.sessionModel = model;
+    this.sessionId = id;
+  }
+
   start(pulseConfig?: Partial<PulseConfig>): void {
     if (this.active) return;
     this.active = true;
 
     this.tui.start();
+    this.tui.renderer.updateLayout();
 
     if (pulseConfig) {
       this.tui.renderer.pulse.updateConfig(pulseConfig);
@@ -178,7 +189,10 @@ export class TuiApp {
     const renderer = this.tui.renderer;
     const cols = renderer.screen.getCols();
     const rows = renderer.screen.getRows();
-    if (cols < 20 || rows < 10) return;
+    if (cols < SPACING.minScreenCols || rows < SPACING.minScreenRows) return;
+
+    // Ensure layout is up-to-date
+    renderer.updateLayout();
 
     // Sync from global activeTrackers
     for (const [id, tracker] of globalTrackers) {
@@ -192,85 +206,107 @@ export class TuiApp {
     const defaultStyle = renderer.style({ bg: renderer.theme.canvas });
     renderer.screen.clear(defaultStyle);
 
-    let y = 1;
+    // ── Layout Regions ─────────────────────────────────────────────────
+    // 1. Top: pulse banner line (if active)
+    // 2. Banner (logo)
+    // 3. Conversation header
+    // 4. Scroll indicator (if scrolled)
+    // 5. Messages (scrollable middle area)
+    // 6. Agent cards
+    // 7. Input area (fixed at bottom)
+    // 8. Status bar (very bottom)
+    //
+    // We layout bottom-up for the fixed elements, then fill the rest.
 
-    // Pulse banner line (thin ∞ shimmer at top when agents are active)
+    // Reserve bottom rows for input + status bar
+    const statusBarY = rows - 1;
+    const inputAreaY = statusBarY - SPACING.inputAreaLines;
+    const maxContentBottom = inputAreaY - 1;
+
+    let y = 0;
+
+    // ── 1. Pulse banner line (thin ∞ shimmer at top) ──
     if (runningCount > 0) {
       y = renderer.drawPulseBannerLine(0);
       y = 1;
     }
 
-    // Banner
+    // ── 2. Banner ──
     y = renderer.drawBanner(y);
 
-    // Pulse ∞ symbol next to running agent count in HUD area
-    if (runningCount > 0) {
-      const hudStyle = renderer.style({ bg: renderer.theme.canvas });
-      renderer.screen.clearLine(y, hudStyle);
-      renderer.drawPulseSymbol(2, y);
-      const statusText = ` ${runningCount} active     `;
-      renderer.screen.writeString(4, y, statusText, renderer.style({ fg: renderer.theme.muted }));
-      y++;
-    }
+    // ── 3. Conversation Header ──
+    const header: ConversationHeader = {
+      modelName: this.sessionModel,
+      sessionId: this.sessionId,
+      contextPercent: Math.min(100, Math.round((this.messageLog.length / this.messageLimit) * 100)),
+      messageCount: this.messageLog.length,
+    };
+    y = renderer.drawConversationHeader(y, header);
 
-    // Messages (reversed, newest first)
-    const visibleMessages = this.messageLog.slice(-10);
-    const msgWidth = Math.min(cols - 4, 100);
+    // ── 4. Scroll indicator ──
+    const totalVisible = this.messageLog.length;
+    const olderCount = Math.max(0, totalVisible - 10 - this.scrollOffset);
+    const scroll: ScrollIndicator = { visible: olderCount > 0, olderCount, newerCount: this.scrollOffset };
+    y = renderer.drawScrollIndicator(y, scroll);
+
+    // ── 5. Messages ──
+    const maxMessages = Math.max(1, maxContentBottom - y - 2);
+    const visibleMessages = this.messageLog.slice(-maxMessages);
     this.renderedElements = [];
 
     for (let i = 0; i < visibleMessages.length; i++) {
       const msg = visibleMessages[i];
       const startY = y;
-      const ts = new Date(msg.timestamp).toLocaleTimeString();
-      
+      const ts = new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
       if (msg.role === "thinking") {
         const isCollapsed = this.collapsedThinkingIndices.has(i);
-        y = renderer.drawThinkingBlock(y, msgWidth, msg.content.slice(0, 200), isCollapsed, ts);
+        y = renderer.drawThinkingBlock(y, renderer.contentWidth, msg.content.slice(0, 300), isCollapsed, ts);
       } else {
-        y = renderer.drawMessageBubble(y, msgWidth, msg.role, msg.content.slice(0, 200), ts, {
+        y = renderer.drawMessageBubble(y, renderer.contentWidth, msg.role, msg.content.slice(0, 300), ts, {
           agentName: msg.role === "assistant" ? "Assistant" : undefined,
           isStreaming: false,
         });
       }
-      
-      const endY = y;
+
       this.renderedElements.push({
         index: i,
         role: msg.role,
         startY,
-        endY
+        endY: y
       });
-      
-      y++;
-      if (y >= rows - 6) break;
+
+      y += SPACING.paddingSm;
+      if (y >= maxContentBottom) break;
     }
 
-    // Agent cards with pulse indicator
+    // ── 6. Agent cards ──
     for (const [id, tracker] of this.trackers) {
-      if (y >= rows - 6) break;
+      if (y >= maxContentBottom) break;
       const running = tracker.status === "running" || tracker.status === "calling_tool";
       const verb = running ? tracker.currentTool || "thinking" : undefined;
       const toolStr = tracker.toolCallCount > 0 ? `${tracker.toolCallCount} tool calls` : undefined;
 
       if (running) {
-        const pulseBox = renderer.drawPulseBorderBox(y, msgWidth, tracker.name);
+        const pulseBox = renderer.drawPulseBorderBox(y, renderer.contentWidth, tracker.name);
         y = pulseBox.y;
+        const cx = renderer.contentLeft;
         const verbLine = `${verb || "working"}...  ${toolStr || ""}`.trim();
         renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
-        renderer.screen.writeString(2, y, `  ${verbLine}`, renderer.style({ fg: renderer.theme.muted }));
+        renderer.screen.writeString(cx + SPACING.padding, y, `  ${verbLine}`, renderer.style({ fg: renderer.theme.muted }));
         y++;
         if (tracker.outputLines.length > 0) {
           const last = tracker.outputLines[tracker.outputLines.length - 1];
           renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
-          renderer.screen.writeString(2, y, `  ${last.slice(0, msgWidth - 8)}`, renderer.style({ fg: renderer.theme.dim, dim: true }));
+          renderer.screen.writeString(cx + SPACING.padding, y, `  ${last.slice(0, renderer.contentWidth - 12)}`, renderer.style({ fg: renderer.theme.dim, dim: true }));
           y++;
         }
         const bStyle = renderer.style({ fg: renderer.theme.hairline });
         renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
-        renderer.screen.writeString(1, y, "╰" + BOX.h.repeat(msgWidth - 2) + "╯", bStyle);
+        renderer.screen.writeString(cx, y, "\u2570" + BOX.h.repeat(renderer.contentWidth - 2) + "\u256f", bStyle);
         y++;
       } else {
-        y = renderer.drawAgentCard(y, msgWidth, tracker.name, tracker.status, {
+        y = renderer.drawAgentCard(y, renderer.contentWidth, tracker.name, tracker.status, {
           verb,
           toolCalls: toolStr,
           outputLines: tracker.outputLines,
@@ -278,24 +314,24 @@ export class TuiApp {
           animate: running,
         });
       }
-      y++;
+      y += SPACING.paddingSm;
     }
 
-    // Input area
-    if (y < rows - 3) {
-      y = renderer.drawInputArea(y, msgWidth, this.inputText, this.cursorPos, this.tui.vimInput.state.mode);
+    // ── 7. Input area (fixed at bottom region) ──
+    if (inputAreaY < statusBarY) {
+      renderer.drawInputArea(inputAreaY, renderer.contentWidth, this.inputText, this.cursorPos, this.tui.vimInput.state.mode);
     }
 
-    // Status bar with pulse
-    if (rows > 2) {
+    // ── 8. Status bar with pulse ──
+    if (statusBarY < rows) {
       if (runningCount > 0) {
-        renderer.drawPulseInStatusBar(rows - 1, `agents: ${runningCount}`);
+        renderer.drawPulseInStatusBar(statusBarY, `agents: ${runningCount}`);
       } else {
-        renderer.drawStatusBar(rows - 1, {
+        renderer.drawStatusBar(statusBarY, {
           vimMode: this.tui.vimInput.state.mode,
           memoryCount: this.memoryCount || undefined,
           vaultCount: this.vaultCount || undefined,
-          agentStatus: `○ idle`,
+          agentStatus: `\u25cb idle`,
         });
       }
     }

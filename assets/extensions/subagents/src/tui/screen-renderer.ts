@@ -1,9 +1,18 @@
 import { TerminalScreen } from "./screen";
 import { StylePool } from "./style-pool";
 import { AnsiWriter } from "./ansi-writer";
-import { THEME, BOX, hexToAnsi, type ThemeColors, type PulseConfig } from "./types";
+import {
+  THEME, BOX, SPACING, hexToAnsi, getResponsiveBreakpoint,
+  type ThemeColors, type PulseConfig, type ResponsiveBreakpoint,
+  type ConversationHeader, type ScrollIndicator, type SurfaceLevel,
+} from "./types";
 import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
 import { PulseController, hexToRgb, rgbToHex } from "./app/pulse-controller";
+
+const GUTTER = SPACING.gutter;
+const GUTTER_LG = SPACING.gutterLg;
+const PAD = SPACING.padding;
+const PAD_SM = SPACING.paddingSm;
 
 export class ScreenRenderer {
   screen: TerminalScreen;
@@ -15,6 +24,10 @@ export class ScreenRenderer {
   private frameCallbacks: Array<() => void> = [];
   private running = false;
   private useTruecolor: boolean;
+
+  breakpoint: ResponsiveBreakpoint = "normal";
+  contentLeft: number = GUTTER;
+  contentWidth: number = 80;
 
   styleCache = new Map<string, number>();
 
@@ -35,6 +48,20 @@ export class ScreenRenderer {
     const colorterm = process.env.TERM || "";
     if (colorterm.includes("truecolor") || colorterm.includes("24-bit")) return true;
     return false;
+  }
+
+  /** Recompute content area dimensions based on terminal width */
+  updateLayout(): void {
+    const cols = this.screen.getCols();
+    this.breakpoint = getResponsiveBreakpoint(cols);
+    const maxContent = Math.min(cols - GUTTER_LG * 2, 120);
+    this.contentLeft = Math.floor((cols - maxContent) / 2);
+    this.contentWidth = maxContent;
+  }
+
+  /** Get the usable content width inside a bordered container */
+  innerWidth(outerW?: number): number {
+    return (outerW ?? this.contentWidth) - PAD * 2;
   }
 
   ansi(hex: string): number {
@@ -69,6 +96,14 @@ export class ScreenRenderer {
     return id;
   }
 
+  surfaceStyle(level: SurfaceLevel): number {
+    const color = this.theme[level === "canvas" ? "canvas" :
+      level === "surface" ? "surface" :
+      level === "elevated" ? "surfaceElevated" :
+      level === "overlay" ? "surfaceOverlay" : "card"];
+    return this.style({ bg: color });
+  }
+
   start(altScreen = true): void {
     this.running = true;
     const out: string[] = [];
@@ -98,6 +133,7 @@ export class ScreenRenderer {
     const { columns, rows } = process.stdout as any;
     if (columns && rows) {
       this.screen.resize(columns, rows);
+      this.updateLayout();
     }
   }
 
@@ -127,6 +163,67 @@ export class ScreenRenderer {
     }
   }
 
+  // ── New Layout Methods ──────────────────────────────────────────────────
+
+  drawConversationHeader(y: number, opts: ConversationHeader): number {
+    const cols = this.screen.getCols();
+    if (y >= this.screen.getRows()) return y;
+
+    const bgStyle = this.surfaceStyle("surface");
+    const accentStyle = this.style({ fg: this.theme.accent, bold: true });
+    const mutedStyle = this.style({ fg: this.theme.muted });
+    const dimStyle = this.style({ fg: this.theme.dim });
+
+    this.screen.clearLine(y, bgStyle);
+
+    // Left: model name + session
+    const modelTag = ` ${opts.modelName} `;
+    this.screen.writeString(GUTTER, y, modelTag, accentStyle);
+
+    // Center separator
+    const sepX = GUTTER + measureWidth(stripAnsi(modelTag)) + 1;
+    this.screen.writeString(sepX, y, "\u2502", dimStyle);
+
+    // Session info
+    const sessionText = ` ${opts.sessionId.slice(0, 12)} `;
+    const sessX = sepX + 2;
+    this.screen.writeString(sessX, y, sessionText, mutedStyle);
+
+    // Context percentage bar
+    const barW = 16;
+    const barX = cols - barW - GUTTER - 10;
+    const filled = Math.round((opts.contextPercent / 100) * barW);
+    const ctxColor = opts.contextPercent > 80 ? this.theme.warning :
+      opts.contextPercent > 50 ? this.theme.accent : this.theme.success;
+    const ctxStyle = this.style({ fg: ctxColor });
+    const bar = "\u2588".repeat(filled) + "\u2591".repeat(barW - filled);
+    this.screen.writeString(barX, y, `ctx ${bar}`, ctxStyle);
+
+    // Message count
+    const msgText = ` ${opts.messageCount} msgs `;
+    this.screen.writeString(cols - GUTTER - measureWidth(stripAnsi(msgText)), y, msgText, mutedStyle);
+
+    return y + 1;
+  }
+
+  drawScrollIndicator(y: number, opts: ScrollIndicator): number {
+    const cols = this.screen.getCols();
+    if (y >= this.screen.getRows()) return y;
+
+    const bgStyle = this.surfaceStyle("canvas");
+    const muteStyle = this.style({ fg: this.theme.muted, dim: true });
+
+    this.screen.clearLine(y, bgStyle);
+
+    if (opts.olderCount > 0) {
+      const text = ` \u2191 ${opts.olderCount} older messages \u2191 `;
+      const x = Math.floor((cols - measureWidth(stripAnsi(text))) / 2);
+      this.screen.writeString(x, y, text, muteStyle);
+    }
+
+    return y + 1;
+  }
+
   drawBanner(startY: number): number {
     const banner = [
       "  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗",
@@ -136,51 +233,61 @@ export class ScreenRenderer {
       " ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║",
       "  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝",
     ];
+    const cols = this.screen.getCols();
     const colors = this.theme.banner;
     const canvasStyle = this.style({ bg: this.theme.canvas });
-    for (let i = 0; i < banner.length; i++) {
-      const line = banner[i];
+
+    // Show full banner on wide, compact on narrow
+    const showFull = cols >= 80;
+    const displayBanner = showFull ? banner : banner.map(l => l.slice(0, Math.floor(cols * 0.6)));
+
+    for (let i = 0; i < displayBanner.length; i++) {
+      const line = displayBanner[i];
       const color = colors[i] || colors[colors.length - 1];
       const s = this.style({ fg: color });
       const y = startY + i;
       this.screen.clearLine(y, canvasStyle);
-      this.screen.writeString(2, y, line, s);
+      const x = showFull ? this.contentLeft : GUTTER;
+      this.screen.writeString(x, y, line, s);
     }
-    return startY + banner.length + 1;
+    return startY + displayBanner.length + SPACING.paddingSm;
   }
 
   drawBox(y: number, width: number, title: string, content: string[], borderColor: string, accentColor?: string): number {
+    const cx = this.contentLeft;
     const bStyle = this.style({ fg: borderColor });
     const aStyle = accentColor ? this.style({ fg: accentColor }) : bStyle;
     const canvasStyle = this.style({ bg: this.theme.canvas });
     const cols = this.screen.getCols();
-    const w = Math.min(width, cols - 4);
+    const w = Math.min(width, cols - cx - GUTTER);
 
     const titleText = ` ${title} `;
     const titleLen = stripAnsi(titleText).length;
     const lineLen = Math.max(0, w - 2 - titleLen - 1);
 
+    if (y >= this.screen.getRows()) return y;
+
     // Top border
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, BOX.tl + BOX.h.repeat(Math.floor(lineLen / 2)), bStyle);
-    this.screen.writeString(1 + Math.floor(lineLen / 2), y, titleText, aStyle);
-    this.screen.writeString(1 + Math.floor(lineLen / 2) + titleLen, y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, bStyle);
+    this.screen.writeString(cx, y, BOX.tl + BOX.h.repeat(Math.floor(lineLen / 2)), bStyle);
+    this.screen.writeString(cx + Math.floor(lineLen / 2), y, titleText, aStyle);
+    this.screen.writeString(cx + Math.floor(lineLen / 2) + titleLen, y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, bStyle);
 
     let cy = y + 1;
     for (const line of content) {
-      if (cy >= this.screen.getRows() - 2) break;
+      if (cy >= this.screen.getRows() - GUTTER) break;
       this.screen.clearLine(cy, canvasStyle);
       const clean = stripAnsi(line);
       const visibleW = measureWidth(clean);
       const pad = Math.max(0, w - 4 - visibleW);
-      this.screen.writeString(2, cy, " " + line + " ".repeat(pad) + " ", bStyle);
+      this.screen.writeString(cx + PAD_SM, cy, " " + line + " ".repeat(pad) + " ", bStyle);
       cy++;
     }
 
     // Bottom border
-    if (cy < this.screen.getRows() - 2) {
+    if (cy < this.screen.getRows() - GUTTER) {
       this.screen.clearLine(cy, canvasStyle);
-      this.screen.writeString(1, cy, BOX.bl + BOX.h.repeat(w - 2) + BOX.br, bStyle);
+      this.screen.writeString(cx, cy, BOX.bl + BOX.h.repeat(w - 2) + BOX.br, bStyle);
       cy++;
     }
 
@@ -188,11 +295,13 @@ export class ScreenRenderer {
   }
 
   drawDivider(y: number, width: number, color: string): number {
+    const cx = this.contentLeft;
     const s = this.style({ fg: color });
     const canvasStyle = this.style({ bg: this.theme.canvas });
     if (y >= this.screen.getRows()) return y;
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, BOX.ltee + BOX.h.repeat(Math.max(0, width - 2)) + BOX.rtee, s);
+    const w = Math.min(width, this.contentWidth);
+    this.screen.writeString(cx, y, "\u2502" + BOX.h.repeat(Math.max(0, w - 2)) + "\u2502", s);
     return y + 1;
   }
 
@@ -203,7 +312,8 @@ export class ScreenRenderer {
     isStreaming?: boolean;
   }): number {
     const cols = this.screen.getCols();
-    const maxCols = Math.min(width - 4, cols - 6);
+    const cx = this.contentLeft;
+    const cw = this.contentWidth;
     const isUser = role === "user";
     const borderColor = isUser ? this.theme.userBubbleBorder : this.theme.assistantBubbleBorder;
     const bStyle = this.style({ fg: borderColor });
@@ -211,61 +321,62 @@ export class ScreenRenderer {
     const canvasStyle = this.style({ bg: this.theme.canvas });
     const contentStyle = this.style({ fg: this.theme.ink });
 
-    const agentIcon = isUser ? "●" : opts?.agentName ? "◈" : "●";
+    // Agent badge: ◆ for user, ▣ for assistant
+    const agentIcon = isUser ? "\u25c6" : "\u25a3";
     const name = isUser ? "You" : (opts?.agentName || "Assistant");
     const metaParts: string[] = [];
     if (opts?.toolCalls !== undefined) metaParts.push(`tools: ${opts.toolCalls}`);
     if (opts?.duration) metaParts.push(opts.duration);
-    if (opts?.isStreaming) metaParts.push("◌ streaming");
-    const meta = metaParts.length > 0 ? `  ·  ${metaParts.join("  ·  ")}` : "";
+    if (opts?.isStreaming) metaParts.push("\u25cc streaming");
+    const meta = metaParts.length > 0 ? `  \u00b7  ${metaParts.join("  \u00b7  ")}` : "";
     const headerText = `${agentIcon} ${name}${meta}  ${timestamp}`;
     const headerW = measureWidth(headerText);
 
-    const lines = wordWrap(content, maxCols - 4);
+    const maxContentW = Math.min(cw - PAD * 2, SPACING.maxBubbleWidth);
+    const lines = wordWrap(content, maxContentW - PAD);
     let maxLineW = 0;
     for (const line of lines) {
       const lineW = measureWidth(stripAnsi(line.trimEnd()));
       if (lineW > maxLineW) maxLineW = lineW;
     }
 
-    const w = Math.min(maxCols, Math.max(headerW + 4, maxLineW + 4));
-    const startX = isUser ? Math.max(2, cols - w - 4) : 2;
+    const bubbleW = Math.min(maxContentW, Math.max(headerW + PAD, maxLineW + PAD));
+    const startX = isUser ? cx + cw - bubbleW - PAD_SM : cx + PAD_SM;
+
+    if (y >= this.screen.getRows() - GUTTER) return y;
 
     // Top border
-    if (y >= this.screen.getRows() - 2) return y;
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(startX, y, "╭" + BOX.h.repeat(w - 2) + "╮", bStyle);
+    this.screen.writeString(startX, y, "\u256d" + BOX.h.repeat(bubbleW - 2) + "\u256e", bStyle);
     y++;
 
-    // Header
-    if (y >= this.screen.getRows() - 3) return y;
+    // Header line
+    if (y >= this.screen.getRows() - GUTTER) return y;
     this.screen.clearLine(y, canvasStyle);
-    const trimmedHeader = headerText.length > w - 4 ? headerText.slice(0, w - 6) + "…" : headerText;
-    this.screen.writeString(startX + 2, y, trimmedHeader, headerStyle);
-    y++;
-
-    // Divider
-    if (y >= this.screen.getRows() - 3) return y;
-    this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(startX, y, "│" + " ".repeat(w - 2) + "│", bStyle);
+    const trimmedHeader = headerText.length > bubbleW - PAD ? headerText.slice(0, bubbleW - PAD - 2) + "\u2026" : headerText;
+    this.screen.writeString(startX + PAD_SM, y, trimmedHeader, headerStyle);
+    // Side borders
+    this.screen.writeString(startX, y, "\u2502", bStyle);
+    this.screen.writeString(startX + bubbleW - 1, y, "\u2502", bStyle);
     y++;
 
     // Content
     for (const line of lines) {
-      if (y >= this.screen.getRows() - 3) break;
+      if (y >= this.screen.getRows() - GUTTER) break;
       this.screen.clearLine(y, canvasStyle);
       const clean = line.trimEnd();
-      const pad = Math.max(0, w - 4 - measureWidth(stripAnsi(clean)));
-      this.screen.writeString(startX + 2, y, clean + " ".repeat(pad), contentStyle);
-      this.screen.writeString(startX, y, "│", bStyle);
-      this.screen.writeString(startX + w - 1, y, "│", bStyle);
+      const visibleLen = measureWidth(stripAnsi(clean));
+      const pad = Math.max(0, bubbleW - PAD - visibleLen);
+      this.screen.writeString(startX + PAD_SM, y, clean + " ".repeat(pad), contentStyle);
+      this.screen.writeString(startX, y, "\u2502", bStyle);
+      this.screen.writeString(startX + bubbleW - 1, y, "\u2502", bStyle);
       y++;
     }
 
     // Bottom border
-    if (y < this.screen.getRows() - 2) {
+    if (y < this.screen.getRows() - GUTTER) {
       this.screen.clearLine(y, canvasStyle);
-      this.screen.writeString(startX, y, "╰" + BOX.h.repeat(w - 2) + "╯", bStyle);
+      this.screen.writeString(startX, y, "\u2570" + BOX.h.repeat(bubbleW - 2) + "\u256f", bStyle);
       y++;
     }
 
@@ -273,28 +384,40 @@ export class ScreenRenderer {
   }
 
   drawThinkingBlock(y: number, width: number, content: string, isCollapsed: boolean, timestamp: string): number {
-    const cols = this.screen.getCols();
-    const w = Math.min(width - 4, cols - 6);
+    const cx = this.contentLeft;
+    const cw = this.contentWidth;
+    const gutterX = cx + PAD_SM;
+
     const canvasStyle = this.style({ bg: this.theme.canvas });
     const headerStyle = this.style({ fg: this.theme.muted, dim: true });
-    const lineStyle = this.style({ fg: this.theme.hairline });
+    const accentStyle = this.style({ fg: this.theme.accent, dim: true });
     const contentStyle = this.style({ fg: this.theme.muted, italic: true });
 
-    if (y >= this.screen.getRows() - 2) return y;
-    this.screen.clearLine(y, canvasStyle);
+    if (y >= this.screen.getRows() - GUTTER) return y;
 
-    const chevron = isCollapsed ? "▸" : "▾";
+    // Accent strip (left border)
+    this.screen.clearLine(y, canvasStyle);
+    this.screen.writeString(gutterX, y, "\u2502", accentStyle);
+    const chevron = isCollapsed ? "\u25b8" : "\u25be";
     const headerText = `${chevron} Reasoning  ${timestamp}`;
-    this.screen.writeString(2, y, headerText, headerStyle);
+    this.screen.writeString(gutterX + PAD_SM, y, headerText, headerStyle);
+
+    // Right-side expand hint
+    const hint = isCollapsed ? "click to expand" : "click to collapse";
+    const hintW = measureWidth(hint);
+    const hintStyle = this.style({ fg: this.theme.dim, dim: true });
+    this.screen.writeString(cx + cw - hintW - GUTTER, y, hint, hintStyle);
+
     y++;
 
     if (!isCollapsed && content) {
-      const lines = wordWrap(content, w - 6);
+      const innerW = cw - GUTTER_LG;
+      const lines = wordWrap(content, innerW);
       for (const line of lines) {
-        if (y >= this.screen.getRows() - 2) break;
+        if (y >= this.screen.getRows() - GUTTER) break;
         this.screen.clearLine(y, canvasStyle);
-        this.screen.writeString(2, y, "│", lineStyle);
-        this.screen.writeString(4, y, line, contentStyle);
+        this.screen.writeString(gutterX, y, "\u2502", accentStyle);
+        this.screen.writeString(gutterX + PAD_SM, y, line, contentStyle);
         y++;
       }
     }
@@ -303,57 +426,77 @@ export class ScreenRenderer {
 
   drawInputArea(y: number, width: number, text: string, cursorPos: number, vimMode?: string): number {
     const cols = this.screen.getCols();
-    const w = Math.min(width - 2, cols - 4);
+    const cx = this.contentLeft;
+    const cw = this.contentWidth;
+    const w = Math.min(cw, cols - cx - GUTTER);
+
     const borderStyle = this.style({ fg: this.theme.hairline });
     const inputStyle = this.style({ fg: this.theme.ink });
     const cursorStyle = this.style({ fg: this.theme.ink, bg: this.theme.accent });
     const canvasStyle = this.style({ bg: this.theme.canvas });
+    const surfaceStyle = this.style({ bg: this.theme.surface });
     const modeStyle = this.style({ fg: this.theme.muted, dim: true });
     const accentStyle = this.style({ fg: this.theme.accent });
 
-    if (y >= this.screen.getRows() - 3) return y;
+    if (y >= this.screen.getRows() - SPACING.inputAreaLines) return y;
+
+    const inputW = w - PAD;
 
     // Top border
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, "╭" + BOX.h.repeat(w) + "╮", borderStyle);
+    this.screen.writeString(cx, y, "\u256d" + BOX.h.repeat(inputW) + "\u256e", borderStyle);
     y++;
 
-    if (y >= this.screen.getRows() - 3) return y;
+    if (y >= this.screen.getRows() - SPACING.inputAreaLines) return y;
 
-    // Input line
-    this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, "│", borderStyle);
-    const displayText = text.length > w - 2 ? text.slice(text.length - w + 4) : text;
+    // Input line with background
+    this.screen.clearLine(y, surfaceStyle);
+    this.screen.writeString(cx, y, "\u2502", borderStyle);
+
+    const displayText = text.length > inputW - 2 ? text.slice(text.length - inputW + 4) : text;
     const visibleCursor = Math.min(cursorPos, displayText.length);
-    for (let i = 0; i < w - 2 && i < displayText.length; i++) {
+    const writeStartX = cx + PAD_SM;
+
+    // Draw text
+    for (let i = 0; i < inputW - 2 && i < displayText.length; i++) {
       const ch = displayText[i];
       if (i === visibleCursor && vimMode === "insert") {
-        this.screen.writeString(2 + i, y, ch, cursorStyle);
+        this.screen.writeString(writeStartX + i, y, ch, cursorStyle);
       } else {
-        this.screen.writeString(2 + i, y, ch, inputStyle);
+        this.screen.writeString(writeStartX + i, y, ch, inputStyle);
       }
     }
-    if (visibleCursor >= displayText.length && vimMode === "insert") {
-      this.screen.writeString(2 + displayText.length, y, " ", cursorStyle);
+
+    // Cursor at end
+    if (visibleCursor >= displayText.length) {
+      if (vimMode === "insert") {
+        this.screen.writeString(writeStartX + displayText.length, y, " ", cursorStyle);
+      } else {
+        this.screen.writeString(writeStartX + displayText.length, y, "\u258c", inputStyle);
+      }
     }
-    this.screen.writeString(w, y, "│", borderStyle);
+
+    this.screen.writeString(cx + cw - PAD_SM, y, "\u2502", borderStyle);
     y++;
 
     // Bottom border
-    if (y < this.screen.getRows() - 2) {
-      this.screen.clearLine(y, canvasStyle);
-      this.screen.writeString(1, y, "╰" + BOX.h.repeat(w) + "╯", borderStyle);
+    if (y < this.screen.getRows() - 1) {
+      this.screen.clearLine(y, surfaceStyle);
+      this.screen.writeString(cx, y, "\u2570" + BOX.h.repeat(inputW) + "\u256f", borderStyle);
       y++;
     }
 
-    // Mode indicator
-    if (y < this.screen.getRows() - 1) {
-      this.screen.clearLine(y, canvasStyle);
+    // Mode bar below input
+    if (y < this.screen.getRows()) {
+      this.screen.clearLine(y, surfaceStyle);
       if (vimMode) {
         const modeText = vimMode.toUpperCase();
-        this.screen.writeString(2, y, `[${modeText}]`, vimMode === "insert" ? accentStyle : modeStyle);
+        this.screen.writeString(cx + PAD_SM, y, `\u25c6 ${modeText}`, vimMode === "insert" ? accentStyle : modeStyle);
+        this.screen.writeString(cx + PAD_SM + 8, y, "\u2502", this.style({ fg: this.theme.dim }));
       }
-      this.screen.writeString(w - 8, y, "Ctrl+Enter send", modeStyle);
+      // Right hint
+      const hint = "\u2302 Ctrl+Enter send";
+      this.screen.writeString(cx + cw - measureWidth(hint) - PAD_SM, y, hint, modeStyle);
       y++;
     }
 
@@ -367,74 +510,77 @@ export class ScreenRenderer {
     duration?: string;
     animate?: boolean;
   }): number {
-    const cols = this.screen.getCols();
-    const w = Math.min(width - 2, cols - 4);
+    const cx = this.contentLeft;
+    const cw = this.contentWidth;
+    const w = Math.min(cw, this.screen.getCols() - cx - GUTTER);
     const isRunning = status === "running" || status === "calling_tool";
     const isSuccess = status === "success" || status === "complete";
     const isError = status === "error";
     const borderColor = isError ? this.theme.error : isSuccess ? this.theme.success : isRunning ? this.theme.agentRunning : this.theme.agentWaiting;
     const bStyle = this.style({ fg: borderColor });
+    const cardBgStyle = this.style({ bg: this.theme.card });
     const nameStyle = this.style({ fg: this.theme.ink, bold: true });
     const verbStyle = this.style({ fg: this.theme.muted });
     const metaStyle = this.style({ fg: this.theme.muted, dim: true });
     const outputStyle = this.style({ fg: borderColor, dim: true });
     const canvasStyle = this.style({ bg: this.theme.canvas });
 
-    const icon = isError ? "✗" : isSuccess ? "✓" : isRunning ? "●" : "◴";
+    const icon = isError ? "\u2717" : isSuccess ? "\u2713" : isRunning ? "\u25cf" : "\u25f4";
     const iconColor = isError ? this.theme.error : isSuccess ? this.theme.success : isRunning ? this.theme.agentRunning : this.theme.agentWaiting;
     const iconStyle = this.style({ fg: iconColor });
 
-    if (y >= this.screen.getRows() - 3) return y;
+    if (y >= this.screen.getRows() - GUTTER) return y;
 
-    // Top border
+    // Top border with icon and name
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, "╭─", bStyle);
-    this.screen.writeString(3, y, icon, iconStyle);
-    this.screen.writeString(5, y, ` ${name} `, nameStyle);
-    const dur = opts?.duration ? ` ◷ ${opts.duration}` : "";
-    const rightLabel = dur;
-    const rightStart = w - rightLabel.length - 1;
-    this.screen.writeString(rightStart, y, rightLabel, metaStyle);
-    this.screen.writeString(w - 1, y, "─╮", bStyle);
+    this.screen.writeString(cx, y, "\u256d\u2500", bStyle);
+    this.screen.writeString(cx + 2, y, icon, iconStyle);
+    this.screen.writeString(cx + 4, y, ` ${name} `, nameStyle);
+    const dur = opts?.duration ? ` \u25f7 ${opts.duration}` : "";
+    const rightStart = cx + w - dur.length - 2;
+    this.screen.writeString(rightStart, y, dur, metaStyle);
+    this.screen.writeString(cx + w - 1, y, "\u2500\u256e", bStyle);
     y++;
 
-    if (y >= this.screen.getRows() - 3) return y;
+    if (y >= this.screen.getRows() - GUTTER) return y;
 
-    // Verb + tool calls line
-    this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, "│ ", bStyle);
+    // Verb + tool calls line (card surface background)
+    this.screen.clearLine(y, cardBgStyle);
+    this.screen.writeString(cx, y, "\u2502 ", bStyle);
     if (opts?.verb) {
-      this.screen.writeString(3, y, `${opts.verb}...`, verbStyle);
+      this.screen.writeString(cx + PAD, y, `${opts.verb}...`, verbStyle);
     }
     if (opts?.toolCalls) {
-      const tcX = w - opts.toolCalls.length - 5;
+      const tcX = cx + w - measureWidth(stripAnsi(opts.toolCalls)) - GUTTER;
       this.screen.writeString(tcX, y, opts.toolCalls, metaStyle);
     }
-    this.screen.writeString(w - 1, y, " │", bStyle);
+    this.screen.writeString(cx + w - 1, y, " \u2502", bStyle);
     y++;
 
-    // Divider if has output
+    // Divider + output lines
     if (opts?.outputLines && opts.outputLines.length > 0) {
-      if (y >= this.screen.getRows() - 3) return y;
-      this.screen.clearLine(y, canvasStyle);
-      this.screen.writeString(1, y, "│  ─────────────────────────────────  │", bStyle);
+      if (y >= this.screen.getRows() - GUTTER) return y;
+      this.screen.clearLine(y, cardBgStyle);
+      this.screen.writeString(cx, y, "\u2502", bStyle);
+      this.screen.writeString(cx + PAD, y, "\u2500".repeat(Math.min(30, w - 8)), this.style({ fg: this.theme.dim }));
+      this.screen.writeString(cx + w - 1, y, "\u2502", bStyle);
       y++;
 
       for (const ol of opts.outputLines.slice(-3)) {
-        if (y >= this.screen.getRows() - 3) break;
-        this.screen.clearLine(y, canvasStyle);
-        this.screen.writeString(1, y, "│ ", bStyle);
-        const trimmed = ol.length > w - 6 ? ol.slice(0, w - 9) + "…" : ol;
-        this.screen.writeString(3, y, trimmed, outputStyle);
-        this.screen.writeString(w - 1, y, " │", bStyle);
+        if (y >= this.screen.getRows() - GUTTER) break;
+        this.screen.clearLine(y, cardBgStyle);
+        this.screen.writeString(cx, y, "\u2502 ", bStyle);
+        const trimmed = ol.length > w - 8 ? ol.slice(0, w - 12) + "\u2026" : ol;
+        this.screen.writeString(cx + PAD, y, trimmed, outputStyle);
+        this.screen.writeString(cx + w - 1, y, " \u2502", bStyle);
         y++;
       }
     }
 
     // Bottom border
-    if (y < this.screen.getRows() - 2) {
+    if (y < this.screen.getRows() - GUTTER) {
       this.screen.clearLine(y, canvasStyle);
-      this.screen.writeString(1, y, "╰" + BOX.h.repeat(w - 2) + "╯", bStyle);
+      this.screen.writeString(cx, y, "\u2570" + BOX.h.repeat(w - 2) + "\u256f", bStyle);
       y++;
     }
 
@@ -454,48 +600,54 @@ export class ScreenRenderer {
 
     const bgStyle = this.style({ bg: this.theme.surface });
     const fgStyle = this.style({ fg: this.theme.muted });
+    const dimStyle = this.style({ fg: this.theme.dim });
 
     this.screen.clearLine(y, bgStyle);
-    let x = 1;
+    let x = GUTTER;
+
+    // Left accent block
+    const blockStyle = this.style({ fg: this.theme.accent, bold: true });
+    this.screen.writeString(x, y, "\u2502", dimStyle);
+    x += 2;
 
     // Vim mode
     if (opts?.vimMode) {
       const modeColor = opts.vimMode === "insert" ? this.theme.accent : this.theme.muted;
       const ms = this.style({ fg: modeColor, bold: true });
       this.screen.writeString(x, y, ` ${opts.vimMode.toUpperCase()} `, ms);
-      x += opts.vimMode.length + 3;
-      this.screen.writeString(x, y, "│", fgStyle);
+      x += measureWidth(stripAnsi(` ${opts.vimMode.toUpperCase()} `)) + 1;
+      this.screen.writeString(x, y, "\u2502", dimStyle);
       x += 2;
     }
 
     // Agent status
     if (opts?.agentStatus) {
       this.screen.writeString(x, y, opts.agentStatus, fgStyle);
-      x += opts.agentStatus.length + 2;
-      this.screen.writeString(x, y, "│", fgStyle);
+      x += measureWidth(stripAnsi(opts.agentStatus)) + 2;
+      this.screen.writeString(x, y, "\u2502", dimStyle);
       x += 2;
     }
 
     // Memory & vault
     const storage: string[] = [];
-    if (opts?.memoryCount !== undefined) storage.push(`memory: ${opts.memoryCount}`);
-    if (opts?.vaultCount !== undefined) storage.push(`vault: ${opts.vaultCount}`);
+    if (opts?.memoryCount !== undefined) storage.push(`mem:${opts.memoryCount}`);
+    if (opts?.vaultCount !== undefined) storage.push(`vault:${opts.vaultCount}`);
     if (storage.length > 0) {
-      this.screen.writeString(x, y, storage.join("  ·  "), fgStyle);
-      x += storage.join("  ·  ").length + 2;
-      this.screen.writeString(x, y, "│", fgStyle);
+      this.screen.writeString(x, y, storage.join("  \u00b7  "), fgStyle);
+      x += measureWidth(stripAnsi(storage.join("  \u00b7  "))) + 2;
+      this.screen.writeString(x, y, "\u2502", dimStyle);
       x += 2;
     }
 
     // Cost
     if (opts?.cost) {
       this.screen.writeString(x, y, opts.cost, fgStyle);
-      x += opts.cost.length + 2;
+      x += measureWidth(stripAnsi(opts.cost)) + 2;
     }
 
     // Right: terminal size
     const sizeStr = ` ${cols}x${this.screen.getRows()} `;
-    this.screen.writeString(cols - sizeStr.length, y, sizeStr, this.style({ fg: this.theme.dim }));
+    this.screen.writeString(cols - measureWidth(sizeStr) - GUTTER, y, sizeStr, dimStyle);
 
     return y + 1;
   }
@@ -529,16 +681,18 @@ export class ScreenRenderer {
 
     this.screen.clearLine(y, bgStyle);
 
+    // Pulse icon + label on the left
     if (this.useTruecolor) {
       const tcStyle = this.pool.getTruecolorStyle(state.color);
-      this.screen.writeString(1, y, ` ${symbol} ${label} `, tcStyle);
+      this.screen.writeString(GUTTER, y, ` ${symbol} ${label} `, tcStyle);
     } else {
       const pulseStyle = this.style({ fg: state.color, bold: true });
-      this.screen.writeString(1, y, ` ${symbol} ${label} `, pulseStyle);
+      this.screen.writeString(GUTTER, y, ` ${symbol} ${label} `, pulseStyle);
     }
 
+    // Terminal size on the right
     const sizeStr = ` ${cols}x${this.screen.getRows()} `;
-    this.screen.writeString(cols - sizeStr.length, y, sizeStr, this.style({ fg: this.theme.dim }));
+    this.screen.writeString(cols - measureWidth(sizeStr) - GUTTER, y, sizeStr, this.style({ fg: this.theme.dim }));
 
     return y + 1;
   }
@@ -549,23 +703,29 @@ export class ScreenRenderer {
 
     const state = this.pulse.getState(elapsed);
     const canvasStyle = this.style({ bg: this.theme.canvas });
-    const fullLine = "∞".repeat(cols - 2);
+
+    // Use the pulse symbol pattern instead of raw ∞ repeats
+    const symbol = this.pulse.getSymbol();
+    const pattern = `${symbol} `;
+    const repeatCount = Math.floor((cols - GUTTER_LG) / measureWidth(pattern));
+    const fullLine = pattern.repeat(repeatCount);
 
     this.screen.clearLine(y, canvasStyle);
 
     if (this.useTruecolor) {
       const tcStyle = this.pool.getTruecolorStyle(state.color);
-      this.screen.writeString(1, y, fullLine, tcStyle);
+      this.screen.writeString(GUTTER, y, fullLine, tcStyle);
     } else {
       const pulseStyle = this.style({ fg: state.color, dim: true });
-      this.screen.writeString(1, y, fullLine, pulseStyle);
+      this.screen.writeString(GUTTER, y, fullLine, pulseStyle);
     }
     return y + 1;
   }
 
   drawPulseBorderBox(y: number, width: number, title: string, elapsed?: number): { y: number; pulseStyle: number } {
+    const cx = this.contentLeft;
     const cols = this.screen.getCols();
-    const w = Math.min(width, cols - 4);
+    const w = Math.min(width, cols - cx - GUTTER);
     const state = this.pulse.getState(elapsed);
     const symbol = this.pulse.getSymbol();
     const canvasStyle = this.style({ bg: this.theme.canvas });
@@ -578,9 +738,9 @@ export class ScreenRenderer {
     const lineLen = Math.max(0, w - 2 - stripAnsi(titleText).length - 1);
 
     this.screen.clearLine(y, canvasStyle);
-    this.screen.writeString(1, y, BOX.tl + BOX.h.repeat(Math.floor(lineLen / 2)), borderStyle);
-    this.screen.writeString(1 + Math.floor(lineLen / 2), y, titleText, borderStyle);
-    this.screen.writeString(1 + Math.floor(lineLen / 2) + stripAnsi(titleText).length, y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, borderStyle);
+    this.screen.writeString(cx, y, BOX.tl + BOX.h.repeat(Math.floor(lineLen / 2)), borderStyle);
+    this.screen.writeString(cx + Math.floor(lineLen / 2), y, titleText, borderStyle);
+    this.screen.writeString(cx + Math.floor(lineLen / 2) + stripAnsi(titleText).length, y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, borderStyle);
 
     return { y: y + 1, pulseStyle: borderStyle };
   }

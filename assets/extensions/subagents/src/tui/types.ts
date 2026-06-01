@@ -25,6 +25,8 @@ export interface ThemeColors {
   info: string;
   canvas: string;
   surface: string;
+  surfaceElevated: string;
+  surfaceOverlay: string;
   card: string;
   hairline: string;
   ink: string;
@@ -38,7 +40,80 @@ export interface ThemeColors {
   agentSuccess: string;
   agentError: string;
   agentWaiting: string;
+  borderFocus: string;
+  borderActive: string;
+  textSecondary: string;
+  textTertiary: string;
+  scrollbar: string;
+  scrollbarThumb: string;
+  link: string;
+  gradientStart: string;
+  gradientEnd: string;
 }
+
+// ── Spacing & Layout Constants ──────────────────────────────────────────
+
+export const SPACING = {
+  gutter: 2,
+  gutterLg: 4,
+  padding: 2,
+  paddingSm: 1,
+  bubblePadding: 2,
+  cardPadding: 2,
+  inputPadding: 2,
+  minScreenCols: 60,
+  minScreenRows: 16,
+  maxBubbleWidth: 100,
+  maxCardWidth: 120,
+  statusBarHeight: 1,
+  inputAreaLines: 3,
+  headerHeight: 1,
+  scrollIndicatorHeight: 1,
+} as const;
+
+export type ResponsiveBreakpoint = "compact" | "normal" | "wide";
+
+export function getResponsiveBreakpoint(cols: number): ResponsiveBreakpoint {
+  if (cols < 80) return "compact";
+  if (cols < 120) return "normal";
+  return "wide";
+}
+
+export interface LayoutRegion {
+  name: string;
+  startY: number;
+  endY: number;
+  startX: number;
+  endX: number;
+  zIndex: number;
+}
+
+export interface ConversationHeader {
+  modelName: string;
+  sessionId: string;
+  contextPercent: number;
+  messageCount: number;
+}
+
+export interface ScrollIndicator {
+  visible: boolean;
+  olderCount: number;
+  newerCount: number;
+}
+
+// ── Surface Depth ───────────────────────────────────────────────────────
+
+export type SurfaceLevel = "canvas" | "surface" | "elevated" | "overlay" | "popup";
+
+export interface SurfaceColors {
+  canvas: string;
+  surface: string;
+  elevated: string;
+  overlay: string;
+  popup: string;
+}
+
+// ── Existing Types ──────────────────────────────────────────────────────
 
 export type AgentState = "pending" | "running" | "success" | "error" | "warning" | "spawning" | "calling_tool" | "complete";
 
@@ -76,6 +151,8 @@ export const THEME: ThemeColors = {
   info: "#5ac8fa",
   canvas: "#0a0a0a",
   surface: "#1a1c20",
+  surfaceElevated: "#222222",
+  surfaceOverlay: "#1e1e1e",
   card: "#191919",
   hairline: "#212327",
   ink: "#ffffff",
@@ -89,6 +166,15 @@ export const THEME: ThemeColors = {
   agentSuccess: "#30d158",
   agentError: "#ff3b30",
   agentWaiting: "#7d8187",
+  borderFocus: "#ff7a17",
+  borderActive: "#5ac8fa",
+  textSecondary: "#9ea2a8",
+  textTertiary: "#6a6e74",
+  scrollbar: "#1a1c20",
+  scrollbarThumb: "#3a3c40",
+  link: "#5ac8fa",
+  gradientStart: "#ff7a17",
+  gradientEnd: "#7c3aed",
 };
 
 export const SPINNERS = {
