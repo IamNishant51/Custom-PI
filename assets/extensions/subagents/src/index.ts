@@ -15,6 +15,7 @@ import os from "node:os";
 
 import { store as storeMemory, search as searchMemory, remove as deleteMemory, stats as memoryStats, getRecent, consolidate as consolidateMemory, searchExisting, markContradicted, getSkills, flush as flushMemory } from "./memory-store";
 import { buildMemoryContextBlock } from "./memory-retrieval";
+import { detectStack, formatStackSummary } from "./stack-detector";
 import { C } from "./tui-colors";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
 import { TuiManager, SPACING as TUI_SPACING } from "./tui";
@@ -3603,12 +3604,29 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // Command: Detect project stack
+  pi.registerCommand("detect", {
+    description: "Detect project language, framework, and tool stack from indicator files.",
+    handler(args, ctx) {
+      const stacks = detectStack(ctx.cwd || process.cwd());
+      if (stacks.length === 0) {
+        ctx.ui.notify("No project stack detected.", "warning");
+        return;
+      }
+      const summary = formatStackSummary(stacks);
+      ctx.ui.notify(`Detected stacks:\n${summary}`, "info");
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // Command: Show keybindings and commands
   pi.registerCommand("help", {
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /help, /tui. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /help, /tui. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
@@ -3786,6 +3804,25 @@ ${state.state_notes || "None"}
           console.error("Failed to inject task state:", e);
         }
       }
+    }
+
+    // Inject project stack detection
+    try {
+      const stacks = detectStack(ctx.cwd || process.cwd());
+      if (stacks.length > 0) {
+        const primary = stacks[0];
+        extraPrompt += `\n# 📦 PROJECT STACK\nDetected: ${primary.name} (${primary.language || "generic"})\n`;
+        if (Object.keys(primary.commands).length > 0) {
+          extraPrompt += `Available commands:\n`;
+          for (const [phase, cmds] of Object.entries(primary.commands)) {
+            if (cmds && cmds.length > 0) {
+              extraPrompt += `  ${phase}: \`${cmds[0]}\`\n`;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // silent — stack detection should never crash startup
     }
 
     // Inject persistent memory context (non-blocking, cached file read)

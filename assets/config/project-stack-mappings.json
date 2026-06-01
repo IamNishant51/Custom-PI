@@ -1,0 +1,440 @@
+{
+  "stacks": [
+    {
+      "id": "typescript",
+      "name": "TypeScript / JavaScript",
+      "indicators": [
+        { "file": "tsconfig.json" },
+        { "file": "package.json", "contains": "typescript" },
+        { "file": "tsconfig.app.json" }
+      ],
+      "language": "typescript",
+      "rules": ["common", "typescript"],
+      "skills": ["verification-loop", "tdd-workflow", "coding-standards"],
+      "commands": {
+        "build": ["npx tsc --noEmit", "npm run build"],
+        "test": ["npm test", "npx vitest run"],
+        "lint": ["npx eslint .", "npx biome check"],
+        "typecheck": ["npx tsc --noEmit"]
+      },
+      "permissions": {
+        "allow": ["npx tsc", "npx vitest", "npm run *", "npx eslint", "npx biome"],
+        "deny": ["npm publish", "npm unpublish"]
+      }
+    },
+    {
+      "id": "react",
+      "name": "React / Next.js",
+      "indicators": [
+        { "file": "next.config.js" },
+        { "file": "next.config.ts" },
+        { "file": "next.config.mjs" },
+        { "file": "vite.config.ts", "contains": "react" },
+        { "file": "src/App.tsx" }
+      ],
+      "language": "typescript",
+      "rules": ["common", "typescript", "react"],
+      "skills": ["verification-loop", "tdd-workflow", "frontend-patterns"],
+      "commands": {
+        "build": ["npm run build"],
+        "dev": ["npm run dev"],
+        "test": ["npm test", "npx vitest run"],
+        "lint": ["npx eslint ."]
+      },
+      "permissions": {
+        "allow": ["npm run *", "npx *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "python",
+      "name": "Python",
+      "indicators": [
+        { "file": "setup.py" },
+        { "file": "setup.cfg" },
+        { "file": "pyproject.toml", "contains": "python" },
+        { "file": "requirements.txt" },
+        { "file": "Pipfile" },
+        { "file": "poetry.lock" }
+      ],
+      "language": "python",
+      "rules": ["common", "python"],
+      "skills": ["verification-loop", "tdd-workflow", "python-patterns"],
+      "commands": {
+        "build": ["python -m build"],
+        "test": ["pytest", "python -m pytest"],
+        "lint": ["ruff check .", "pylint src/"],
+        "typecheck": ["mypy src/"]
+      },
+      "permissions": {
+        "allow": ["python", "pip", "pytest", "ruff", "mypy", "black"],
+        "deny": []
+      }
+    },
+    {
+      "id": "django",
+      "name": "Django",
+      "indicators": [
+        { "file": "manage.py" },
+        { "file": "requirements.txt", "contains": "django" },
+        { "file": "pyproject.toml", "contains": "django" }
+      ],
+      "language": "python",
+      "rules": ["common", "python", "django"],
+      "skills": ["verification-loop", "tdd-workflow", "django-patterns"],
+      "commands": {
+        "test": ["python manage.py test"],
+        "migrate": ["python manage.py migrate"],
+        "lint": ["ruff check ."]
+      },
+      "permissions": {
+        "allow": ["python manage.py *", "ruff"],
+        "deny": []
+      }
+    },
+    {
+      "id": "golang",
+      "name": "Go",
+      "indicators": [
+        { "file": "go.mod" },
+        { "file": "go.sum" },
+        { "file": "main.go" }
+      ],
+      "language": "golang",
+      "rules": ["common", "golang"],
+      "skills": ["verification-loop", "tdd-workflow", "go-patterns"],
+      "commands": {
+        "build": ["go build ./..."],
+        "test": ["go test ./..."],
+        "lint": ["golangci-lint run", "go vet ./..."],
+        "fmt": ["go fmt ./..."]
+      },
+      "permissions": {
+        "allow": ["go *", "golangci-lint"],
+        "deny": []
+      }
+    },
+    {
+      "id": "rust",
+      "name": "Rust",
+      "indicators": [
+        { "file": "Cargo.toml" },
+        { "file": "Cargo.lock" },
+        { "file": "rust-toolchain.toml" }
+      ],
+      "language": "rust",
+      "rules": ["common", "rust"],
+      "skills": ["verification-loop", "tdd-workflow", "rust-patterns"],
+      "commands": {
+        "build": ["cargo build"],
+        "test": ["cargo test"],
+        "lint": ["cargo clippy"],
+        "fmt": ["cargo fmt"]
+      },
+      "permissions": {
+        "allow": ["cargo *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "java",
+      "name": "Java (Maven)",
+      "indicators": [
+        { "file": "pom.xml" },
+        { "file": "build.gradle" },
+        { "file": "build.gradle.kts" },
+        { "file": "settings.gradle" }
+      ],
+      "language": "java",
+      "rules": ["common", "java"],
+      "skills": ["verification-loop", "java-patterns"],
+      "commands": {
+        "build": ["mvn compile", "gradle build"],
+        "test": ["mvn test", "gradle test"],
+        "lint": ["mvn checkstyle:check"]
+      },
+      "permissions": {
+        "allow": ["mvn *", "gradle *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "kotlin",
+      "name": "Kotlin / Android",
+      "indicators": [
+        { "file": "build.gradle.kts", "contains": "kotlin" },
+        { "file": "app/build.gradle.kts" },
+        { "file": "gradle/libs.versions.toml" }
+      ],
+      "language": "kotlin",
+      "rules": ["common", "kotlin"],
+      "skills": ["verification-loop", "kotlin-patterns"],
+      "commands": {
+        "build": ["./gradlew assemble"],
+        "test": ["./gradlew test"],
+        "lint": ["./gradlew lint"]
+      },
+      "permissions": {
+        "allow": ["./gradlew *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "flutter",
+      "name": "Flutter / Dart",
+      "indicators": [
+        { "file": "pubspec.yaml" },
+        { "file": "pubspec.lock" },
+        { "file": "analysis_options.yaml" }
+      ],
+      "language": "dart",
+      "rules": ["common", "dart", "flutter"],
+      "skills": ["verification-loop", "flutter-patterns"],
+      "commands": {
+        "build": ["flutter build"],
+        "test": ["flutter test"],
+        "lint": ["flutter analyze"],
+        "fmt": ["dart format ."]
+      },
+      "permissions": {
+        "allow": ["flutter *", "dart *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "swift",
+      "name": "Swift / iOS",
+      "indicators": [
+        { "file": "Package.swift" },
+        { "file": "*.xcodeproj" },
+        { "file": "*.xcworkspace" }
+      ],
+      "language": "swift",
+      "rules": ["common", "swift"],
+      "skills": ["verification-loop", "swift-patterns"],
+      "commands": {
+        "build": ["swift build"],
+        "test": ["swift test"],
+        "lint": ["swiftlint"]
+      },
+      "permissions": {
+        "allow": ["swift *", "swiftlint"],
+        "deny": []
+      }
+    },
+    {
+      "id": "cpp",
+      "name": "C / C++",
+      "indicators": [
+        { "file": "CMakeLists.txt" },
+        { "file": "Makefile", "contains": "CXX" },
+        { "file": "meson.build" },
+        { "file": "conanfile.py" },
+        { "file": "vcpkg.json" }
+      ],
+      "language": "cpp",
+      "rules": ["common", "cpp"],
+      "skills": ["verification-loop", "cpp-patterns"],
+      "commands": {
+        "build": ["cmake --build build", "make"],
+        "test": ["ctest", "make test"],
+        "lint": ["cppcheck"]
+      },
+      "permissions": {
+        "allow": ["cmake *", "make *", "cppcheck"],
+        "deny": []
+      }
+    },
+    {
+      "id": "csharp",
+      "name": "C# / .NET",
+      "indicators": [
+        { "file": "*.csproj" },
+        { "file": "*.sln" },
+        { "file": "global.json" },
+        { "file": "nuget.config" }
+      ],
+      "language": "csharp",
+      "rules": ["common", "csharp"],
+      "skills": ["verification-loop", "csharp-patterns"],
+      "commands": {
+        "build": ["dotnet build"],
+        "test": ["dotnet test"],
+        "lint": ["dotnet format"]
+      },
+      "permissions": {
+        "allow": ["dotnet *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "php",
+      "name": "PHP / Laravel",
+      "indicators": [
+        { "file": "composer.json" },
+        { "file": "artisan" },
+        { "file": "composer.lock" }
+      ],
+      "language": "php",
+      "rules": ["common", "php", "laravel"],
+      "skills": ["verification-loop", "php-patterns"],
+      "commands": {
+        "test": ["./vendor/bin/phpunit", "php artisan test"],
+        "lint": ["./vendor/bin/phpcs"]
+      },
+      "permissions": {
+        "allow": ["php *", "composer *", "./vendor/bin/*"],
+        "deny": []
+      }
+    },
+    {
+      "id": "ruby",
+      "name": "Ruby / Rails",
+      "indicators": [
+        { "file": "Gemfile" },
+        { "file": "Gemfile.lock" },
+        { "file": "config/routes.rb" },
+        { "file": "Rakefile" }
+      ],
+      "language": "ruby",
+      "rules": ["common", "ruby", "rails"],
+      "skills": ["verification-loop", "ruby-patterns"],
+      "commands": {
+        "test": ["bundle exec rspec", "rails test"],
+        "lint": ["rubocop"]
+      },
+      "permissions": {
+        "allow": ["bundle *", "rails *", "rubocop"],
+        "deny": []
+      }
+    },
+    {
+      "id": "docker",
+      "name": "Docker / Container",
+      "indicators": [
+        { "file": "Dockerfile" },
+        { "file": "docker-compose.yml" },
+        { "file": "docker-compose.yaml" },
+        { "file": ".dockerignore" }
+      ],
+      "language": null,
+      "rules": ["common"],
+      "skills": ["docker-patterns"],
+      "commands": {
+        "build": ["docker compose build"],
+        "up": ["docker compose up -d"],
+        "down": ["docker compose down"]
+      },
+      "permissions": {
+        "allow": ["docker *", "docker-compose *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "terraform",
+      "name": "Terraform / IaC",
+      "indicators": [
+        { "file": "*.tf" },
+        { "file": "terraform.tfstate" },
+        { "file": ".terraform.lock.hcl" }
+      ],
+      "language": "hcl",
+      "rules": ["common", "terraform"],
+      "skills": ["terraform-patterns"],
+      "commands": {
+        "plan": ["terraform plan"],
+        "apply": ["terraform apply"],
+        "fmt": ["terraform fmt"]
+      },
+      "permissions": {
+        "allow": ["terraform *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "machine-learning",
+      "name": "Machine Learning / Data Science",
+      "indicators": [
+        { "file": "requirements.txt", "contains": "torch" },
+        { "file": "requirements.txt", "contains": "tensorflow" },
+        { "file": "notebooks/" },
+        { "file": "*.ipynb" },
+        { "file": "pyproject.toml", "contains": "pytorch" }
+      ],
+      "language": "python",
+      "rules": ["common", "python"],
+      "skills": ["verification-loop", "ml-patterns", "pytorch-patterns"],
+      "commands": {
+        "test": ["pytest"],
+        "train": ["python train.py"]
+      },
+      "permissions": {
+        "allow": ["python *", "pytest"],
+        "deny": []
+      }
+    },
+    {
+      "id": "node-package",
+      "name": "Node.js Package / Library",
+      "indicators": [
+        { "file": "package.json", "contains": "\"private\": false" },
+        { "file": "package.json", "contains": "\"main\":" }
+      ],
+      "language": "typescript",
+      "rules": ["common", "typescript"],
+      "skills": ["verification-loop", "tdd-workflow", "publishing-patterns"],
+      "commands": {
+        "build": ["npm run build"],
+        "test": ["npm test"],
+        "publish": ["npm publish --dry-run"]
+      },
+      "permissions": {
+        "allow": ["npm run *", "npx *"],
+        "deny": ["npm publish"]
+      }
+    },
+    {
+      "id": "monorepo",
+      "name": "Monorepo (Turborepo / Nx)",
+      "indicators": [
+        { "file": "turbo.json" },
+        { "file": "nx.json" },
+        { "file": "lerna.json" },
+        { "file": "pnpm-workspace.yaml" }
+      ],
+      "language": "typescript",
+      "rules": ["common", "typescript", "monorepo"],
+      "skills": ["verification-loop", "monorepo-patterns"],
+      "commands": {
+        "build": ["npm run build", "npx turbo build"],
+        "test": ["npm test", "npx turbo test"]
+      },
+      "permissions": {
+        "allow": ["npm *", "npx *", "pnpm *"],
+        "deny": []
+      }
+    },
+    {
+      "id": "kubernetes",
+      "name": "Kubernetes",
+      "indicators": [
+        { "file": "kustomization.yaml" },
+        { "file": "kustomization.yml" },
+        { "file": "Chart.yaml" },
+        { "file": "values.yaml" },
+        { "file": "k8s/" }
+      ],
+      "language": null,
+      "rules": ["common", "kubernetes"],
+      "skills": ["kubernetes-patterns"],
+      "commands": {
+        "apply": ["kubectl apply -f"],
+        "validate": ["kubectl validate"]
+      },
+      "permissions": {
+        "allow": ["kubectl *", "helm *"],
+        "deny": []
+      }
+    }
+  ]
+}
