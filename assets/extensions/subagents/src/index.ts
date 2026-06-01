@@ -1864,28 +1864,19 @@ function patchToolExecution(proto: any) {
   toolExecutionPatched = true;
   debugLog("PATCHING TOOL EXECUTION PROTOTYPE");
 
-  // Neutralize solid backgrounds in updateDisplay
   const originalUpdateDisplay = proto.updateDisplay;
   proto.updateDisplay = function (this: any) {
     originalUpdateDisplay.call(this);
-    const noopBgFn = (text: string) => text;
-    if (this.contentBox && typeof this.contentBox.setBgFn === "function") {
-      this.contentBox.setBgFn(noopBgFn);
-    }
-    if (this.contentText && typeof this.contentText.setCustomBgFn === "function") {
-      this.contentText.setCustomBgFn(noopBgFn);
-    }
   };
 
-  // Add interesting bordered layout to render
   const originalToolRender = proto.render;
   proto.render = function (this: any, width: number) {
     if (this.hideComponent) {
       return [];
     }
 
-    const maxLineW = Math.max(10, width - 6);
-    const rawLines = originalToolRender.call(this, maxLineW);
+    const contentWidth = Math.max(10, width - 4);
+    const rawLines = originalToolRender.call(this, contentWidth);
 
     if (rawLines.length === 0) {
       return [];
@@ -1925,20 +1916,38 @@ function patchToolExecution(proto: any) {
       }
     }
 
+    // Check if content already uses box-drawing chars (tool has its own visual structure)
+    const hasOwnBorders = rawLines.some((l: string) =>
+      l.includes("\u2554") || l.includes("\u2557") || l.includes("\u255a") || l.includes("\u255d") || l.includes("\u2551")
+    );
+
+    if (hasOwnBorders) {
+      // Tool renders its own visual — just prepend a clean status line, no wrapping
+      const header = statusColorFn(`${statusSymbol} ${this.toolName}  ${statusLabel}`);
+      return ["  " + header, ...rawLines.map((l: string) => "  " + l)];
+    }
+
+    // Plain content — wrap in a clean bordered card
     const titleText = `${statusSymbol} ${this.toolName}  ${statusLabel}`;
     const titleW = visibleWidth(titleText);
-    const rightDashes = Math.max(2, maxLineW - titleW - 3);
+    const maxLineW = Math.max(10, contentWidth);
+    let contentMaxW = 1;
+    for (const line of rawLines) {
+      const w = visibleWidth(line);
+      if (w > contentMaxW) contentMaxW = w;
+    }
+    const boxW = Math.max(titleW + 4, contentMaxW + 2);
+    const rightDashes = Math.max(2, boxW - titleW - 3);
     const topBorder = statusColorFn("\u256d\u2500 " + titleText + " " + "\u2500".repeat(rightDashes) + "\u256e");
-    const bottomBorder = statusColorFn("\u2570" + "\u2500".repeat(maxLineW + 2) + "\u256f");
+    const bottomBorder = statusColorFn("\u2570" + "\u2500".repeat(boxW) + "\u256f");
 
     const middleLines = rawLines.map((line: string) => {
       const w = visibleWidth(line);
-      const pad = " ".repeat(Math.max(0, maxLineW - w));
+      const pad = " ".repeat(Math.max(0, boxW - 2 - w));
       return statusColorFn("\u2502 ") + line + pad + statusColorFn(" \u2502");
     });
 
-    const finalLines = [topBorder, ...middleLines, bottomBorder];
-    return finalLines.map(line => "  " + line);
+    return [topBorder, ...middleLines, bottomBorder].map(line => "  " + line);
   };
 }
 
