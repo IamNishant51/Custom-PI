@@ -264,6 +264,11 @@ export async function tieredRetrieve(
   let confidence = 0;
   let fallbackUsed = false;
 
+function wrapSource(content: string, source: string, confidence: number): string {
+  const tag = `[CONTEXT_SOURCE: ${source} | Confidence=${(confidence * 100).toFixed(0)}%]`;
+  return `${tag}\n${content}`;
+}
+
   if (intent === "conversational") {
     // Tier A: FTS5 full-text search (fast)
     if (opts?.sessionId) {
@@ -272,6 +277,7 @@ export async function tieredRetrieve(
         content = ftsResults.slice(0, 3).map((r: any) => r.content || r.text).join("\n\n");
         confidence = 0.85;
         sources.push("fts5");
+        content = wrapSource(content, "ChatHistory", confidence);
         return { primarySource: "conversational", content, confidence, fallbackUsed: false, sources };
       }
     }
@@ -282,6 +288,7 @@ export async function tieredRetrieve(
       content = triplets.slice(0, 3).map(t => `${t.subjectLabel} ${t.predicateLabel} ${t.objectLabel}`).join("\n");
       confidence = 0.6;
       sources.push("triplets");
+      content = wrapSource(content, "Triplet_KG", confidence);
     }
   } else if (intent === "knowledge_graph") {
     // Tier B: Knowledge graph triplets
@@ -290,6 +297,7 @@ export async function tieredRetrieve(
       content = triplets.slice(0, 5).map(t => `${t.subjectLabel} ${t.predicateLabel} ${t.objectLabel} (${(t.confidenceScore * 100).toFixed(0)}%)`).join("\n");
       confidence = 0.8;
       sources.push("triplets");
+      content = wrapSource(content, "Triplet_KG", confidence);
       return { primarySource: "knowledge_graph", content, confidence, fallbackUsed: false, sources };
     }
     // Fallback to FTS5
@@ -299,13 +307,14 @@ export async function tieredRetrieve(
         content = ftsResults.slice(0, 3).map((r: any) => r.content || r.text).join("\n\n");
         confidence = 0.6;
         sources.push("fts5");
+        content = wrapSource(content, "ChatHistory", confidence);
         fallbackUsed = true;
       }
     }
   } else if (intent === "system_state") {
     // Tier C: system state — just return indication
     sources.push("system_state");
-    return { primarySource: "system_state", content: "[System state query — use / commands for details]", confidence: 1.0, fallbackUsed: false, sources };
+    return { primarySource: "system_state", content: "[CONTEXT_SOURCE: SystemState | Confidence=100%]\n[System state query — use / commands for details]", confidence: 1.0, fallbackUsed: false, sources };
   } else {
     // Unknown intent — try FTS5 first, then triplets
     if (opts?.sessionId) {
@@ -314,6 +323,7 @@ export async function tieredRetrieve(
         content = ftsResults.slice(0, 3).map((r: any) => r.content || r.text).join("\n\n");
         confidence = 0.7;
         sources.push("fts5");
+        content = wrapSource(content, "ChatHistory", confidence);
       }
     }
     if (!content) {
@@ -322,6 +332,7 @@ export async function tieredRetrieve(
         content = triplets.slice(0, 3).map(t => `${t.subjectLabel} ${t.predicateLabel} ${t.objectLabel}`).join("\n");
         confidence = 0.5;
         sources.push("triplets");
+        content = wrapSource(content, "Triplet_KG", confidence);
         fallbackUsed = true;
       }
     }

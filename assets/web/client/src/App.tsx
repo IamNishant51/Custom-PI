@@ -5,6 +5,7 @@ import Dashboard from "./components/Dashboard";
 import VaultPanel from "./components/VaultPanel";
 import BudgetPanel from "./components/BudgetPanel";
 import MemoryPanel from "./components/MemoryPanel";
+import KnowledgeGraphPanel from "./components/KnowledgeGraphPanel";
 import WorkProductsPanel from "./components/WorkProductsPanel";
 import SubAgentPanel from "./components/SubAgentPanel";
 import MCPPanel from "./components/MCPPanel";
@@ -16,7 +17,7 @@ import { AsciiMenu } from "./components/Icons";
 import { ChatProvider, useChat } from "./context/ChatContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings";
+export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings";
 
 export default function App() {
   return (
@@ -72,6 +73,9 @@ function AppContent() {
             <div style={{ display: activeView === "memory" ? "block" : "none", height: "100%", width: "100%" }}>
               <MemoryPanel />
             </div>
+            <div style={{ display: activeView === "knowledge-graph" ? "block" : "none", height: "100%", width: "100%" }}>
+              <KnowledgeGraphPanel />
+            </div>
             <div style={{ display: activeView === "work-products" ? "block" : "none", height: "100%", width: "100%" }}>
               <WorkProductsPanel />
             </div>
@@ -101,7 +105,8 @@ function AppContent() {
 const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { activeView: string; wsConnected: boolean; onMenuClick: () => void }) {
   const labels: Record<string, string> = {
     chat: "Chat", dashboard: "Dashboard", vault: "Secrets Vault",
-    budget: "Budget", memory: "Memory", "work-products": "Work Products",
+    budget: "Budget", memory: "Memory", "knowledge-graph": "Knowledge Graph",
+    "work-products": "Work Products",
     agents: "Sub-Agents", "agent-discovery": "Agent Discovery", mcp: "MCP Servers",
     teams: "Teams", settings: "Settings",
   };

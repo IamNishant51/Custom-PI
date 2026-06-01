@@ -2,7 +2,7 @@ import { View } from "../App";
 import {
   AsciiChat, AsciiDashboard, AsciiVault, AsciiBudget, AsciiMemory,
   AsciiWorkProducts, AsciiAgents, AsciiMCP, AsciiSettings, AsciiTeams, AsciiUsers,
-  AsciiBanner,
+  AsciiGraph, AsciiBanner,
 } from "./Icons";
 
 interface SidebarProps {
@@ -17,6 +17,7 @@ const NAV_ITEMS: { view: View; icon: typeof AsciiChat; label: string }[] = [
   { view: "vault", icon: AsciiVault, label: "Secrets Vault" },
   { view: "budget", icon: AsciiBudget, label: "Budget" },
   { view: "memory", icon: AsciiMemory, label: "Memory" },
+  { view: "knowledge-graph", icon: AsciiGraph, label: "Knowledge Graph" },
   { view: "work-products", icon: AsciiWorkProducts, label: "Work Products" },
   { view: "agents", icon: AsciiAgents, label: "Sub-Agents" },
   { view: "agent-discovery", icon: AsciiUsers, label: "Agent Discovery" },

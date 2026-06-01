@@ -396,20 +396,35 @@ export interface PruneResult {
   redundantMerged: number;
   totalBefore: number;
   totalAfter: number;
+  staleItems: string[];
+  mergedItems: { kept: string; removed: string; reason: string }[];
+}
+
+const PRUNE_LOG_PATH = path.join(DB_DIR, "prune-log.json");
+
+function appendPruneLog(entry: any): void {
+  try {
+    const log: any[] = fs.existsSync(PRUNE_LOG_PATH)
+      ? JSON.parse(fs.readFileSync(PRUNE_LOG_PATH, "utf8"))
+      : [];
+    log.push({ ...entry, timestamp: Date.now() });
+    if (log.length > 1000) log.splice(0, log.length - 1000);
+    fs.writeFileSync(PRUNE_LOG_PATH, JSON.stringify(log, null, 2));
+  } catch { /* prune log is best-effort */ }
 }
 
 export function getTtlDays(subjectType: string): number {
   return TTL_DAYS[subjectType] ?? DEFAULT_TTL_DAYS;
 }
 
-export function pruneStaleTriplets(): number {
+export function pruneStaleTriplets(): { count: number; items: string[] } {
   const d = openDb();
   const now = Date.now();
-  let deleted = 0;
+  const items: string[] = [];
 
   const all = d.prepare(
-    "SELECT id, subject_type, last_updated FROM triplets"
-  ).all() as { id: string; subject_type: string; last_updated: number }[];
+    "SELECT id, subject_id, subject_label, predicate_label, object_label, subject_type, last_updated FROM triplets"
+  ).all() as { id: string; subject_id: string; subject_label: string; predicate_label: string; object_label: string; subject_type: string; last_updated: number }[];
 
   for (const row of all) {
     const ttlDays = getTtlDays(row.subject_type);
@@ -417,14 +432,14 @@ export function pruneStaleTriplets(): number {
     const age = now - (row.last_updated || now);
     if (age > ttlMs) {
       d.prepare("DELETE FROM triplets WHERE id = ?").run(row.id);
-      deleted++;
+      items.push(`${row.subject_label} → ${row.predicate_label} → ${row.object_label} (${row.subject_type}, expired ${Math.round(age / 86_400_000)}d/${ttlDays}d)`);
     }
   }
 
-  return deleted;
+  return { count: items.length, items };
 }
 
-export function mergeRedundantTriplets(): number {
+export function mergeRedundantTriplets(): { count: number; items: { kept: string; removed: string; reason: string }[] } {
   const d = openDb();
   const all = d.prepare(
     "SELECT id, subject_id, subject_label, predicate_type, predicate_label, object_id, object_label, confidence_score FROM triplets ORDER BY confidence_score DESC"
@@ -435,7 +450,7 @@ export function mergeRedundantTriplets(): number {
     confidence_score: number;
   }[];
 
-  let merged = 0;
+  const items: { kept: string; removed: string; reason: string }[] = [];
   const processed = new Set<string>();
 
   for (let i = 0; i < all.length; i++) {
@@ -456,25 +471,30 @@ export function mergeRedundantTriplets(): number {
         if (a.confidence_score >= b.confidence_score) {
           d.prepare("DELETE FROM triplets WHERE id = ?").run(b.id);
           processed.add(b.id);
+          items.push({ kept: `${a.subject_label} → ${a.predicate_label} → ${a.object_label}`, removed: `${b.subject_label} → ${b.predicate_label} → ${b.object_label}`, reason: `redundant (sim=${sim.toFixed(2)}, kept confidence=${a.confidence_score})` });
         } else {
           d.prepare("DELETE FROM triplets WHERE id = ?").run(a.id);
           processed.add(a.id);
+          items.push({ kept: `${b.subject_label} → ${b.predicate_label} → ${b.object_label}`, removed: `${a.subject_label} → ${a.predicate_label} → ${a.object_label}`, reason: `redundant (sim=${sim.toFixed(2)}, kept confidence=${b.confidence_score})` });
         }
-        merged++;
       }
     }
   }
 
-  return merged;
+  return { count: items.length, items };
 }
 
 export function pruneTriplets(): PruneResult {
   const d = openDb();
   const totalBefore = (d.prepare("SELECT COUNT(*) as c FROM triplets").get() as any).c;
-  const staleDeleted = pruneStaleTriplets();
-  const redundantMerged = mergeRedundantTriplets();
+  const stale = pruneStaleTriplets();
+  const redundant = mergeRedundantTriplets();
   const totalAfter = (d.prepare("SELECT COUNT(*) as c FROM triplets").get() as any).c;
-  return { staleDeleted, redundantMerged, totalBefore, totalAfter };
+  const result: PruneResult = { staleDeleted: stale.count, redundantMerged: redundant.count, totalBefore, totalAfter, staleItems: stale.items, mergedItems: redundant.items };
+  if (result.staleDeleted > 0 || result.redundantMerged > 0) {
+    appendPruneLog({ action: "prune", result });
+  }
+  return result;
 }
 
 export function closeDb(): void {

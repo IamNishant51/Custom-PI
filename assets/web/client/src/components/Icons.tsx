@@ -2,7 +2,7 @@ import {
   MessageSquare, LayoutDashboard, KeyRound, BarChart3,
   Brain, FileText, Users, Puzzle, Settings, Menu,
   Zap, ArrowRight, Send, Play, Check, X, Plus, Trash2,
-  Eye, RefreshCw, type LucideIcon,
+  Eye, RefreshCw, Share2, type LucideIcon,
 } from "lucide-react";
 
 interface IconProps {
@@ -135,3 +135,24 @@ export function AsciiBanner() {
     </pre>
   );
 }
+
+export function AsciiChat() { return <MessageSquare size={14} />; }
+export function AsciiDashboard() { return <LayoutDashboard size={14} />; }
+export function AsciiVault() { return <KeyRound size={14} />; }
+export function AsciiBudget() { return <BarChart3 size={14} />; }
+export function AsciiMemory() { return <Brain size={14} />; }
+export function AsciiWorkProducts() { return <FileText size={14} />; }
+export function AsciiAgents() { return <Users size={14} />; }
+export function AsciiMCP() { return <Puzzle size={14} />; }
+export function AsciiSettings() { return <Settings size={14} />; }
+export function AsciiTeams() { return <Users size={14} />; }
+export function AsciiUsers() { return <Users size={14} />; }
+export function AsciiGraph() { return <Share2 size={14} />; }
+export function AsciiEye() { return <Eye size={14} />; }
+export function AsciiTrash() { return <Trash2 size={14} />; }
+export function AsciiRefresh() { return <RefreshCw size={14} />; }
+export function AsciiMenu() { return <Menu size={14} />; }
+export function AsciiPlus() { return <Plus size={14} />; }
+export function AsciiCheck() { return <Check size={14} />; }
+export function AsciiX() { return <X size={14} />; }
+export function AsciiPlay() { return <Play size={14} />; }
