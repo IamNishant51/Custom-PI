@@ -305,6 +305,108 @@ export function deleteTriplet(id: string): boolean {
   return res.changes > 0;
 }
 
+// ── Triplet TTL Policy ─────────────────────────────────────────────────────
+
+const TTL_DAYS: Record<string, number> = {
+  tool: 7,
+  file: 90,
+  function: 180,
+  class: 180,
+  concept: 365,
+  dependency: 365,
+  setting: 365,
+  person: 365 * 5,
+};
+
+const DEFAULT_TTL_DAYS = 90;
+const REDUNDANCY_SIMILARITY_THRESHOLD = 0.85;
+
+export interface PruneResult {
+  staleDeleted: number;
+  redundantMerged: number;
+  totalBefore: number;
+  totalAfter: number;
+}
+
+export function getTtlDays(subjectType: string): number {
+  return TTL_DAYS[subjectType] ?? DEFAULT_TTL_DAYS;
+}
+
+export function pruneStaleTriplets(): number {
+  const d = openDb();
+  const now = Date.now();
+  let deleted = 0;
+
+  const all = d.prepare(
+    "SELECT id, subject_type, last_updated FROM triplets"
+  ).all() as { id: string; subject_type: string; last_updated: number }[];
+
+  for (const row of all) {
+    const ttlDays = getTtlDays(row.subject_type);
+    const ttlMs = ttlDays * 86_400_000;
+    const age = now - (row.last_updated || now);
+    if (age > ttlMs) {
+      d.prepare("DELETE FROM triplets WHERE id = ?").run(row.id);
+      deleted++;
+    }
+  }
+
+  return deleted;
+}
+
+export function mergeRedundantTriplets(): number {
+  const d = openDb();
+  const all = d.prepare(
+    "SELECT id, subject_id, subject_label, predicate_type, predicate_label, object_id, object_label, confidence_score FROM triplets ORDER BY confidence_score DESC"
+  ).all() as {
+    id: string; subject_id: string; subject_label: string;
+    predicate_type: string; predicate_label: string;
+    object_id: string; object_label: string;
+    confidence_score: number;
+  }[];
+
+  let merged = 0;
+  const processed = new Set<string>();
+
+  for (let i = 0; i < all.length; i++) {
+    if (processed.has(all[i].id)) continue;
+    for (let j = i + 1; j < all.length; j++) {
+      if (processed.has(all[j].id)) continue;
+
+      const a = all[i];
+      const b = all[j];
+      const sim =
+        (a.subject_id === b.subject_id ? 0.3 : 0) +
+        (a.predicate_type === b.predicate_type ? 0.3 : 0) +
+        (a.object_id === b.object_id ? 0.3 : 0) +
+        (a.confidence_score > 0.7 && b.confidence_score > 0.7 ? 0.1 : 0);
+
+      if (sim >= REDUNDANCY_SIMILARITY_THRESHOLD) {
+        // Keep the higher-confidence entry, delete the other
+        if (a.confidence_score >= b.confidence_score) {
+          d.prepare("DELETE FROM triplets WHERE id = ?").run(b.id);
+          processed.add(b.id);
+        } else {
+          d.prepare("DELETE FROM triplets WHERE id = ?").run(a.id);
+          processed.add(a.id);
+        }
+        merged++;
+      }
+    }
+  }
+
+  return merged;
+}
+
+export function pruneTriplets(): PruneResult {
+  const d = openDb();
+  const totalBefore = (d.prepare("SELECT COUNT(*) as c FROM triplets").get() as any).c;
+  const staleDeleted = pruneStaleTriplets();
+  const redundantMerged = mergeRedundantTriplets();
+  const totalAfter = (d.prepare("SELECT COUNT(*) as c FROM triplets").get() as any).c;
+  return { staleDeleted, redundantMerged, totalBefore, totalAfter };
+}
+
 export function closeDb(): void {
   if (db) {
     db.close();

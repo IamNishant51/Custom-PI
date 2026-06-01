@@ -1,5 +1,5 @@
 import { runCurator, CuratorReport } from "./curator";
-import { closeDb } from "./state-db";
+import { closeDb, pruneTriplets } from "./state-db";
 import { memoryConsolidate as fileConsolidate } from "./memory-file-store";
 import { loadMcpServers, probeMcpServer, probeProvider } from "./mcp-catalog";
 import { contextMonitor } from "./context-monitor";
@@ -169,8 +169,14 @@ export function startCronJobs(
     } catch { /* silent */ }
   }, cfg.consolidationIntervalMs);
 
-  // DB cleanup / maintenance
+  // DB cleanup / maintenance — prune stale triplets, then reopen
   const dbTimer = setInterval(() => {
+    try {
+      const result = pruneTriplets();
+      if (result.staleDeleted > 0 || result.redundantMerged > 0) {
+        // Triplet housekeeping happened
+      }
+    } catch { /* silent */ }
     try { closeDb(); } catch { /* silent */ }
   }, cfg.dbCleanupIntervalMs);
 
