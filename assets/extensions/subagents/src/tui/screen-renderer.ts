@@ -477,6 +477,20 @@ export class ScreenRenderer {
     return y;
   }
 
+  /** Detect entity type at a given position in text */
+  private entityAt(text: string, pos: number): { type: "at" | "slash" | "shell" | null; start: number; end: number } {
+    if (pos < 0 || pos >= text.length) return { type: null, start: pos, end: pos };
+    // Check for @mention
+    const atMatch = text.slice(0, pos + 1).match(/(?:^|\s)(@\w*)$/);
+    if (atMatch) return { type: "at", start: pos - atMatch[1].length + 1, end: pos };
+    // Check for /command
+    const slashMatch = text.slice(0, pos + 1).match(/(?:^|\s)(\/\w*)$/);
+    if (slashMatch) return { type: "slash", start: pos - slashMatch[1].length + 1, end: pos };
+    // Check for !shell
+    if (text.charAt(0) === "!") return { type: "shell", start: 0, end: text.indexOf(" ") > 0 ? text.indexOf(" ") - 1 : text.length - 1 };
+    return { type: null, start: pos, end: pos };
+  }
+
   drawInputArea(y: number, width: number, text: string, cursorPos: number, vimMode?: string): number {
     const cols = this.screen.getCols();
     const cx = this.contentLeft;
@@ -487,66 +501,138 @@ export class ScreenRenderer {
     const inputStyle = this.style({ fg: this.theme.ink });
     const cursorStyle = this.style({ fg: this.theme.ink, bg: this.theme.accent });
     const canvasStyle = this.style({ bg: this.theme.canvas });
-    const surfaceStyle = this.style({ bg: this.theme.surface });
+    const elevatedStyle = this.style({ bg: this.theme.surfaceElevated });
     const modeStyle = this.style({ fg: this.theme.muted, dim: true });
     const accentStyle = this.style({ fg: this.theme.accent });
+    const atStyle = this.style({ fg: this.theme.info });
+    const slashStyle = this.style({ fg: this.theme.warning });
+    const shellStyle = this.style({ fg: this.theme.error });
 
     if (y >= this.screen.getRows() - SPACING.inputAreaLines) return y;
 
     const inputW = w - PAD;
+    const maxVisibleChars = inputW - 2;
+
+    // Split text into lines for multi-line display
+    const lines = text.split("\n");
+    const visibleLines = lines.slice(-3); // max 3 visible lines
+    const totalLines = visibleLines.length;
 
     // Top border
-    this.screen.clearLine(y, canvasStyle);
+    this.screen.clearLine(y, elevatedStyle);
     this.screen.writeString(cx, y, "\u256d" + BOX.h.repeat(inputW) + "\u256e", borderStyle);
     y++;
 
-    if (y >= this.screen.getRows() - SPACING.inputAreaLines) return y;
-
-    // Input line with background
-    this.screen.clearLine(y, surfaceStyle);
-    this.screen.writeString(cx, y, "\u2502", borderStyle);
-
-    const displayText = text.length > inputW - 2 ? text.slice(text.length - inputW + 4) : text;
-    const visibleCursor = Math.min(cursorPos, displayText.length);
-    const writeStartX = cx + PAD_SM;
-
-    // Draw text
-    for (let i = 0; i < inputW - 2 && i < displayText.length; i++) {
-      const ch = displayText[i];
-      if (i === visibleCursor && vimMode === "insert") {
-        this.screen.writeString(writeStartX + i, y, ch, cursorStyle);
-      } else {
-        this.screen.writeString(writeStartX + i, y, ch, inputStyle);
+    // Figure out which visual line and x-position the cursor is on
+    let cursorLine = 0;
+    let cursorLineOffset = 0;
+    let charCount = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const lineLen = lines[i].length + 1; // +1 for newline
+      if (charCount + lineLen > cursorPos) {
+        cursorLine = i;
+        cursorLineOffset = cursorPos - charCount;
+        break;
       }
+      charCount += lineLen;
+    }
+    // Adjust for visible lines (show bottom-most)
+    const lineOffset = Math.max(0, lines.length - 3);
+    const visCursorLine = cursorLine - lineOffset;
+
+    // Draw visible input lines
+    for (let li = 0; li < visibleLines.length; li++) {
+      if (y >= this.screen.getRows() - SPACING.inputAreaLines) break;
+      this.screen.clearLine(y, elevatedStyle);
+      this.screen.writeString(cx, y, "\u2502", borderStyle);
+
+      const lineText = visibleLines[li];
+      const displayText = lineText.length > maxVisibleChars
+        ? lineText.slice(lineText.length - maxVisibleChars)
+        : lineText;
+      const startOffset = lineText.length > maxVisibleChars ? lineText.length - maxVisibleChars : 0;
+
+      const writeStartX = cx + PAD_SM;
+
+      // Draw each character with entity highlighting
+      for (let i = 0; i < displayText.length && i < maxVisibleChars; i++) {
+        const globalI = startOffset + i;
+        const ch = displayText[i];
+        const isCursor = li === visCursorLine && globalI === cursorLineOffset;
+
+        // Determine styling based on entity type
+        const entity = this.entityAt(text, globalI);
+        let charStyle = inputStyle;
+        if (entity.type === "at" && globalI >= entity.start && globalI <= entity.end) {
+          charStyle = atStyle;
+        } else if (entity.type === "slash" && globalI >= entity.start && globalI <= entity.end) {
+          charStyle = slashStyle;
+        } else if (entity.type === "shell") {
+          charStyle = shellStyle;
+        }
+
+        if (isCursor && vimMode === "insert") {
+          this.screen.writeString(writeStartX + i, y, ch, cursorStyle);
+        } else {
+          this.screen.writeString(writeStartX + i, y, ch, charStyle);
+        }
+      }
+
+      // Cursor on this line at end
+      if (li === visCursorLine && cursorLineOffset >= lineText.length) {
+        if (vimMode === "insert") {
+          this.screen.writeString(writeStartX + lineText.length - startOffset, y, " ", cursorStyle);
+        } else {
+          this.screen.writeString(writeStartX + lineText.length - startOffset, y, "\u258c", inputStyle);
+        }
+      }
+
+      // If no text and this is the active line, show cursor
+      if (lineText.length === 0 && li === visCursorLine) {
+        if (vimMode === "insert") {
+          this.screen.writeString(writeStartX, y, " ", cursorStyle);
+        } else {
+          this.screen.writeString(writeStartX, y, "\u258c", inputStyle);
+        }
+      }
+
+      this.screen.writeString(cx + inputW + 1, y, "\u2502", borderStyle);
+      y++;
     }
 
-    // Cursor at end
-    if (visibleCursor >= displayText.length) {
-      if (vimMode === "insert") {
-        this.screen.writeString(writeStartX + displayText.length, y, " ", cursorStyle);
-      } else {
-        this.screen.writeString(writeStartX + displayText.length, y, "\u258c", inputStyle);
-      }
+    // Fill remaining input lines if fewer than 3
+    for (let li = visibleLines.length; li < 3; li++) {
+      if (y >= this.screen.getRows() - 1) break;
+      this.screen.clearLine(y, elevatedStyle);
+      this.screen.writeString(cx, y, "\u2502", borderStyle);
+      this.screen.writeString(cx + inputW + 1, y, "\u2502", borderStyle);
+      y++;
     }
-
-    this.screen.writeString(cx + cw - PAD_SM, y, "\u2502", borderStyle);
-    y++;
 
     // Bottom border
     if (y < this.screen.getRows() - 1) {
-      this.screen.clearLine(y, surfaceStyle);
+      this.screen.clearLine(y, elevatedStyle);
       this.screen.writeString(cx, y, "\u2570" + BOX.h.repeat(inputW) + "\u256f", borderStyle);
       y++;
     }
 
     // Mode bar below input
     if (y < this.screen.getRows()) {
-      this.screen.clearLine(y, surfaceStyle);
+      this.screen.clearLine(y, this.surfaceStyle("surface"));
       if (vimMode) {
         const modeText = vimMode.toUpperCase();
         this.screen.writeString(cx + PAD_SM, y, `\u25c6 ${modeText}`, vimMode === "insert" ? accentStyle : modeStyle);
         this.screen.writeString(cx + PAD_SM + 8, y, "\u2502", this.style({ fg: this.theme.dim }));
       }
+
+      // Line count indicator (multi-line)
+      if (lines.length > 1) {
+        const lineCount = `${lines.length} lines`;
+        const lcStyle = this.style({ fg: this.theme.textSecondary });
+        this.screen.writeString(cx + PAD_SM + 12, y, lineCount, lcStyle);
+        this.screen.writeString(cx + PAD_SM + 12 + measureWidth(lineCount) + 1, y, "\u2502", this.style({ fg: this.theme.dim }));
+      }
+
       // Right hint
       const hint = "\u2302 Ctrl+Enter send";
       this.screen.writeString(cx + cw - measureWidth(hint) - PAD_SM, y, hint, modeStyle);
