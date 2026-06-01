@@ -2201,6 +2201,19 @@ function patchFooterComponent(child: any) {
     }
     return originalSetExtensionStatus.call(this, key, text);
   };
+
+  // Also patch FooterComponent's render to strip "Dashboard active" from output
+  const proto = Object.getPrototypeOf(child);
+  if (proto && typeof proto.render === "function") {
+    const originalFooterRender = proto.render;
+    proto.render = function (this: any, width: number) {
+      const lines = originalFooterRender.call(this, width);
+      return lines.filter((l: string) => {
+        const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
+        return plain !== "Dashboard active" && !plain.includes("Dashboard active");
+      });
+    };
+  }
 }
 
 function applyLivePatches(tui: any, themeInstance: any) {
@@ -2229,7 +2242,12 @@ function applyLivePatches(tui: any, themeInstance: any) {
       const childLines = child.render(width);
       offset += childLines.length;
     }
-    return originalTuiRender.call(this, width);
+    const lines = originalTuiRender.call(this, width);
+    // Filter out "Dashboard active" status line from final output
+    return lines.filter((l: string) => {
+      const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
+      return plain !== "Dashboard active" && !plain.includes("Dashboard active");
+    });
   };
 
   // Hook TUI.prototype.start to enable mouse tracking
