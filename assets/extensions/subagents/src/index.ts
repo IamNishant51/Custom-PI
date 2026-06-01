@@ -39,6 +39,7 @@ import { getCurrentRouting, getAvailableModels, setModelRoute, resetRouting } fr
 import { recordWorkProduct, getWorkProducts, getWorkProductSummary, clearWorkProducts } from "./work-products";
 import { LocalStorageDriver, type StorageDriver } from "./storage-driver";
 import { runVerification } from "./verification-engine";
+import { harvestContext, suggestWorkflows, formatSuggestionsForPrompt } from "./workflow-suggestions";
 import { discoverAgents, spawnAgentSession, closeSession, listSessions, getAgentLabel, saveCustomAgent, removeCustomAgent } from "./agent-manager";
 import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMcpServer, getEnabledMcpServers, buildMcpContextForPrompt } from "./mcp-catalog";
 import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext, type Team, type TeamAgent } from "./team-manager";
@@ -4003,12 +4004,34 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
+  // ── Workflows Command ───────────────────────────────────────────────────────
+  pi.registerCommand("workflows", {
+    description: "Show suggested workflows based on project context.",
+    handler(args, ctx) {
+      try {
+        const context = harvestContext();
+        const suggestions = suggestWorkflows(context);
+        if (!suggestions.length) {
+          ctx.ui.notify("No workflow suggestions available for this project.", "info");
+          return;
+        }
+        const lines = suggestions.map(s => `  - npm run ${s.command} (${s.intent}, ${s.confidence})`);
+        ctx.ui.notify(`Workflow suggestions:\n${lines.join("\n")}`, "info");
+      } catch {
+        ctx.ui.notify("Failed to generate workflow suggestions.", "error");
+      }
+    },
+    execute(args, ctx) {
+      return (this as any).handler(args, ctx);
+    }
+  });
+
   // Command: Show keybindings and commands
   pi.registerCommand("help", {
     description: "Show available commands and keyboard shortcuts.",
     handler(args, ctx) {
       ctx.ui.notify(
-        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /plugins, /help. " +
+        "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /workflows, /plugins, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
@@ -4092,6 +4115,21 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         );
       }
     } catch { /* checkpoint check must never crash startup */ }
+
+    // Proactive workflow suggestions on session start
+    try {
+      const context = harvestContext();
+      if (Object.keys(context.scripts).length > 0) {
+        const suggestions = suggestWorkflows(context);
+        if (suggestions.length > 0) {
+          const formatted = formatSuggestionsForPrompt(suggestions);
+          pi.sendMessage({
+            role: "system" as any,
+            content: [{ type: "text", text: formatted }]
+          });
+        }
+      }
+    } catch { /* workflow suggestions must never crash startup */ }
 
     // Listen for abort signal (Escape key) to stop animation and clear working state
     if (ctx.signal) {
