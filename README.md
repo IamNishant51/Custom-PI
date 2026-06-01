@@ -8,17 +8,17 @@
 ```
 
 <p align="center">
-  <b>⚡ HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.</b><br/>
-  <i>32+ tools • DAG swarm orchestration • Semantic memory • Web UI • LSP • MCP • Vault • SSH</i>
+  <b>HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.</b><br/>
+  <i>32+ tools | DAG swarm orchestration | Semantic memory | Web UI | LSP | MCP | Vault | SSH</i>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/custom-pi"><img src="https://img.shields.io/npm/v/custom-pi.svg?style=for-the-badge&color=ff007f&logo=npm" alt="NPM Version" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-a122ff.svg?style=for-the-badge" alt="License: MIT" /></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-00f0ff.svg?style=for-the-badge&logo=node.js" alt="Node Version" /></a>
+  <a href="https://www.npmjs.com/package/custom-pi"><img src="https://img.shields.io/npm/v/custom-pi.svg?style=for-the-badge&color=00d7ff&logo=npm" alt="NPM Version" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-005fff.svg?style=for-the-badge" alt="License: MIT" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-00d787.svg?style=for-the-badge&logo=node.js" alt="Node Version" /></a>
   <img src="https://img.shields.io/badge/TF--IDF-Memory-00ff88.svg?style=for-the-badge" alt="TF-IDF Memory" />
-  <img src="https://img.shields.io/badge/DAG-Swarm-a100ff.svg?style=for-the-badge" alt="DAG Swarm" />
-  <img src="https://img.shields.io/badge/142-Tests-00f0ff.svg?style=for-the-badge" alt="142 Tests" />
+  <img src="https://img.shields.io/badge/DAG-Swarm-af00ff.svg?style=for-the-badge" alt="DAG Swarm" />
+  <img src="https://img.shields.io/badge/Tests-142%20Passed-00f0ff.svg?style=for-the-badge" alt="142 Tests" />
 </p>
 
 <p align="center">
@@ -27,141 +27,145 @@
 
 ---
 
-## 🧬 The Fusion
+## The Fusion
 
-> **Hermes** — the messenger god, swift and articulate. **Paperclip Maximizer** — the thought experiment that became a legend, tirelessly optimizing toward its goal.
+Hermes represents the swift, articulate messenger. The Paperclip Maximizer represents the theoretical model of absolute, relentless optimization toward a target goal.
 
-**custom-pi** is what happens when you give a coding agent the speed of Hermes and the relentless focus of the Paperclip. It's a premium extension suite for the [Pi Coding Agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) that adds:
+custom-pi is a premium engineering extension suite for the Pi Coding Agent. It equips the host agent with persistent context recall, multi-agent wave orchestration, and safe system execution tooling.
 
-- **Memory that lasts** — TF-IDF semantic vectors, not brittle keyword search
-- **DAG-powered swarms** — orchestrate 3+ agents in parallel waves
-- **32+ production tools** — browser, GitHub, email, SSH, image gen, TTS, and more
-- **Full web UI** — real-time streaming, dashboards, vault manager, memory browser
-- **Encrypted everything** — AES-256 vault, sandboxed plugins, approval gates
-- **Code intelligence** — LSP diagnostics, goto-def, rename across 5 languages
-- **Zero config** — install once, everything syncs automatically
+* **Durable Context**: Cognitive memory tracking utilizing TF-IDF semantic vector similarity combined with recency decay factors.
+* **DAG Swarms**: Multi-agent pipelines (Researcher, Coder, Reviewer) running in parallel to prevent single-agent execution dead-ends.
+* **32+ Built-in Tools**: Full-featured OS, browser, LSP, AST-grep, email, cryptographic vault, SSH, and social posting integration.
+* **Dual Dashboards**: Stream reasoning and execution logs in real-time through an interactive fullscreen TUI or a React-based web dashboard.
+* **Secure Sandbox**: Enforced user approval gates, AES-256 encrypted configuration storage, and isolated custom plugins execution.
 
 ---
 
-## 🚀 Quick Start
+## Interactive Architecture Flow
+
+The workflow diagram below illustrates how custom-pi coordinates task completion through the CEO Orchestrator, the subagent swarm, and the diagnostic verification layer:
+
+```mermaid
+graph TD
+  Goal[User Input / Goal] --> CEO[CEO Orchestrator]
+  CEO --> Config[DAG Planner / dag-config.yaml]
+  Config --> Swarm{DAG Swarm Execution}
+  Swarm -->|Task A| Res[Researcher Agent]
+  Swarm -->|Task B| Cod[Coder Agent]
+  Res -.->|Analyzed Data| Cod
+  Cod --> Rev[Reviewer Agent]
+  Rev --> Test[Test Suite / LSP Linting]
+  Test -->|Validation Failed| CEO
+  Test -->|Validation Passed| Deliver[Final Deliverable]
+```
+
+---
+
+## Quick Start
+
+### Installation
+
+Install the package globally using npm:
 
 ```bash
 npm install -g custom-pi
-
-# Launch terminal UI
-custom-pi
-
-# Launch web UI (served at http://localhost:4321)
-custom-pi-web
 ```
 
-That's it. The first run copies all agent configs, themes, system prompts, and extension modules to `~/.pi/agent/`. No manual setup required.
+To run browser automation tasks, install Playwright's Chromium binary:
 
-### Prerequisites
+```bash
+npx playwright install chromium
+```
 
-- **Node.js** >= 18.0.0
-- **Playwright** (for browser automation): `npx playwright install chromium`
-- **Language servers** (for LSP): `npm install -g typescript-language-server`, `pip install pyright`, etc.
+For full IDE code intelligence support, make sure you have appropriate language servers installed locally:
 
----
+```bash
+npm install -g typescript-language-server
+pip install pyright
+```
 
-## 🎯 Why CUSTOM-PI?
+### Launch Commands
 
-| Problem | Solution |
-|---------|----------|
-| Agents forget context between sessions | **TF-IDF semantic memory** with cosine similarity + recency decay |
-| Single agents hit dead ends | **DAG swarm** — 3 agents (researcher/coder/reviewer) in pipeline/parallel waves |
-| No web interface | **React + Vite web UI** with real-time WebSocket streaming |
-| Secrets in plaintext config files | **AES-256-GCM vault** with import/export |
-| No code intelligence | **LSP client** — diagnostics, goto-def, rename across 5 languages |
-| Can't browse the web | **Playwright browser** — navigate, click, type, screenshot, extract |
-| Can't use GitHub | **GitHub API** — issues, PRs, code search, file read |
-| No planning | **Multi-step plans** with CRUD, status tracking, auto-completion |
-| Expensive API keys for search | **3 free providers** — DuckDuckGo → HackerNews → Wikipedia fallback |
-| Twitter paywall | **Browser automation** — free posting via Playwright |
+Start the terminal dashboard interface:
 
----
+```bash
+custom-pi
+```
 
-## 🛠️ Tool Arsenal (32+)
-
-### 🔍 Search & Web
-| Tool | What it does |
-|------|-------------|
-| `web_search` | DuckDuckGo → HackerNews Algolia → Wikipedia (free fallback chain) |
-| `web_fetch` | HTML/JSON parsing, 15s timeout, auto User-Agent |
-| `internal_url` | 8-protocol router: `memory://`, `vault://`, `local://`, `omp://`, `issue://`, `pr://`, `skill://`, `rule://` |
-
-### 🤖 Browser & Automation
-| Tool | What it does |
-|------|-------------|
-| `browser` | Navigate, click, type, screenshot (base64 PNG), extract (selector/full page) |
-| `ssh_exec` | Remote execution with key/password auth, temp key cleanup |
-
-### 💻 Code Intelligence
-| Tool | What it does |
-|------|-------------|
-| `lsp` | Diagnostics, goto-def, references, hover, symbols, rename, code actions (TS/JS/Python/Rust/Go) |
-| `ast_grep` | Structural search — functions, classes, imports (11 languages) |
-| `hashline_edit` | Content-hash validated patches with 3-way merge recovery |
-
-### 🔐 GitHub & Email
-| Tool | What it does |
-|------|-------------|
-| `github` | Issues, PRs, code search, file read by branch |
-| `send_email` | Gmail OAuth 2.0 device flow with auto-refresh |
-
-### 📱 Social
-| Tool | What it does |
-|------|-------------|
-| `post_to_reddit` | OAuth 2.0 password grant |
-| `post_to_bluesky` | AT Protocol |
-| `post_to_discord` | Webhook |
-| `post_to_telegram` | Bot API |
-
-### 🧠 Memory & Vault
-| Tool | What it does |
-|------|-------------|
-| `memory_store/search/edit` | TF-IDF semantic vectors with importance scoring |
-| `vault_set/get/delete/list/import` | AES-256-GCM encrypted storage |
-
-### 🎨 Media
-| Tool | What it does |
-|------|-------------|
-| `generate_image` | DALL-E 3 / Gemini / Grok — auto-selects from available keys |
-| `text_to_speech` | edge-tts CLI with base64 audio |
-| `render_mermaid` | SVG rendering with ASCII fallback |
-
-### 📋 Planning & Management
-| Tool | What it does |
-|------|-------------|
-| `plan` | Multi-step plans with CRUD, auto-completion |
-| `session` | Checkpoint save/restore/compact with full state capture |
-| `plugin` | List, create, enable/disable, sandboxed execution |
-| `todo_write` | Persistent phased task lists |
-
----
-
-## 🌐 Web UI
-
-The web interface gives you full control without touching the terminal:
-
-- **Chat** — streaming LLM responses, tool call cards, conversation history
-- **Swarm Dashboard** — agent status, DAG execution logs, CEO console
-- **Vault Manager** — add, reveal, delete encrypted secrets
-- **Budget Panel** — token/cost stats, session/daily limits
-- **Memory Browser** — search, store, browse semantic facts
-- **Work Products** — every file the agent created or modified
+Start the React web server (served locally at http://localhost:4321):
 
 ```bash
 custom-pi-web
-# → http://localhost:4321
 ```
 
 ---
 
-## 🧩 DAG Swarm Orchestration
+## Technical Specifications
 
-Define multi-agent workflows in `~/.pi/agent/dag-config.yaml`:
+| Objective | Legacy Limitation | custom-pi Resolution |
+| :--- | :--- | :--- |
+| **Context Retention** | Agents lose state and forget decisions across sessions. | **TF-IDF semantic vector space** with cosine similarity matching and recency decay. |
+| **Problem Solving** | Single agents get stuck in recursive bugs or loops. | **DAG swarms** that delegate specialized roles (Research, Coding, Reviewing) concurrently. |
+| **Interface Telemetry** | Plain terminal scrolling output makes tracking swarms difficult. | **Double-buffered fullscreen TUI** alongside a WebSocket-driven React dashboard. |
+| **Credentials Storage** | Storing API keys in plaintext files or config variables. | **AES-256-GCM encrypted vault** with programmatic key generation. |
+| **Code Understanding** | Regex-based file search lacks structural and type context. | **LSP client integration** with ast-grep queries for 11+ languages. |
+| **Web Access** | Incapable of logging in or interacting with complex JavaScript apps. | **Playwright integration** for screenshot capture, selector querying, and action execution. |
+
+---
+
+## Tool Arsenal (32+)
+
+### Search and Web Automation
+
+* `web_search`: Multi-tier search fallback chain (DuckDuckGo -> Algolia HackerNews -> Wikipedia).
+* `web_fetch`: Programmatic page fetching with HTML-to-Markdown parsing and automatic user-agent rotation.
+* `internal_url`: URL router handling internal schemas (`memory://`, `vault://`, `local://`, `issue://`, `pr://`, `skill://`, `rule://`).
+
+### Headless Browser & Shell
+
+* `browser`: Navigate, type, click, screenshot (base64 PNG), and extract node content via headless Chromium.
+* `ssh_exec`: Execution of remote host commands with secure temporary SSH key and password management.
+
+### Code Intelligence
+
+* `lsp`: Programmatic interface for language servers supporting hover definitions, symbols, rename, and diagnostic arrays.
+* `ast_grep`: Structural syntax tree search across 11 programming languages.
+* `hashline_edit`: Content-hash validated code editing to ensure merge safety and prevent corrupt patches.
+
+### Integrations and Messaging
+
+* `github`: Full integration with the GitHub API for issues, pull request tracking, and branch-specific code search.
+* `send_email`: Compose and dispatch emails using the Gmail API via OAuth 2.0 Device Flow authorization.
+
+### Broadcast & Social API
+
+* `post_to_reddit`: Submit post payloads via Reddit OAuth password grant.
+* `post_to_bluesky`: AT Protocol client helper for publishing text updates.
+* `post_to_discord`: Webhook integration for system logs broadcasting.
+* `post_to_telegram`: Bot API integration for secure command updates.
+
+### Memory & Encryption
+
+* `memory_store` / `memory_search` / `memory_edit`: Create, retrieve, and update TF-IDF memory vectors.
+* `vault_set` / `vault_get` / `vault_delete` / `vault_list` / `vault_import`: Cryptographically secure storage mapped to AES-256-GCM encryption.
+
+### Media Synthesis
+
+* `generate_image`: Automated image rendering using DALL-E 3, Gemini, or Grok based on active vault credentials.
+* `text_to_speech`: Edge-tts CLI client returning audio base64 buffers.
+* `render_mermaid`: Compiles Mermaid diagrams into SVG vectors with ASCII fallbacks.
+
+### Orchestration & State
+
+* `plan`: Formulate, track, and complete multi-step checklists.
+* `session`: Checkpoint serialization containing execution states, tools, and variables.
+* `plugin`: Register, configure, and isolate dynamic JavaScript extensions.
+
+---
+
+## Multi-Agent Swarms
+
+Configure parallel multi-agent workflows using `~/.pi/agent/dag-config.yaml`:
 
 ```yaml
 version: 1
@@ -169,99 +173,120 @@ mode: pipeline
 pipeline_count: 3
 agents:
   - id: researcher
-    role: Research and gather information
+    role: Research specifications and codebase structure
     tools: [web_search, web_fetch, memory_search]
     waits_for: []
   - id: coder
-    role: Implement solutions
+    role: Implement software features and bug fixes
     tools: [write, edit, bash, glob, grep]
     waits_for: [researcher]
   - id: reviewer
-    role: Review and validate
+    role: Validate type checks, tests, and run compiler
     tools: [bash, glob, grep, lsp]
     waits_for: [coder]
 ```
 
-3 modes: **pipeline** (N iterations with CEO feedback), **parallel** (all at once), **sequential** (one by one). Cycle detection via Kahn's algorithm. Failure isolation per agent.
+### Swarm Execution Configurations
+
+* **pipeline**: Iterative loop. Reviewer validates output, and the CEO Orchestrator routes feedback to the Coder/Researcher if defects are found.
+* **parallel**: Executes all agents concurrently when task definitions do not overlap.
+* **sequential**: Strict single-lane dependency execution.
 
 ---
 
-## 🔌 MCP & LSP Integration
+## Memory and Vault Operations
 
-**MCP Servers** — configure in `~/.pi/agent/mcp-servers.json`:
+### Mathematical Model for Memory Decay
 
-```json
-[
-  { "name": "sequential-thinking", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"] },
-  { "name": "filesystem", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"] }
-]
+To keep context relevant, the retrieval system calculates memory weights dynamically. The score decays exponentially based on age:
+
+$$\text{Retrieved Weight} = \text{Cosine Similarity}(Q, M_i) \times e^{-\lambda t}$$
+
+Where:
+* $Q$ is the active query vector.
+* $M_i$ is the target memory vector.
+* $\lambda$ is the decay constant.
+* $t$ is the time elapsed since the memory was captured.
+
+### Vault Encryption Details
+
+The secure storage subsystem generates a random 12-byte Initialization Vector (IV) and creates a ciphertext containing an Authentication Tag using AES-256-GCM.
+
+```
+Plaintext Credential + Master Key -> AES-256-GCM -> Ciphertext + 12-Byte IV + 16-Byte Auth Tag
 ```
 
-**LSP Servers** — started on-demand per language:
-
-```json
-{
-  "typescript": { "command": "typescript-language-server", "args": ["--stdio"] },
-  "python": { "command": "pyright-langserver", "args": ["--stdio"] },
-  "rust": { "command": "rust-analyzer", "args": [] },
-  "go": { "command": "gopls", "args": [] }
-}
-```
+If `CUSTOM_PI_VAULT_KEY` is not present in the environment variables, the system reads the key from `~/.pi/agent/.vault/master.key` (enforcing `0600` owner-only read permissions).
 
 ---
 
-## 📁 File Layout
+## Runtime File Structure
+
+All assets, extensions, and configurations are synchronized locally in your home directory:
 
 ```
 ~/.pi/agent/
-├── SOUL.md                # Identity layer (loaded as first prompt block)
-├── SYSTEM.md              # System instructions
-├── settings.json          # Default model, etc.
-├── models.json            # Model provider configs
-├── semantic.json          # TF-IDF memory entries
-├── semantic.vec.json      # Pre-computed vectors
-├── session-state.json     # Auto-saved every 10 tool calls
-├── dag-config.yaml        # DAG swarm workflow
-├── mcp-servers.json       # MCP server configs
-├── lsp-servers.json       # LSP server configs
-├── checkpoints/           # Session checkpoints
-├── costs/                 # Token/cost tracking
-├── work-products/         # File change tracking
-├── plugins/               # Installed plugins
-├── .vault/                # AES-256 encrypted vault
-└── web/                   # Web UI server + client
+├── SOUL.md                 # Identity definition injected on turn start
+├── SYSTEM.md               # Core programming and formatting rules
+├── settings.json           # Model profiles and active configurations
+├── models.json             # API keys and provider targets
+├── semantic.json           # SQLite FTS5 database indices
+├── semantic.vec.json       # Compiled TF-IDF vectors
+├── session-state.json      # Periodic state snapshots (every 10 turns)
+├── dag-config.yaml         # Active swarm configurations
+├── mcp-servers.json        # MCP server definition list
+├── lsp-servers.json        # LSP server executables mapping
+├── checkpoints/            # Directory containing past session snapshots
+├── costs/                  # Log files tracking token usage and cost bounds
+├── work-products/          # Ledger mapping created and modified files
+├── plugins/                # Directory containing dynamic script extensions
+├── .vault/                 # Secure storage directory
+│   ├── master.key          # 32-byte hex master key
+│   └── vault.json          # Encrypted key-value database
+└── web/                    # Distribution containing Vite client assets
 ```
 
 ---
 
-## 📊 Testing
+## Testing & Verification
+
+Verify the system by running the full unit and integration test suites:
 
 ```bash
-npm test          # 142 tests across 18 test files
-npx tsc --noEmit  # TypeScript type-check
+npm test
 ```
 
+### Test Logs Sample
+
 ```
- ✓ soul-loader                  ✓ secret-vault
- ✓ memory-file-store            ✓ cost-tracker
- ✓ memory-nudge                 ✓ work-products
- ✓ state-db                     ✓ cron-scheduler
- ✓ skill-store                  ✓ web-search
- ✓ skill-retrieval              ✓ memory-embedding
- ✓ memory-embedding-upgrade     ✓ hashline
- ✓ tui-colors                   ✓ mcp-client
- ✓ lsp-integration              ✓ session-management
+[OK] soul-loader                  [OK] secret-vault
+[OK] memory-file-store            [OK] cost-tracker
+[OK] memory-nudge                 [OK] work-products
+[OK] state-db                     [OK] cron-scheduler
+[OK] skill-store                  [OK] web-search
+[OK] skill-retrieval              [OK] memory-embedding
+[OK] memory-embedding-upgrade     [OK] hashline
+[OK] tui-colors                   [OK] mcp-client
+[OK] lsp-integration              [OK] session-management
+
+142 tests passed across 18 test files
+```
+
+Check TypeScript type compiler compliance:
+
+```bash
+npx tsc --noEmit
 ```
 
 ---
 
-## 📜 License
+## License
 
-MIT — go build something ridiculous.
+MIT - Licensed under the MIT License. Free to use, modify, and distribute.
 
 ---
 
 <p align="center">
   <b>Hermes speed + Paperclip obsession = custom-pi</b><br/>
-  <i>One agent to rule them all. And in the terminal bind them.</i>
+  <i>One agent to configure them all. And in the terminal bind them.</i>
 </p>
