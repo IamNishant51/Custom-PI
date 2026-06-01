@@ -963,14 +963,16 @@ class QuantumHUDWidget implements Component {
       swarm = running.length > 0 ? `Swarm: ${running.length} active` : "";
     }
 
+    const innerW = w - 4;
     const parts = [this.t("accent", label), cpu, ram, rag, swarm].filter(Boolean);
     const statsLine = parts.join(this.t("muted", " │ "));
+    const statsTrimmed = truncateToWidth(statsLine, innerW);
+    const pad = " ".repeat(Math.max(0, innerW - stripAnsi(statsTrimmed).length));
 
     // Top border
     lines.push(this.t("border", `╔${"═".repeat(w - 2)}╗`));
     // Stats line
-    const padded = statsLine + " ".repeat(Math.max(0, w - 2 - stripAnsi(statsLine).length));
-    lines.push(this.t("border", "║ ") + padded + this.t("border", " ║"));
+    lines.push(this.t("border", "║ ") + statsTrimmed + pad + this.t("border", " ║"));
 
     // Active agents sub-section
     if (running.length > 0) {
@@ -984,8 +986,9 @@ class QuantumHUDWidget implements Component {
         const raw = w < 70
           ? `   ${dot} ${name} ⬡ ${turn} ⬡ ${time}`
           : `   ${dot} ${name} ⬡ ${turn} ⬡ ${this.t("accent", verb)} ⬡ ${time}`;
-        const agentLine = raw + " ".repeat(Math.max(0, w - 2 - stripAnsi(raw).length));
-        lines.push(this.t("border", "║ ") + agentLine + this.t("border", " ║"));
+        const agentLine = truncateToWidth(raw, innerW);
+        const agentPad = " ".repeat(Math.max(0, innerW - stripAnsi(agentLine).length));
+        lines.push(this.t("border", "║ ") + agentLine + agentPad + this.t("border", " ║"));
       }
     }
 
