@@ -449,10 +449,24 @@ h4, h5, h6 { font-size: 16px; line-height: 20px; letter-spacing: 0; margin: 10px
 
 .msg-user {
   align-self: flex-end;
-  background: var(--surface-dark-elevated);
-  border: 1px solid var(--hairline-strong);
-  border-radius: 8px 8px 2px 8px;
-  padding: 8px 14px;
+  background: linear-gradient(135deg, #1b162f 0%, #251e3f 100%);
+  border: 1px solid #3e3568;
+  border-radius: 12px 12px 2px 12px;
+  padding: 10px 16px;
+  max-width: 70%;
+  width: fit-content;
+  box-shadow: 0 4px 12px rgba(143, 122, 244, 0.08);
+  word-break: break-word;
+}
+
+.msg-user.clickable-bubble {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.msg-user.clickable-bubble:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(143, 122, 244, 0.15);
+  border-color: #5d4f9c;
 }
 
 .msg-user .msg-label {

@@ -37,6 +37,31 @@ export default function ChatView() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [attachments, setAttachments] = useState<any[]>([]);
+  const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<Set<string>>(new Set());
+
+  const toggleThinkingCollapse = (thinkingId: string) => {
+    setCollapsedThinkingIds(prev => {
+      const next = new Set(prev);
+      if (next.has(thinkingId)) {
+        next.delete(thinkingId);
+      } else {
+        next.add(thinkingId);
+      }
+      return next;
+    });
+  };
+
+  const findAssociatedThinkingId = (userMsgIndex: number): string | null => {
+    for (let i = userMsgIndex + 1; i < items.length; i++) {
+      if (items[i].type === "thinking") {
+        return items[i].id;
+      }
+      if (items[i].type === "user") {
+        break;
+      }
+    }
+    return null;
+  };
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items]);
 
@@ -143,8 +168,16 @@ export default function ChatView() {
           </div>
         )}
 
-        {items.map(item => (
-          <ChatItemRenderer key={item.id} item={item} />
+        {items.map((item, index) => (
+          <ChatItemRenderer
+            key={item.id}
+            item={item}
+            index={index}
+            items={items}
+            collapsedThinkingIds={collapsedThinkingIds}
+            toggleThinkingCollapse={toggleThinkingCollapse}
+            findAssociatedThinkingId={findAssociatedThinkingId}
+          />
         ))}
 
         {loading && items.length > 0 && items[items.length - 1].type === "tool_call" && items[items.length - 1].status === "running" && (
@@ -218,12 +251,41 @@ export default function ChatView() {
 
 // ── Item Renderer ──────────────────────────────────────
 
-function ChatItemRenderer({ item }: { item: ChatItem }) {
+function ChatItemRenderer({
+  item,
+  index,
+  items,
+  collapsedThinkingIds,
+  toggleThinkingCollapse,
+  findAssociatedThinkingId
+}: {
+  item: ChatItem;
+  index: number;
+  items: ChatItem[];
+  collapsedThinkingIds: Set<string>;
+  toggleThinkingCollapse: (id: string) => void;
+  findAssociatedThinkingId: (idx: number) => string | null;
+}) {
   switch (item.type) {
     case "user":
-      return <UserMessage content={item.content} attachments={(item as any).attachments} />;
+      const thinkingId = findAssociatedThinkingId(index);
+      return (
+        <UserMessage
+          content={item.content}
+          attachments={(item as any).attachments}
+          onBubbleClick={thinkingId ? () => toggleThinkingCollapse(thinkingId) : undefined}
+        />
+      );
     case "thinking":
-      return <ThinkingBlock content={item.content} isStreaming={item.isStreaming} />;
+      const isCollapsed = collapsedThinkingIds.has(item.id);
+      return (
+        <ThinkingBlock
+          content={item.content}
+          isStreaming={item.isStreaming}
+          isCollapsed={isCollapsed}
+          onToggleCollapse={() => toggleThinkingCollapse(item.id)}
+        />
+      );
     case "tool_call":
       return (
         <ToolCallItem
@@ -244,9 +306,21 @@ function ChatItemRenderer({ item }: { item: ChatItem }) {
 
 // ── User Message ───────────────────────────────────────
 
-function UserMessage({ content, attachments }: { content: string; attachments?: any[] }) {
+function UserMessage({
+  content,
+  attachments,
+  onBubbleClick
+}: {
+  content: string;
+  attachments?: any[];
+  onBubbleClick?: () => void;
+}) {
   return (
-    <div className="msg msg-user stagger-item">
+    <div
+      className={`msg msg-user stagger-item ${onBubbleClick ? "clickable-bubble" : ""}`}
+      onClick={onBubbleClick}
+      style={{ cursor: onBubbleClick ? "pointer" : "default" }}
+    >
       <div className="msg-label">You</div>
       {attachments && attachments.length > 0 && (
         <div className="msg-user-attachments">
@@ -268,22 +342,30 @@ function UserMessage({ content, attachments }: { content: string; attachments?: 
 
 // ── Thinking Block ─────────────────────────────────────
 
-function ThinkingBlock({ content, isStreaming }: {
+function ThinkingBlock({
+  content,
+  isStreaming,
+  isCollapsed,
+  onToggleCollapse
+}: {
   content: string;
   isStreaming?: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
   const [maxH, setMaxH] = useState("0px");
 
   useEffect(() => {
-    if (ref.current) setMaxH(expanded ? `${ref.current.scrollHeight}px` : "0px");
-  }, [expanded, content]);
+    if (ref.current) {
+      setMaxH(!isCollapsed ? `${ref.current.scrollHeight}px` : "0px");
+    }
+  }, [isCollapsed, content]);
 
   return (
     <div className="msg msg-thinking stagger-item">
-      <button className="thinking-header" onClick={() => setExpanded(v => !v)}>
-        <span className={`thinking-chevron ${expanded ? "rotated" : ""}`}>▸</span>
+      <button className="thinking-header" onClick={onToggleCollapse}>
+        <span className={`thinking-chevron ${!isCollapsed ? "rotated" : ""}`}>▸</span>
         <span className="thinking-label">Reasoning</span>
       </button>
       <div
