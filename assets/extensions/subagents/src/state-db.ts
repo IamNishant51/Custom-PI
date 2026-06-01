@@ -270,6 +270,7 @@ export function queryTriplets(filter: {
   predicateType?: string;
   objectId?: string;
   objectType?: string;
+  minConfidence?: number;
 }): TripletRecord[] {
   const d = openDb();
   let sql = "SELECT id, subject_id as subjectId, subject_type as subjectType, subject_label as subjectLabel, predicate_type as predicateType, predicate_label as predicateLabel, object_id as objectId, object_type as objectType, object_label as objectLabel, confidence_score as confidenceScore, last_updated as lastUpdated, source_session as sourceSession FROM triplets WHERE 1=1";
@@ -295,8 +296,77 @@ export function queryTriplets(filter: {
     sql += " AND object_type = ?";
     params.push(filter.objectType);
   }
+  if (filter.minConfidence !== undefined) {
+    sql += " AND confidence_score >= ?";
+    params.push(filter.minConfidence);
+  }
+  sql += " ORDER BY confidence_score DESC, last_updated DESC";
   
   return d.prepare(sql).all(...params) as TripletRecord[];
+}
+
+export interface AggregatedEntity {
+  entityId: string;
+  entityType: string;
+  entityLabel: string;
+  triplets: TripletRecord[];
+  avgConfidence: number;
+  lastUpdated: number;
+}
+
+export function aggregateByEntity(entityId: string): AggregatedEntity | null {
+  const triples = queryTriplets({ subjectId: entityId });
+  if (triples.length === 0) return null;
+
+  const first = triples[0];
+  return {
+    entityId,
+    entityType: first.subjectType,
+    entityLabel: first.subjectLabel,
+    triplets: triples,
+    avgConfidence: triples.reduce((s, t) => s + t.confidenceScore, 0) / triples.length,
+    lastUpdated: Math.max(...triples.map(t => t.lastUpdated || 0)),
+  };
+}
+
+export interface ConnectedEntity {
+  entityId: string;
+  entityType: string;
+  entityLabel: string;
+  relationship: string;
+  direction: "outgoing" | "incoming";
+  confidenceScore: number;
+}
+
+export function findConnectedEntities(entityId: string): ConnectedEntity[] {
+  const d = openDb();
+  const results: ConnectedEntity[] = [];
+
+  // Outgoing: this entity is the subject
+  const outgoing = d.prepare(`
+    SELECT object_id as entityId, object_type as entityType, object_label as entityLabel,
+           predicate_label as relationship, confidence_score as confidenceScore
+    FROM triplets WHERE subject_id = ?
+    ORDER BY confidence_score DESC
+  `).all(entityId) as any[];
+
+  for (const r of outgoing) {
+    results.push({ ...r, direction: "outgoing" });
+  }
+
+  // Incoming: this entity is the object
+  const incoming = d.prepare(`
+    SELECT subject_id as entityId, subject_type as entityType, subject_label as entityLabel,
+           predicate_label as relationship, confidence_score as confidenceScore
+    FROM triplets WHERE object_id = ?
+    ORDER BY confidence_score DESC
+  `).all(entityId) as any[];
+
+  for (const r of incoming) {
+    results.push({ ...r, direction: "incoming" });
+  }
+
+  return results;
 }
 
 export function deleteTriplet(id: string): boolean {
