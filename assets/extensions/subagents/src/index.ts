@@ -1,6 +1,7 @@
-// @ts-nocheck — this file is an extension loaded at runtime by pi-agent; types resolve dynamically
+// @ts-expect-error — runtime-provided by pi-agent
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+// @ts-expect-error — runtime-provided by pi-agent
 import { Container, TUI, visibleWidth, CURSOR_MARKER } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -1831,23 +1832,6 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 // Tree connector context — set by ContainerPrototype.render before child iteration
 let treeCtx: { index: number; total: number } = { index: 0, total: 0 };
 let treeCtxActive = false;
-
-function treeConnector(idx: number, total: number): string {
-  if (total === 1) return "\u2514\u2500\u2500 "; // └── (single child)
-  if (idx === 0) return "\u250c\u2500\u2500 "; // ┌── (first)
-  if (idx === total - 1) return "\u2514\u2500\u2500 "; // └── (last)
-  return "\u251c\u2500\u2500 "; // ├── (middle)
-}
-
-function treeContinuation(idx: number, total: number): string {
-  if (idx === total - 1) return "  "; // last child — no vertical bar
-  return "\u2502 "; // │
-}
-
-function treeConnectorFirst(total: number): string {
-  if (total === 1) return "\u2514\u2500"; // └─
-  return "\u250c\u2500"; // ┌─
-}
 
 // Safety: truncate all lines in a render result to stay within terminal width
 // and pad with trailing spaces to overwrite previous content fully
