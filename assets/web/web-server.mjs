@@ -4959,14 +4959,12 @@ async function main() {
       const minConf = req.query?.minConfidence ?? 0.5;
       const limit = Math.min(parseInt(req.query?.limit ?? "50"), 200);
       const rows = db.prepare(`
-        SELECT t.id, t.subject_id, s.label AS subject_label, s.type AS subject_type,
-               t.predicate_type, t.object_id, o.label AS object_label, o.type AS object_type,
-               t.confidence_score, t.created_at, t.last_updated
-        FROM triplets t
-        JOIN entities s ON t.subject_id = s.id
-        JOIN entities o ON t.object_id = o.id
-        WHERE t.confidence_score >= ?
-        ORDER BY t.confidence_score DESC, t.last_updated DESC
+        SELECT id, subject_id, subject_type, subject_label,
+               predicate_type, predicate_label, object_id, object_type, object_label,
+               confidence_score, last_updated
+        FROM triplets
+        WHERE confidence_score >= ?
+        ORDER BY confidence_score DESC, last_updated DESC
         LIMIT ?
       `).all(minConf, limit);
       db.close();
@@ -4982,22 +4980,31 @@ async function main() {
       if (!id) return { error: "id parameter required" };
       const Database = _require("better-sqlite3");
       const db = new Database(STATE_DB_PATH, { readonly: true });
-      const entity = db.prepare("SELECT * FROM entities WHERE id = ?").get(id);
-      if (!entity) { db.close(); return { error: "Entity not found" }; }
+      // Get entity info from any triplet containing this id
+      const entityRow = db.prepare(`
+        SELECT subject_id AS id, subject_label AS label, subject_type AS type
+        FROM triplets WHERE subject_id = ? LIMIT 1
+      `).get(id);
+      if (!entityRow) {
+        const objRow = db.prepare(`
+          SELECT object_id AS id, object_label AS label, object_type AS type
+          FROM triplets WHERE object_id = ? LIMIT 1
+        `).get(id);
+        if (!objRow) { db.close(); return { error: "Entity not found" }; }
+        const outgoing = db.prepare(`
+          SELECT * FROM triplets WHERE subject_id = ? ORDER BY confidence_score DESC
+        `).all(id);
+        db.close();
+        return { entity: objRow, outgoing, incoming: [] };
+      }
       const outgoing = db.prepare(`
-        SELECT t.*, o.label AS object_label, o.type AS object_type
-        FROM triplets t JOIN entities o ON t.object_id = o.id
-        WHERE t.subject_id = ?
-        ORDER BY t.confidence_score DESC
+        SELECT * FROM triplets WHERE subject_id = ? ORDER BY confidence_score DESC
       `).all(id);
       const incoming = db.prepare(`
-        SELECT t.*, s.label AS subject_label, s.type AS subject_type
-        FROM triplets t JOIN entities s ON t.subject_id = s.id
-        WHERE t.object_id = ?
-        ORDER BY t.confidence_score DESC
+        SELECT * FROM triplets WHERE object_id = ? ORDER BY confidence_score DESC
       `).all(id);
       db.close();
-      return { entity, outgoing, incoming };
+      return { entity: entityRow, outgoing, incoming };
     } catch (e) {
       return { error: e.message };
     }
