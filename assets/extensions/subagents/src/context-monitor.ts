@@ -1,6 +1,7 @@
 import { getAllHealth } from "./mcp-catalog";
 import { getCostSummary } from "./cost-tracker";
 import { stats } from "./memory-store";
+import { extractTriplets, persistTriplets } from "./triplet-generator";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -43,6 +44,9 @@ export class ContextMonitor {
   private decisionTraces: DecisionTrace[] = [];
   private traceIdCounter = 0;
   private listeners: Set<(trace: DecisionTrace) => void> = new Set();
+  private pendingTexts: { text: string; sessionId: string }[] = [];
+  private autoLearnModel: any = null;
+  private autoLearnAuth: { apiKey?: string; headers?: Record<string, string> } | null = null;
 
   recordToolCall(toolName: string, args: any): void {
     this.toolCalls.push({
@@ -195,6 +199,43 @@ export class ContextMonitor {
       fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf8");
       fs.renameSync(tmp, path.join(dir, "telemetry.json"));
     } catch { /* telemetry write must never crash */ }
+  }
+
+  // ── Auto-Learning (Triplet Generation) ─────────────────────────────────
+
+  recordSignificantOutput(text: string, sessionId: string): void {
+    if (text.length < 50) return; // skip trivial outputs
+    this.pendingTexts.push({ text, sessionId });
+    if (this.pendingTexts.length > 20) {
+      this.pendingTexts = this.pendingTexts.slice(-10);
+    }
+  }
+
+  configureAutoLearn(model: any, auth: { apiKey?: string; headers?: Record<string, string> }): void {
+    this.autoLearnModel = model;
+    this.autoLearnAuth = auth;
+  }
+
+  async flushAutoLearn(): Promise<number> {
+    if (this.pendingTexts.length === 0 || !this.autoLearnModel || !this.autoLearnAuth) return 0;
+
+    const batch = this.pendingTexts.splice(0, 5);
+    let totalStored = 0;
+
+    for (const item of batch) {
+      try {
+        const result = await extractTriplets(
+          { rawText: item.text, sourceSession: item.sessionId },
+          this.autoLearnModel,
+          this.autoLearnAuth,
+        );
+        if (result.error) continue;
+        const stored = await persistTriplets(result.triplets, item.sessionId);
+        totalStored += stored;
+      } catch { /* silent */ }
+    }
+
+    return totalStored;
   }
 
   reset(): void {

@@ -1695,6 +1695,13 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
             "info"
           );
           const result = await this.runTool(call.name, call.arguments);
+          // Feed significant tool output to auto-learning engine
+          if (!result.startsWith("Error:") && result.length > 60) {
+            contextMonitor.recordSignificantOutput(
+              `Tool ${call.name}:\n${result.slice(0, 2000)}`,
+              this.ctx.sessionId || "unknown"
+            );
+          }
           const line = `\u25b6 ${call.name}: ${result.slice(0, 200).replace(/\n/g, " ")}${result.length > 200 ? "..." : ""}`;
           this.tracker.outputLines.push(line);
           if (this.tracker.outputLines.length > 20) this.tracker.outputLines.shift();
@@ -4229,6 +4236,8 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     const cronModel = resolveFastModel(ctx);
     const cronAuth = await ctx.modelRegistry.getApiKeyAndHeaders(cronModel);
     if (cronAuth.ok) {
+      // Configure auto-learn with same model
+      contextMonitor.configureAutoLearn(cronModel, { apiKey: cronAuth.apiKey, headers: cronAuth.headers });
       startCronJobs(cronModel, { apiKey: cronAuth.apiKey, headers: cronAuth.headers }, {}, (report) => {
         // if (report.deleted.length > 0 || report.archived.length > 0) {
         //   ctx.ui.notify(
@@ -4636,6 +4645,11 @@ If nothing to report, return: {}`;
   // ─────────────────────────────────────────────────────────────────────────
   pi.on("session_shutdown", async (_event, ctx) => {
     logger.info("session_shutdown");
+    // Flush auto-learn triplets before shutdown
+    try {
+      const stored = await contextMonitor.flushAutoLearn();
+      if (stored > 0) logger.info(`Auto-learn: stored ${stored} triplet(s) on shutdown`);
+    } catch {}
     // Flush any pending memory writes before shutdown
     try {
       await flushMemory();

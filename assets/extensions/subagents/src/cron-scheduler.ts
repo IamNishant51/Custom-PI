@@ -185,6 +185,7 @@ export function startCronJobs(
         probeProvider("google", process.env.GEMINI_API_KEY),
       ]);
       contextMonitor.writeTelemetrySnapshot();
+      await contextMonitor.flushAutoLearn();
     } catch { /* silent */ }
   }, cfg.healthCheckIntervalMs);
 
