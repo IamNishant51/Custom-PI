@@ -1847,10 +1847,13 @@ function treeConnectorFirst(total: number): string {
 }
 
 // Safety: truncate all lines in a render result to stay within terminal width
+// and pad with trailing spaces to overwrite previous content fully
 function truncateLines(lines: string[], maxWidth: number): string[] {
   return lines.map(line => {
     const vw = visibleWidth(line);
-    return vw > maxWidth ? truncateToWidth(line, maxWidth) : line;
+    if (vw > maxWidth) return truncateToWidth(line, maxWidth);
+    if (vw < maxWidth) return line + " ".repeat(maxWidth - vw);
+    return line;
   });
 }
 
@@ -1911,10 +1914,6 @@ function patchToolExecution(proto: any) {
     const contentWidth = Math.max(10, width - 8);
     const rawLines = originalToolRender.call(this, contentWidth);
 
-    if (rawLines.length === 0) {
-      return [];
-    }
-
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
@@ -1923,6 +1922,7 @@ function patchToolExecution(proto: any) {
     const isRunning = this.isPartial;
     const isError = this.result?.isError;
 
+    // Always render header, even when running with no output yet
     let statusSymbol: string;
     let toolColor: (s: string) => string;
 
