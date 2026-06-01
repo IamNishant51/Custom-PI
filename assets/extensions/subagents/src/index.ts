@@ -2017,7 +2017,7 @@ function patchAssistantMessage(proto: any) {
 
     // Branded prefix for assistant: ✦ C-P (Custom-PI)
     const assistantLabel = "C-PI";
-    const prefix = "\u2726 "; // ✦
+    const prefix = "\u2756 "; // ❖ BLACK DIAMOND MINUS WHITE X
 
     const result: string[] = [];
     result.push(purple(truncateToWidth(prefix + assistantLabel, width - 4)));
