@@ -2029,10 +2029,8 @@ function patchAssistantMessage(proto: any) {
     const lines = originalRender.call(this, width - 4);
     if (lines.length === 0) return lines;
 
-    // Custom-PI signature purple: ✦ C-P
-    const purple = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("accent", s)
-      : (s: string) => `\x1b[38;2;143;122;244m${s}\x1b[0m`;
+    // Custom-PI signature purple (#8f7af4 / rgb(143,122,244)) — ✦ C-P
+    const purple = (s: string) => `\x1b[38;2;143;122;244m${s}\x1b[0m`;
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
@@ -2163,23 +2161,34 @@ function applyLivePatches(tui: any, themeInstance: any) {
 
       renderedComponents = [];
       const lines: string[] = [];
+      let prevWasRenderable = false;
       for (const child of this.children) {
         if (!child) continue;
         const startLine = lines.length;
         const childLines = child.render(width);
         const endLine = startLine + childLines.length;
+
+        if (prevWasRenderable) {
+          lines.push("");
+        }
+
+        const offsetStart = prevWasRenderable ? startLine + 1 : startLine;
+        const offsetEnd = offsetStart + childLines.length;
         
         if (child.constructor?.name === "UserMessageComponent" || child.constructor?.name === "AssistantMessageComponent") {
           renderedComponents.push({
             component: child,
-            startLine,
-            endLine,
+            startLine: offsetStart,
+            endLine: offsetEnd,
           });
         }
 
         // Only advance tree index for renderable children
         if (renderable.includes(child)) {
           treeCtx.index++;
+          prevWasRenderable = true;
+        } else {
+          prevWasRenderable = false;
         }
         
         for (const line of childLines) {
