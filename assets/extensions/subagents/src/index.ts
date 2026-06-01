@@ -1,7 +1,7 @@
 // @ts-nocheck — this file is an extension loaded at runtime by pi-agent; types resolve dynamically
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { Container, TUI, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, TUI, visibleWidth, CURSOR_MARKER } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import fs from "node:fs";
@@ -1820,6 +1820,8 @@ theme = locateTheme();
 let livePatchesApplied = false;
 let userMessagePatched = false;
 let toolExecutionPatched = false;
+let customEditorPatched = false;
+let dynamicBorderPatched = false;
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -1913,7 +1915,7 @@ function patchToolExecution(proto: any) {
 
     const contentWidth = Math.max(10, width - 8);
     let rawLines = originalToolRender.call(this, contentWidth);
-    // Strip theme background ANSI codes — keep foreground colors and content intact
+    // Strip theme background ANSI codes
     rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
     // Remove leading/trailing blank lines and collapse runs of blanks into one
     let prevBlank = false;
@@ -1923,41 +1925,25 @@ function patchToolExecution(proto: any) {
       prevBlank = isBlank;
       return true;
     });
-    // Trim leading blank lines
     while (rawLines.length > 0 && rawLines[0].trim() === "") rawLines.shift();
-    // Trim trailing blank lines
     while (rawLines.length > 0 && rawLines[rawLines.length - 1].trim() === "") rawLines.pop();
 
+    const isRunning = this.isPartial;
+    const isError = this.result?.isError;
+
+    // Status dot: ● green (success), ● red (error), ● orange (running)
+    const dotColor = isRunning
+      ? `\x1b[38;2;255;165;0m`    // orange
+      : isError
+        ? `\x1b[38;2;255;80;80m`    // red
+        : `\x1b[38;2;80;200;120m`;  // green
+    const statusDot = `${dotColor}\u25cf\x1b[0m`; // ●
+    const yellow = (s: string) => `\x1b[38;2;220;180;60m${s}\x1b[0m`;
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-    // OpenClaude spinner states
-    const isRunning = this.isPartial;
-    const isError = this.result?.isError;
-
-    // Always render header, even when running with no output yet
-    let statusSymbol: string;
-    let toolColor: (s: string) => string;
-
-    if (isRunning) {
-      statusSymbol = "\u25d8"; // ◘ spinner
-      toolColor = (theme && typeof theme.fg === "function")
-        ? (s: string) => theme.fg("accent", s)
-        : (s: string) => `\x1b[36m${s}\x1b[0m`;
-    } else if (isError) {
-      statusSymbol = "\u2717"; // ✗
-      toolColor = (theme && typeof theme.fg === "function")
-        ? (s: string) => theme.fg("error", s)
-        : (s: string) => `\x1b[31m${s}\x1b[0m`;
-    } else {
-      statusSymbol = "\u2713"; // ✓
-      toolColor = (theme && typeof theme.fg === "function")
-        ? (s: string) => theme.fg("success", s)
-        : (s: string) => `\x1b[32m${s}\x1b[0m`;
-    }
-
-    // Build parameter summary from tool arguments
+    // Build param summary from tool arguments
     let paramSummary = "";
     if (this.args && typeof this.args === "object") {
       const params: string[] = [];
@@ -1966,26 +1952,36 @@ function patchToolExecution(proto: any) {
         params.push(`${key}: ${v}`);
       }
       if (params.length > 0) {
-        paramSummary = " (" + params.join(", ") + ")";
+        paramSummary = "(" + params.join(", ") + ")";
       }
     }
 
-    // Truncate long parameter summary
+    // Truncate long param summary
     const maxSummaryW = Math.max(10, width - 20);
-    const fullHeader = this.toolName + paramSummary;
+    const fullHeader = this.toolName + (paramSummary ? " " + paramSummary : "");
     const truncatedHeader = visibleWidth(fullHeader) > maxSummaryW
       ? truncateToWidth(fullHeader, maxSummaryW) + "\u2026"
       : fullHeader;
 
-    // OpenClaude style: tool name bold with spinner + params inline
-    const headerLine = toolColor(statusSymbol + " " + truncatedHeader);
+    // Build header: ● ToolName(params) with optional (ctrl+o to expand)
+    let headerLine = `${statusDot} ${yellow(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
+    // Check if output is collapsed (first content line has "earlier lines" or similar)
+    const contentStartIndex = rawLines.length > 0 ? 1 : 0;
+    const firstContentLine = contentStartIndex < rawLines.length ? rawLines[contentStartIndex] : "";
+    const isCollapsed = firstContentLine.includes("earlier lines") || firstContentLine.includes("ctrl+o");
+    if (isCollapsed) {
+      headerLine += dimFn(" (ctrl+o to expand)");
+    }
 
-    // Phase 4: Detect diff output for edit-type tools
+    // Detect diff output for edit-type tools
     const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
     const hasDiff = rawLines.some((l: string) => /^[+-]{1,3}/.test(l.trim()));
 
     const indent = "  ";
     let contentLines: string[];
+
+    // Content starts from line 1 (skip first line which is from original render)
+    const contentRaw = rawLines.length > 1 ? rawLines.slice(1) : [];
 
     if ((isEditTool || hasDiff) && !isRunning) {
       // Render diff with green/red highlighting
@@ -2001,7 +1997,7 @@ function patchToolExecution(proto: any) {
 
       contentLines = [];
       let diffBlockOpen = false;
-      for (const line of rawLines) {
+      for (const line of contentRaw) {
         const trimmed = line.trim();
         if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
           contentLines.push(indent + dimFn2(line));
@@ -2024,7 +2020,7 @@ function patchToolExecution(proto: any) {
         }
       }
     } else {
-      contentLines = rawLines.map((line: string) => indent + line);
+      contentLines = contentRaw.map((line: string) => indent + line);
     }
 
     return truncateLines([headerLine, ...contentLines], width);
@@ -2068,6 +2064,130 @@ function patchAssistantMessage(proto: any) {
     }
 
     return result;
+  };
+}
+
+function patchCustomEditor(proto: any) {
+  if (customEditorPatched) return;
+  customEditorPatched = true;
+  debugLog("PATCHING CUSTOM EDITOR PROTOTYPE");
+
+  proto.render = function (this: any, width: number) {
+    const paddingX = this.paddingX || 0;
+    const contentWidth = Math.max(1, width - paddingX * 2);
+    const prefixWidth = 2;
+    const contentWidthForText = Math.max(1, contentWidth - prefixWidth);
+    const layoutWidth = Math.max(1, contentWidthForText - (paddingX ? 0 : 1));
+    this.lastWidth = layoutWidth;
+    
+    const layoutLines = this.layoutText(layoutWidth);
+    const terminalRows = this.tui.terminal.rows;
+    const maxVisibleLines = Math.max(5, Math.floor(terminalRows * 0.3));
+    
+    let cursorLineIndex = layoutLines.findIndex((line: any) => line.hasCursor);
+    if (cursorLineIndex === -1) cursorLineIndex = 0;
+    
+    if (cursorLineIndex < this.scrollOffset) {
+      this.scrollOffset = cursorLineIndex;
+    } else if (cursorLineIndex >= this.scrollOffset + maxVisibleLines) {
+      this.scrollOffset = cursorLineIndex - maxVisibleLines + 1;
+    }
+    const maxScrollOffset = Math.max(0, layoutLines.length - maxVisibleLines);
+    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScrollOffset));
+    
+    const visibleLines = layoutLines.slice(this.scrollOffset, this.scrollOffset + maxVisibleLines);
+    const result: string[] = [];
+    const leftPadding = " ".repeat(paddingX);
+    const rightPadding = leftPadding;
+    
+    const horizontalStr = "─".repeat(width);
+    const horizontal = typeof this.borderColor === "function" ? this.borderColor(horizontalStr) : horizontalStr;
+    
+    // Top border divider (sleek single horizontal line)
+    if (this.scrollOffset > 0) {
+      const indicator = `─── ↑ ${this.scrollOffset} more `;
+      const remaining = width - visibleWidth(indicator);
+      if (remaining >= 0) {
+        result.push(typeof this.borderColor === "function" ? this.borderColor(indicator + "─".repeat(remaining)) : indicator + "─".repeat(remaining));
+      } else {
+        result.push(typeof this.borderColor === "function" ? this.borderColor(truncateToWidth(indicator, width)) : truncateToWidth(indicator, width));
+      }
+    } else {
+      result.push(horizontal);
+    }
+    
+    const emitCursorMarker = this.focused && !this.autocompleteState;
+    const pointerColor = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("accent", s)
+      : (s: string) => `\x1b[38;2;106;155;204m${s}\x1b[0m`;
+    const prefixStr = pointerColor("❯ ");
+    const indentStr = "  ";
+    
+    const segmenter = typeof this.segment === "function"
+      ? this.segment.bind(this)
+      : (s: string) => [...s].map(c => ({ segment: c }));
+    
+    for (let i = 0; i < visibleLines.length; i++) {
+      const layoutLine = visibleLines[i];
+      let displayText = layoutLine.text;
+      let lineVisibleWidth = visibleWidth(layoutLine.text);
+      let cursorInPadding = false;
+      
+      if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+        const before = displayText.slice(0, layoutLine.cursorPos);
+        const after = displayText.slice(layoutLine.cursorPos);
+        const marker = emitCursorMarker ? CURSOR_MARKER : "";
+        if (after.length > 0) {
+          const afterGraphemes = [...segmenter(after, "grapheme")];
+          const firstGrapheme = afterGraphemes[0]?.segment || "";
+          const restAfter = after.slice(firstGrapheme.length);
+          const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
+          displayText = before + marker + cursor + restAfter;
+        } else {
+          const cursor = "\x1b[7m \x1b[0m";
+          displayText = before + marker + cursor;
+          lineVisibleWidth = lineVisibleWidth + 1;
+          if (lineVisibleWidth > contentWidthForText && paddingX > 0) {
+            cursorInPadding = true;
+          }
+        }
+      }
+      
+      const linePrefix = (i === 0 && this.scrollOffset === 0) ? prefixStr : indentStr;
+      const padding = " ".repeat(Math.max(0, contentWidthForText - lineVisibleWidth));
+      const lineRightPadding = cursorInPadding ? rightPadding.slice(1) : rightPadding;
+      
+      result.push(`${leftPadding}${linePrefix}${displayText}${padding}${lineRightPadding}`);
+    }
+    
+    // Bottom border is NOT rendered unless scrolled down
+    const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
+    if (linesBelow > 0) {
+      const indicator = `─── ↓ ${linesBelow} more `;
+      const remaining = width - visibleWidth(indicator);
+      result.push(typeof this.borderColor === "function" ? this.borderColor(indicator + "─".repeat(Math.max(0, remaining))) : indicator + "─".repeat(Math.max(0, remaining)));
+    }
+    
+    if (this.autocompleteState && this.autocompleteList) {
+      const autocompleteResult = this.autocompleteList.render(contentWidthForText);
+      for (const line of autocompleteResult) {
+        const lineWidth = visibleWidth(line);
+        const linePadding = " ".repeat(Math.max(0, contentWidthForText - lineWidth));
+        result.push(`${leftPadding}${indentStr}${line}${linePadding}${rightPadding}`);
+      }
+    }
+    
+    return result;
+  };
+}
+
+function patchDynamicBorder(proto: any) {
+  if (dynamicBorderPatched) return;
+  dynamicBorderPatched = true;
+  debugLog("PATCHING DYNAMIC BORDER PROTOTYPE");
+
+  proto.render = function (this: any, width: number) {
+    return [];
   };
 }
 
@@ -2155,6 +2275,10 @@ function applyLivePatches(tui: any, themeInstance: any) {
           patchAssistantMessage(Object.getPrototypeOf(child));
         } else if (className === "ToolExecutionComponent") {
           patchToolExecution(Object.getPrototypeOf(child));
+        } else if (className === "CustomEditor") {
+          patchCustomEditor(Object.getPrototypeOf(child));
+        } else if (className === "DynamicBorder") {
+          patchDynamicBorder(Object.getPrototypeOf(child));
         }
       }
     }
