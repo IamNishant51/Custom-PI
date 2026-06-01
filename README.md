@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/TUI_SC.png" alt="Custom-PI Terminal UI" width="90%" />
+  <img src="assets/Custom-pi-logo.png" alt="Custom-PI Logo" width="80%" />
 </p>
 
 ---
