@@ -504,30 +504,27 @@ export class ScreenRenderer {
     const cw = this.contentWidth;
     const w = Math.min(cw, cols - cx - GUTTER);
 
-    const borderStyle = this.style({ fg: this.theme.hairline });
+    const borderStyle = this.style({ fg: this.theme.hairline, dim: true });
     const inputStyle = this.style({ fg: this.theme.ink });
     const cursorStyle = this.style({ fg: this.theme.ink, bg: this.theme.accent });
     const canvasStyle = this.style({ bg: this.theme.canvas });
-    const elevatedStyle = this.style({ bg: this.theme.surfaceElevated });
     const modeStyle = this.style({ fg: this.theme.muted, dim: true });
-    const accentStyle = this.style({ fg: this.theme.accent });
+    const accentStyle = this.style({ fg: this.theme.accent, bold: true });
     const atStyle = this.style({ fg: this.theme.info });
     const slashStyle = this.style({ fg: this.theme.warning });
     const shellStyle = this.style({ fg: this.theme.error });
 
     if (y >= this.screen.getRows() - SPACING.inputAreaLines) return y;
 
-    const inputW = w - PAD;
-    const maxVisibleChars = inputW - 2;
+    const maxVisibleChars = w - 3;
 
     // Split text into lines for multi-line display
     const lines = text.split("\n");
     const visibleLines = lines.slice(-3); // max 3 visible lines
-    const totalLines = visibleLines.length;
 
-    // Top border
-    this.screen.clearLine(y, elevatedStyle);
-    this.screen.writeString(cx, y, "\u256d" + BOX.h.repeat(inputW) + "\u256e", borderStyle);
+    // Top border separator line (sleek and borderless, single line divider)
+    this.screen.clearLine(y, canvasStyle);
+    this.screen.writeString(cx, y, "─".repeat(w), borderStyle);
     y++;
 
     // Figure out which visual line and x-position the cursor is on
@@ -550,8 +547,14 @@ export class ScreenRenderer {
     // Draw visible input lines
     for (let li = 0; li < visibleLines.length; li++) {
       if (y >= this.screen.getRows() - SPACING.inputAreaLines) break;
-      this.screen.clearLine(y, elevatedStyle);
-      this.screen.writeString(cx, y, "\u2502", borderStyle);
+      this.screen.clearLine(y, canvasStyle);
+
+      // Render prompt caret indicator on the first visual line, or spaces on continuation lines
+      if (li === 0 && lineOffset === 0) {
+        this.screen.writeString(cx, y, "❯ ", accentStyle);
+      } else {
+        this.screen.writeString(cx, y, "  ", modeStyle);
+      }
 
       const lineText = visibleLines[li];
       const displayText = lineText.length > maxVisibleChars
@@ -559,7 +562,7 @@ export class ScreenRenderer {
         : lineText;
       const startOffset = lineText.length > maxVisibleChars ? lineText.length - maxVisibleChars : 0;
 
-      const writeStartX = cx + PAD_SM;
+      const writeStartX = cx + 2;
 
       // Draw each character with entity highlighting
       for (let i = 0; i < displayText.length && i < maxVisibleChars; i++) {
@@ -567,7 +570,6 @@ export class ScreenRenderer {
         const ch = displayText[i];
         const isCursor = li === visCursorLine && globalI === cursorLineOffset;
 
-        // Determine styling based on entity type
         const entity = this.entityAt(text, globalI);
         let charStyle = inputStyle;
         if (entity.type === "at" && globalI >= entity.start && globalI <= entity.end) {
@@ -590,7 +592,7 @@ export class ScreenRenderer {
         if (vimMode === "insert") {
           this.screen.writeString(writeStartX + lineText.length - startOffset, y, " ", cursorStyle);
         } else {
-          this.screen.writeString(writeStartX + lineText.length - startOffset, y, "\u258c", inputStyle);
+          this.screen.writeString(writeStartX + lineText.length - startOffset, y, "\u2588", inputStyle);
         }
       }
 
@@ -599,37 +601,26 @@ export class ScreenRenderer {
         if (vimMode === "insert") {
           this.screen.writeString(writeStartX, y, " ", cursorStyle);
         } else {
-          this.screen.writeString(writeStartX, y, "\u258c", inputStyle);
+          this.screen.writeString(writeStartX, y, "\u2588", inputStyle);
         }
       }
-
-      this.screen.writeString(cx + inputW + 1, y, "\u2502", borderStyle);
       y++;
     }
 
-    // Fill remaining input lines if fewer than 3
+    // Fill remaining input lines with empty canvas lines if fewer than 3
     for (let li = visibleLines.length; li < 3; li++) {
       if (y >= this.screen.getRows() - 1) break;
-      this.screen.clearLine(y, elevatedStyle);
-      this.screen.writeString(cx, y, "\u2502", borderStyle);
-      this.screen.writeString(cx + inputW + 1, y, "\u2502", borderStyle);
+      this.screen.clearLine(y, canvasStyle);
       y++;
     }
 
-    // Bottom border
-    if (y < this.screen.getRows() - 1) {
-      this.screen.clearLine(y, elevatedStyle);
-      this.screen.writeString(cx, y, "\u2570" + BOX.h.repeat(inputW) + "\u256f", borderStyle);
-      y++;
-    }
-
-    // Mode bar below input
+    // Mode bar below input (no bottom border box, just a clean flat status indicator bar)
     if (y < this.screen.getRows()) {
       this.screen.clearLine(y, this.surfaceStyle("surface"));
       if (vimMode) {
         const modeText = vimMode.toUpperCase();
-        this.screen.writeString(cx + PAD_SM, y, `\u25c6 ${modeText}`, vimMode === "insert" ? accentStyle : modeStyle);
-        this.screen.writeString(cx + PAD_SM + 8, y, "\u2502", this.style({ fg: this.theme.dim }));
+        this.screen.writeString(cx, y, ` ◆ ${modeText}`, vimMode === "insert" ? accentStyle : modeStyle);
+        this.screen.writeString(cx + 10, y, "\u2502", this.style({ fg: this.theme.dim }));
       }
 
       // Line count indicator (multi-line)
