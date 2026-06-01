@@ -1992,24 +1992,29 @@ function patchAssistantMessage(proto: any) {
     const lines = originalRender.call(this, width - 4);
     if (lines.length === 0) return lines;
 
-    const modelStr = this.message?.model || "assistant";
-    const accentFn = (theme && typeof theme.fg === "function")
+    // OpenClaude Claude Brand Orange: rgb(215,119,87)
+    const brandOrange = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("accent", s)
-      : (s: string) => `\x1b[36m${s}\x1b[0m`;
+      : (s: string) => `\x1b[38;2;215;119;87m${s}\x1b[0m`;
     const dimFn = (theme && typeof theme.fg === "function")
       ? (s: string) => theme.fg("muted", s)
       : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-    const idx = treeCtxActive ? treeCtx.index : 0;
-    const total = treeCtxActive ? treeCtx.total : 1;
-    const conn = treeConnector(idx, total);
-    const cont = treeContinuation(idx, total);
+    const modelStr = this.message?.model || "assistant";
 
+    // OpenClaude style: model name left-aligned above markdown
     const result: string[] = [];
-    result.push(accentFn(conn) + dimFn(modelStr));
-
+    result.push(brandOrange(modelStr));
     for (const line of lines) {
-      result.push(accentFn(cont) + line);
+      result.push(line);
+    }
+
+    // Streaming cursor: pulsing block at end of last line
+    if (this.isStreaming) {
+      const lastIdx = result.length - 1;
+      if (lastIdx >= 0) {
+        result[lastIdx] = result[lastIdx] + dimFn("\u2588");
+      }
     }
 
     return result;
