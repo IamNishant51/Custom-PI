@@ -2039,9 +2039,12 @@ function patchAssistantMessage(proto: any) {
 
     const modelStr = this.message?.model || "assistant";
 
-    // OpenClaude style: model name left-aligned above markdown
+    // Branded prefix for assistant: ✦ C-P  (Custom-PI)
+    const assistantLabel = "C-P";
+    const prefix = "\u2726 "; // ✦
+
     const result: string[] = [];
-    result.push(brandOrange(truncateToWidth(modelStr, width - 4)));
+    result.push(brandOrange(truncateToWidth(prefix + assistantLabel, width - 4)));
     for (const line of lines) {
       result.push(line);
     }
