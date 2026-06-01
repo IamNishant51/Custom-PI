@@ -1822,6 +1822,7 @@ let userMessagePatched = false;
 let toolExecutionPatched = false;
 let customEditorPatched = false;
 let dynamicBorderPatched = false;
+let footerComponentPatched = false;
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -2082,18 +2083,21 @@ function patchCustomEditor(proto: any) {
     const result: string[] = [];
     const leftPadding = " ".repeat(paddingX);
     const rightPadding = leftPadding;
-    
+    const dimFn = (theme && typeof theme.fg === "function")
+      ? (s: string) => theme.fg("muted", s)
+      : (s: string) => `\x1b[90m${s}\x1b[0m`;
+
     const horizontalStr = "─".repeat(width);
-    const horizontal = typeof this.borderColor === "function" ? this.borderColor(horizontalStr) : horizontalStr;
+    const horizontal = dimFn(horizontalStr);
     
     // Top border divider (sleek single horizontal line)
     if (this.scrollOffset > 0) {
       const indicator = `─── ↑ ${this.scrollOffset} more `;
       const remaining = width - visibleWidth(indicator);
       if (remaining >= 0) {
-        result.push(typeof this.borderColor === "function" ? this.borderColor(indicator + "─".repeat(remaining)) : indicator + "─".repeat(remaining));
+        result.push(dimFn(indicator + "─".repeat(remaining)));
       } else {
-        result.push(typeof this.borderColor === "function" ? this.borderColor(truncateToWidth(indicator, width)) : truncateToWidth(indicator, width));
+        result.push(dimFn(truncateToWidth(indicator, width)));
       }
     } else {
       result.push(horizontal);
@@ -2148,7 +2152,7 @@ function patchCustomEditor(proto: any) {
     if (linesBelow > 0) {
       const indicator = `─── ↓ ${linesBelow} more `;
       const remaining = width - visibleWidth(indicator);
-      result.push(typeof this.borderColor === "function" ? this.borderColor(indicator + "─".repeat(Math.max(0, remaining))) : indicator + "─".repeat(Math.max(0, remaining)));
+      result.push(dimFn(indicator + "─".repeat(Math.max(0, remaining))));
     }
     
     if (this.autocompleteState && this.autocompleteList) {
@@ -2171,6 +2175,31 @@ function patchDynamicBorder(proto: any) {
 
   proto.render = function (this: any, width: number) {
     return [];
+  };
+}
+
+function patchFooterComponent(child: any) {
+  if (footerComponentPatched) return;
+  if (!child.footerData) return;
+  footerComponentPatched = true;
+  debugLog("PATCHING FOOTER COMPONENT PROVIDER");
+
+  // Remove any existing "Dashboard active" status
+  if (child.footerData.extensionStatuses instanceof Map) {
+    for (const [key, val] of child.footerData.extensionStatuses.entries()) {
+      if (val === "Dashboard active" || (typeof val === "string" && val.includes("Dashboard active"))) {
+        child.footerData.extensionStatuses.delete(key);
+      }
+    }
+  }
+
+  const footerDataProto = Object.getPrototypeOf(child.footerData);
+  const originalSetExtensionStatus = footerDataProto.setExtensionStatus;
+  footerDataProto.setExtensionStatus = function (this: any, key: string, text: string) {
+    if (text === "Dashboard active" || (text && text.includes("Dashboard active"))) {
+      return originalSetExtensionStatus.call(this, key, "");
+    }
+    return originalSetExtensionStatus.call(this, key, text);
   };
 }
 
@@ -2262,6 +2291,8 @@ function applyLivePatches(tui: any, themeInstance: any) {
           patchCustomEditor(Object.getPrototypeOf(child));
         } else if (className === "DynamicBorder") {
           patchDynamicBorder(Object.getPrototypeOf(child));
+        } else if (className === "FooterComponent") {
+          patchFooterComponent(child);
         }
       }
     }
