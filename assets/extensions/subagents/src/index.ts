@@ -1634,6 +1634,7 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
       try {
         return await fn();
       } catch (e: any) {
+        if (this.signal?.aborted) throw e;
         lastError = e;
         if (attempt < maxRetries) {
           const delay = Math.pow(2, attempt) * 1000;
