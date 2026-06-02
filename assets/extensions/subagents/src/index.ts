@@ -1324,6 +1324,7 @@ class SubAgentRuntime {
         this.ctx.sessionId || "unknown",
         this.config.name,
         `Sub-agent '${this.config.name}' invoking tool '${name}'`,
+        `Sub-agent '${this.config.name}' invoking tool '${name}'`,
         name,
         JSON.stringify(args).slice(0, 200),
         0,
@@ -4429,7 +4430,7 @@ ${state.state_notes || "None"}
 `;
           }
         } catch (e) {
-          ctx.ui.notify(`Failed to inject task state: ${e.message}`, "warning");
+          ctx.ui.notify(`Failed to inject task state: ${e instanceof Error ? e.message : e}`, "warning");
         }
       }
     }
