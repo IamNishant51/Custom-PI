@@ -5231,86 +5231,117 @@ async function main() {
     } catch { return { limits: [] }; }
   });
 
-  // ── Social Media Proxy Routes ────────────────────────────────────────────
+  // ── Helper Functions for Social AI Agent ─────────────────────────────────
 
-  const SOCIAL_BRIDGE = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-  const EMAIL_BRIDGE = process.env.EMAIL_BRIDGE_URL || "http://localhost:9878";
-
-  async function proxyToBridge(bridgeUrl, endpoint, method, body) {
-    const url = `${bridgeUrl}${endpoint}`;
-    const opts = { method, headers: { "Content-Type": "application/json" } };
-    if (body) opts.body = JSON.stringify(body);
-    const resp = await fetch(url, opts);
-    return resp.json();
-  }
-
-  // ── Tweet content generation helpers ──────────────────────────────────
-  const HASHTAG_MAP = {
-    ai: ["#AI", "#ArtificialIntelligence", "#MachineLearning"],
-    "machine learning": ["#MachineLearning", "#AI", "#DeepLearning"],
-    agents: ["#AIAgents", "#Agents", "#AIAutomation"],
-    automation: ["#Automation", "#AIAgents", "#TechAutomation"],
-    coding: ["#Coding", "#Programming", "#DevTools"],
-    developer: ["#Developer", "#Coding", "#DevCommunity"],
-    tech: ["#Tech", "#Technology", "#Innovation"],
-    python: ["#Python", "#Coding", "#Programming"],
-    javascript: ["#JavaScript", "#WebDev", "#Coding"],
-    web: ["#WebDev", "#WebDevelopment", "#Frontend"],
-    data: ["#DataScience", "#BigData", "#Analytics"],
-    security: ["#CyberSecurity", "#InfoSec", "#Security"],
-    openai: ["#OpenAI", "#ChatGPT", "#AI"],
-    gpt: ["#GPT", "#ChatGPT", "#OpenAI"],
-    startup: ["#Startup", "#Entrepreneurship", "#Innovation"],
-    product: ["#ProductManagement", "#Tech", "#Innovation"],
-    design: ["#Design", "#UX", "#UIDesign"],
-    api: ["#API", "#DevTools", "#Backend"],
-    cloud: ["#Cloud", "#AWS", "#CloudComputing"],
-    blockchain: ["#Blockchain", "#Web3", "#Crypto"],
-    crypto: ["#Crypto", "#Blockchain", "#Web3"],
-    nlp: ["#NLP", "#AI", "#LanguageModels"],
-    llm: ["#LLM", "#AI", "#LanguageModels"],
-    future: ["#Future", "#Innovation", "#TechTrends"],
-  };
-
-  function generateHashtags(topic) {
-    const lower = topic.toLowerCase();
-    const tags = new Set(["#Tech", "#AI"]);
-
-    for (const [keyword, hashtags] of Object.entries(HASHTAG_MAP)) {
-      if (lower.includes(keyword)) {
-        hashtags.forEach((t) => tags.add(t));
+  async function getLLMCompletion(systemPrompt, userPrompt) {
+    const model = resolveModel();
+    const auth = getModelAuth(model);
+    let text = "";
+    try {
+      const stream = streamSimple(model, {
+        systemPrompt,
+        messages: [{ role: "user", content: [{ type: "text", text: userPrompt }] }]
+      }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+      for await (const event of stream) {
+        if (event.type === "text_delta") text += event.delta;
       }
+    } catch (e) {
+      console.error("LLM Error:", e);
     }
-
-    // Extract significant words (3+ chars) and create hashtag
-    const words = lower.match(/[a-z]{3,}/g) || [];
-    const stopWords = new Set(["the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was", "one", "our", "out", "has", "his", "how", "its", "may", "new", "now", "old", "see", "way", "who", "did", "get", "let", "say", "she", "too", "use", "this", "that", "with", "from", "they", "been", "have", "will", "more", "when", "some", "than", "them", "into", "each", "make", "like", "just", "over", "such", "also", "well", "only", "very"]);
-    const significant = words.filter((w) => !stopWords.has(w) && !/^(post|tweet|share|publish|about|something|related|twitter|xcom)$/i.test(w));
-    for (const w of significant.slice(0, 2)) {
-      const tag = "#" + w.charAt(0).toUpperCase() + w.slice(1);
-      if (!tags.has(tag)) tags.add(tag);
-    }
-
-    return [...tags].slice(0, 5).join(" ");
+    return text.trim();
   }
 
-  // Social Bridge Status
+  async function searchWebForTopic(query) {
+    const tavilyKey = process.env.TAVILY_API_KEY || "";
+    const serperKey = process.env.SERPER_API_KEY || "";
+    if (!tavilyKey && !serperKey) return "No web search API keys configured. Using offline LLM knowledge.";
+    
+    try {
+      if (tavilyKey) {
+        const r = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_key: tavilyKey, query, search_depth: "basic", max_results: 3 })
+        });
+        if (r.ok) {
+          const data = await r.json();
+          return data.results.map(res => `Title: ${res.title}\nURL: ${res.url}\nContent: ${res.content}\n`).join("\n---\n");
+        }
+      }
+      if (serperKey) {
+        const r = await fetch("https://google.serper.dev/search", {
+          method: "POST",
+          headers: { "X-API-KEY": serperKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ q: query, num: 3 })
+        });
+        if (r.ok) {
+          const data = await r.json();
+          return data.organic.map(res => `Title: ${res.title}\nURL: ${res.link}\nSnippet: ${res.snippet}\n`).join("\n---\n");
+        }
+      }
+    } catch (e) {
+      console.error("Search failed:", e);
+    }
+    return "Web search failed. Using offline LLM knowledge.";
+  }
+
+  async function generatePostImage(prompt) {
+    const provider = vaultGet("OPENAI_API_KEY") ? "openai" : vaultGet("GEMINI_API_KEY") ? "gemini" : vaultGet("XAI_API_KEY") ? "grok" : null;
+    if (!provider) return { error: "No image generation keys in vault." };
+    
+    try {
+      if (provider === "openai") return await generateImageOpenAI(prompt, "1024x1024", "base64");
+      if (provider === "gemini") return await generateImageGemini(prompt);
+      if (provider === "grok") return await generateImageGrok(prompt, "base64");
+    } catch (e) {
+      return { error: e.message };
+    }
+    return { error: "Failed to generate image." };
+  }
+
+  // ── Social Bridge Status ──────────────────────────────────────────────────
   app.get("/api/social/status", async () => {
-    try { return await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET"); }
-    catch { return { ok: false, error: "Social bridge not running" }; }
+    try {
+      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => ({ platforms: {} }));
+      const email = await proxyToBridge(EMAIL_BRIDGE, "/status", "GET").catch(() => ({ configured: false }));
+      const bskyConfigured = !!(vaultGet("BLUESKY_IDENTIFIER") && vaultGet("BLUESKY_APP_PASSWORD"));
+      const discordConfigured = !!vaultGet("DISCORD_WEBHOOK_URL");
+      const telegramConfigured = !!(vaultGet("TELEGRAM_BOT_TOKEN") && vaultGet("TELEGRAM_CHAT_ID"));
+
+      return {
+        ok: true,
+        platforms: {
+          ...social.platforms,
+          email: { configured: email.configured },
+          bluesky: { configured: bskyConfigured },
+          discord: { configured: discordConfigured },
+          telegram: { configured: telegramConfigured },
+        }
+      };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   });
 
-  // Twitter
+  // Twitter Proxy
   app.post("/api/social/twitter/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/login", "POST", req.body));
   app.post("/api/social/twitter/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", req.body));
   app.post("/api/social/twitter/reply", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", req.body));
+  app.post("/api/social/twitter/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/twitter/disconnect", "POST"));
 
-  // Reddit
+  // Reddit Proxy
   app.post("/api/social/reddit/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/login", "POST", req.body));
   app.post("/api/social/reddit/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", req.body));
   app.post("/api/social/reddit/comment", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/comment", "POST", req.body));
+  app.post("/api/social/reddit/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/reddit/disconnect", "POST"));
 
-  // Email
+  // LinkedIn Proxy
+  app.post("/api/social/linkedin/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/login", "POST", req.body));
+  app.post("/api/social/linkedin/setup", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/setup", "POST", req.body));
+  app.post("/api/social/linkedin/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/post", "POST", req.body));
+  app.post("/api/social/linkedin/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/disconnect", "POST"));
+
+  // Email Proxy
   app.get("/api/social/email/status", async () => {
     try { return await proxyToBridge(EMAIL_BRIDGE, "/status", "GET"); }
     catch { return { ok: false, error: "Email bridge not running" }; }
@@ -5324,13 +5355,111 @@ async function main() {
   });
   app.post("/api/social/email/disconnect", async () => proxyToBridge(EMAIL_BRIDGE, "/disconnect", "POST"));
 
-  // Disconnect platforms
-  app.post("/api/social/twitter/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/twitter/disconnect", "POST"));
-  app.post("/api/social/reddit/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/reddit/disconnect", "POST"));
+  // Bluesky
+  app.post("/api/social/bluesky/configure", async (req) => {
+    const { username, password } = req.body;
+    if (!username || !password) return { ok: false, error: "username and password required" };
+    vaultSet("BLUESKY_IDENTIFIER", username);
+    vaultSet("BLUESKY_APP_PASSWORD", password);
+    return { ok: true, message: "Bluesky configured successfully" };
+  });
+  app.post("/api/social/bluesky/disconnect", async () => {
+    vaultDelete("BLUESKY_IDENTIFIER");
+    vaultDelete("BLUESKY_APP_PASSWORD");
+    return { ok: true, message: "Bluesky disconnected" };
+  });
+  app.post("/api/social/bluesky/post", async (req) => {
+    const { text } = req.body;
+    if (!text) return { ok: false, error: "text required" };
+    const res = await postToBluesky(text);
+    return { ok: !res.toLowerCase().includes("error"), message: res };
+  });
+
+  // Discord
+  app.post("/api/social/discord/configure", async (req) => {
+    const { webhookUrl } = req.body;
+    if (!webhookUrl) return { ok: false, error: "webhookUrl required" };
+    vaultSet("DISCORD_WEBHOOK_URL", webhookUrl);
+    return { ok: true, message: "Discord configured successfully" };
+  });
+  app.post("/api/social/discord/disconnect", async () => {
+    vaultDelete("DISCORD_WEBHOOK_URL");
+    return { ok: true, message: "Discord disconnected" };
+  });
+  app.post("/api/social/discord/post", async (req) => {
+    const { text } = req.body;
+    if (!text) return { ok: false, error: "text required" };
+    const res = await postToDiscord(text);
+    return { ok: !res.toLowerCase().includes("error"), message: res };
+  });
+
+  // Telegram
+  app.post("/api/social/telegram/configure", async (req) => {
+    const { token, chatId } = req.body;
+    if (!token || !chatId) return { ok: false, error: "token and chatId required" };
+    vaultSet("TELEGRAM_BOT_TOKEN", token);
+    vaultSet("TELEGRAM_CHAT_ID", chatId);
+    return { ok: true, message: "Telegram configured successfully" };
+  });
+  app.post("/api/social/telegram/disconnect", async () => {
+    vaultDelete("TELEGRAM_BOT_TOKEN");
+    vaultDelete("TELEGRAM_CHAT_ID");
+    return { ok: true, message: "Telegram disconnected" };
+  });
+  app.post("/api/social/telegram/post", async (req) => {
+    const { text } = req.body;
+    if (!text) return { ok: false, error: "text required" };
+    const res = await postToTelegram(text);
+    return { ok: !res.toLowerCase().includes("error"), message: res };
+  });
+
+  // Cross-platform Publish Draft
+  app.post("/api/social/publish", async (req) => {
+    const { text, mediaPath, platforms, drafts } = req.body;
+    if (!text) return { ok: false, error: "text required" };
+    
+    const results = [];
+    const targetPlatforms = platforms || ["twitter"];
+    
+    for (const platform of targetPlatforms) {
+      let platformText = text;
+      if (drafts && drafts[platform]) {
+        platformText = drafts[platform];
+        if (typeof platformText === "object") {
+          platformText = platformText.body || platformText.text || JSON.stringify(platformText);
+        }
+      }
+      
+      try {
+        if (platform === "twitter") {
+          const res = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", { text: platformText, mediaPath });
+          results.push(`Twitter: ${res.ok ? "Success" : "Failed (" + res.error + ")"}`);
+        } else if (platform === "linkedin") {
+          const res = await proxyToBridge(SOCIAL_BRIDGE, "/linkedin/post", "POST", { text: platformText, mediaPath });
+          results.push(`LinkedIn: ${res.ok ? "Success" : "Failed (" + res.error + ")"}`);
+        } else if (platform === "reddit") {
+          const title = (drafts?.reddit?.title) || "Shared via Custom-PI";
+          const res = await proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", { subreddit: "programming", title, body: platformText });
+          results.push(`Reddit: ${res.ok ? "Success" : "Failed (" + res.error + ")"}`);
+        } else if (platform === "bluesky") {
+          const res = await postToBluesky(platformText);
+          results.push(`Bluesky: ${res.includes("Posted") ? "Success" : "Failed (" + res + ")"}`);
+        } else if (platform === "discord") {
+          const res = await postToDiscord(platformText);
+          results.push(`Discord: ${res.includes("Posted") ? "Success" : "Failed (" + res + ")"}`);
+        } else if (platform === "telegram") {
+          const res = await postToTelegram(platformText);
+          results.push(`Telegram: ${res.includes("Posted") ? "Success" : "Failed (" + res + ")"}`);
+        }
+      } catch (err) {
+        results.push(`${platform}: Failed (${err.message})`);
+      }
+    }
+    
+    return { ok: true, message: `Publish execution completed:\n${results.join("\n")}` };
+  });
 
   // ── Social Chat Agent ────────────────────────────────────────────────────
-  // Parses natural language and routes to the appropriate social action
-
   app.post("/api/social/chat", async (req) => {
     const { message } = req.body;
     if (!message) return { ok: false, error: "message required" };
@@ -5339,125 +5468,21 @@ async function main() {
 
     // ── Status check ────────────────────────────────────────────────────
     if (/\b(status|connected|what.*(connect|account|platform))\b/.test(msg)) {
-      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => null);
-      const email = await proxyToBridge(EMAIL_BRIDGE, "/status", "GET").catch(() => null);
+      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => ({ platforms: {} }));
+      const email = await proxyToBridge(EMAIL_BRIDGE, "/status", "GET").catch(() => ({ configured: false }));
+      const bskyConfigured = !!(vaultGet("BLUESKY_IDENTIFIER") && vaultGet("BLUESKY_APP_PASSWORD"));
+      const discordConfigured = !!vaultGet("DISCORD_WEBHOOK_URL");
+      const telegramConfigured = !!(vaultGet("TELEGRAM_BOT_TOKEN") && vaultGet("TELEGRAM_CHAT_ID"));
+
       const lines = [];
-      if (social?.platforms?.twitter?.configured) lines.push("Twitter: connected");
-      else lines.push("Twitter: not connected");
-      if (social?.platforms?.reddit?.configured) lines.push("Reddit: connected");
-      else lines.push("Reddit: not connected");
-      if (email?.configured) lines.push(`Email: connected (${email.email})`);
-      else lines.push("Email: not configured");
+      lines.push(`Twitter: ${social.platforms?.twitter?.configured ? "connected" : "not connected"}`);
+      lines.push(`Reddit: ${social.platforms?.reddit?.configured ? "connected" : "not connected"}`);
+      lines.push(`LinkedIn: ${social.platforms?.linkedin?.configured ? "connected" : "not connected"}`);
+      lines.push(`Email: ${email.configured ? "configured" : "not configured"}`);
+      lines.push(`Bluesky: ${bskyConfigured ? "connected" : "not connected"}`);
+      lines.push(`Discord Webhook: ${discordConfigured ? "configured" : "not configured"}`);
+      lines.push(`Telegram: ${telegramConfigured ? "connected" : "not connected"}`);
       return { ok: true, action: "status", message: lines.join("\n") };
-    }
-
-    // ── Twitter post ────────────────────────────────────────────────────
-    if (/\b(post|tweet|share|publish|x\.com|twitter)\b/.test(msg) && !/\breddit\b/.test(msg) && !/\bemail\b/.test(msg) && !/\breply\b/.test(msg) && !/\bcomment\b/.test(msg)) {
-      // Extract the topic — remove common prefixes and filler
-      let topic = message
-        .replace(/^(please\s+)?/i, "")
-        .replace(/\b(post|tweet|share|publish)\b\s*(something\s+)?(related\s+to|about|on|to)?\s*(on\s+)?(twitter|x\.com|x)?\s*[:\-]?\s*/i, "")
-        .replace(/^(about|about\s+my|about\s+this|something\s+related\s+to)\s+/i, "")
-        .trim();
-      if (!topic || topic.length < 3) {
-        topic = message.replace(/^(post|tweet|share|publish)\s+/i, "").trim();
-      }
-      if (!topic) topic = message;
-
-      // If topic is already a well-formed tweet (short + has hashtags), post as-is
-      const looksLikeTweet = topic.length <= 280 && /#\w+/.test(topic) && topic.split("\n").length <= 3;
-
-      let content;
-      if (looksLikeTweet) {
-        content = topic;
-      } else {
-        // Generate a proper tweet from the topic
-        const hashtags = generateHashtags(topic);
-        const lower = topic.toLowerCase();
-
-        // Build an informative tweet based on topic keywords
-        const tweetTemplates = [
-          // AI / Agents
-          () => {
-            if (/ai\s*agent|agent/.test(lower)) {
-              return `AI Agents are transforming work.\n\nThey reason, plan, use tools, and act autonomously.\n\n- Multi-step reasoning\n- Tool use & APIs\n- Memory & context\n- Self-correction loops\n\nThe future is agents, not chatbots. ${hashtags}`;
-            }
-            return null;
-          },
-          () => {
-            if (/machine\s*learn|ml\b/.test(lower)) {
-              return `Machine Learning in 2026:\n\n- Foundation models everywhere\n- On-device inference going mainstream\n- Multi-modal models (text+image+code)\n- Autonomous agents on ML pipelines\n\nResearch to products: the gap is closing. ${hashtags}`;
-            }
-            return null;
-          },
-          () => {
-            if (/cod|program|develop|dev\s*tool/.test(lower)) {
-              return `AI is reshaping development:\n\n- Code completion to generation\n- Code review to instant feedback\n- Debugging to root cause analysis\n- Deployment to one-click automation\n\nDevs aren't replaced. They're amplified. ${hashtags}`;
-            }
-            return null;
-          },
-          () => {
-            if (/automat/.test(lower)) {
-              return `Automation isn't just about saving time.\n\nIt's about eliminating cognitive load.\n\nWhen routine tasks run themselves, your brain is free for work that matters.\n\nBuild once. Automate forever. ${hashtags}`;
-            }
-            return null;
-          },
-          () => {
-            if (/future|trend|202[5-9]|next\s*gen/.test(lower)) {
-              return `The next wave of tech:\n\n- AI agents as coworkers\n- Personalized medicine via ML\n- Ambient computing everywhere\n- Open-source foundation models\n\nWe're just getting started. ${hashtags}`;
-            }
-            return null;
-          },
-          () => {
-            if (/data|analytics|insight/.test(lower)) {
-              return `Data in 2026:\n\n- Real-time pipelines are default\n- AI turns data into insights\n- Privacy-preserving ML is mainstream\n- Every company is a data company\n\nData without action is just noise. ${hashtags}`;
-            }
-            return null;
-          },
-          () => {
-            const clean = topic.replace(/^(post|tweet|share|publish|something\s+related\s+to|about)\s+/gi, "").trim();
-            const words = clean.split(/\s+/);
-            const title = words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-            return `${title}\n\nWorth watching. The intersection of tech and real impact is where the exciting stuff happens.\n\nStay curious. Keep building. ${hashtags}`;
-          },
-        ];
-
-        let tweet = "";
-        for (const template of tweetTemplates) {
-          const result = template();
-          if (result) { tweet = result; break; }
-        }
-
-        // Truncate to 280 chars
-        if (tweet.length > 280) {
-          const tagMatch = tweet.match(/\n\n#\S+(\s#\S+)*$/);
-          const tagStr = tagMatch ? tagMatch[0] : "";
-          const maxBody = 280 - tagStr.length - 4;
-          tweet = tweet.slice(0, maxBody).trimEnd() + "…" + tagStr;
-        }
-        content = tweet;
-      }
-
-      const result = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", { text: content });
-      return {
-        ok: result.ok,
-        action: "twitter_post",
-        message: result.ok ? `Posted to Twitter:\n${content}` : `Twitter post failed: ${result.error}`,
-      };
-    }
-
-    // ── Twitter reply ───────────────────────────────────────────────────
-    if (/\b(reply|respond)\b/.test(msg) && (/\b twitter\b/.test(msg) || /\bx\.com\b/.test(msg))) {
-      const urlMatch = message.match(/https?:\/\/(x\.com|twitter\.com)\/\S+/);
-      if (!urlMatch) return { ok: false, action: "twitter_reply", message: "Please provide the tweet URL to reply to." };
-      const text = message.replace(urlMatch[0], "").replace(/reply|respond|to\s*(tweet|this)?/gi, "").trim();
-      if (!text) return { ok: false, action: "twitter_reply", message: "Please provide the reply text." };
-      const result = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", { url: urlMatch[0], text });
-      return {
-        ok: result.ok,
-        action: "twitter_reply",
-        message: result.ok ? `Replied to tweet` : `Twitter reply failed: ${result.error}`,
-      };
     }
 
     // ── Reddit post ─────────────────────────────────────────────────────
@@ -5492,7 +5517,7 @@ async function main() {
       return {
         ok: result.ok,
         action: "reddit_post",
-        message: result.ok ? `Posted to r/${subreddit}:\nTitle: ${title}\n${body ? `Body: ${body.slice(0, 200)}` : ""}` : `Reddit post failed: ${result.error}`,
+        message: result.ok ? "Posted to r/" + subreddit + ":\nTitle: " + title + "\n" + (body ? "Body: " + body.slice(0, 200) : "") : "Reddit post failed: " + result.error,
       };
     }
 
