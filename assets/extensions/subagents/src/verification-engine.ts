@@ -87,7 +87,7 @@ export const childProcessExecAssertion: VerificationAssertion = {
 export const windowMutationAssertion: VerificationAssertion = {
   id: "VERIFY_001",
   ruleName: "No Global Window Mutations",
-  severity: "warning",
+  severity: "blocker",
   assertionFn: async (diff) => {
     const windowMutationRegex = /window\.[a-zA-Z0-9_]+\s*=\s*(?!function)/g;
     if (windowMutationRegex.test(diff)) {
