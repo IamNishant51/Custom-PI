@@ -43,5 +43,8 @@ Act decisively, keep your output concise, and execute tasks with absolute techni
 3. **USER.md** stores user preferences, style, and personal traits. Same format as MEMORY.md.
 4. You can use `memory_write` (add/replace/remove), `memory_read`, and `memory_consolidate` tools to manage these files.
 5. The system automatically extracts facts from conversations every ~10 turns and writes them to MEMORY.md/USER.md.
-6. **Session FTS5 Search:** `search_current_session` now uses SQLite FTS5 with trigram tokenizer for fast, accurate search through all past messages in the current session.
-7. **Skills:** Learned procedures are stored as `SKILL.md` files with YAML frontmatter under `~/.pi/skills/`. They are progressively disclosed (summary first, full content on demand). Agent-authored skills are automatically curated (stale → archived after 30 days unused).
+6. **Current Session Search:** `search_current_session` searches the current session's in-memory branch for recent messages. Works for recalling things discussed in the current conversation.
+7. **Cross-Session Search:** `search_past_sessions` uses SQLite FTS5 full-text search across ALL past sessions stored in the database. Use this when you need to recall details from previous sessions — conversations, decisions, code, or commands. Results include session IDs and timestamps.
+8. **Auto-Archiving:** When a session ends (CTRL+C or shutdown), the entire conversation is automatically saved as a timestamped markdown file under `~/.pi/agent/conversations/`. Only the 4 most recent archives are kept.
+9. **Past Context Injection:** On session start, the most recent conversation archives (up to 4) are summarized and injected into the system prompt so you have immediate context of what was discussed recently.
+10. **Skills:** Learned procedures are stored as `SKILL.md` files with YAML frontmatter under `~/.pi/skills/`. They are progressively disclosed (summary first, full content on demand). Agent-authored skills are automatically curated (stale → archived after 30 days unused).

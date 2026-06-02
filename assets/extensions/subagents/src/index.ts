@@ -30,7 +30,7 @@ import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate a
 import { initNudgeState, incrementTurn, shouldNudgeMemory, shouldNudgeSkill, resetMemoryNudge, resetSkillNudge, getNudgeState } from "./memory-nudge";
 import { runMemoryReview, runSkillReview, runPreCompressionFlush } from "./background-review";
 import { startCronJobs, stopCronJobs, isCronRunning } from "./cron-scheduler";
-import { ensureSession, insertMessage, searchSession, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities } from "./state-db";
+import { ensureSession, insertMessage, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities } from "./state-db";
 import {
   vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
 } from "./secret-vault";
@@ -4192,6 +4192,12 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       // }
     } catch {}
 
+    // Ensure session record exists in SQLite for message persistence
+    try {
+      const sid = deriveSessionId(ctx);
+      if (sid) ensureSession(sid);
+    } catch {}
+
     // Set playful geometric thinking indicator
     const megaFrames = ["◐", "◓", "◑", "◒"];
     ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });
@@ -4422,13 +4428,98 @@ ${state.state_notes || "None"}
       // silent — skill injection should never crash startup
     }
 
+    // Inject past conversation context (last 3-4 archives) for cross-session memory
+    try {
+      const convDir = path.join(os.homedir(), ".pi", "agent", "conversations");
+      if (fs.existsSync(convDir)) {
+        const archives = fs.readdirSync(convDir)
+          .filter((f: string) => f.endsWith(".md"))
+          .map((f: string) => ({ name: f, mtime: fs.statSync(path.join(convDir, f)).mtimeMs }))
+          .sort((a: any, b: any) => b.mtime - a.mtime)
+          .slice(0, 4);
+        if (archives.length > 0) {
+          const summaries: string[] = ["\n# 💬 PAST CONVERSATION ARCHIVES\nThe following are summaries of your recent past sessions. Use this context to remember what was discussed previously. For full details, use `search_past_sessions`.\n"];
+          for (const arch of archives) {
+            const fullPath = path.join(convDir, arch.name);
+            const content = fs.readFileSync(fullPath, "utf8");
+            const lines = content.split("\n");
+            const dateLine = lines.find((l: string) => l.startsWith("**Date:**")) || "unknown date";
+            const msgCountLine = lines.find((l: string) => l.startsWith("**Total Messages:**")) || "";
+            const firstMsg = lines.slice(0, 20).filter((l: string) => l.startsWith("### ")).map((l: string) => l.replace(/^### \d+\.\s*/, "")).join(", ");
+            summaries.push(`- **${arch.name}**: ${dateLine.replace("**Date:** ", "")} ${msgCountLine} — Topics: ${firstMsg.slice(0, 200) || "conversation archive"}`);
+          }
+          extraPrompt += `\n## 📜 RECENT PAST SESSIONS\n${summaries.join("\n")}\n`;
+        }
+      }
+    } catch {}
+
     return {
       systemPrompt: event.systemPrompt + extraPrompt
     };
   });
 
+  // ── Helpers for message persistence ────────────────────────────────────
+  function deriveSessionId(ctx: any): string | null {
+    try {
+      const sessionFile = ctx.sessionManager?.getSessionFile();
+      if (sessionFile) return path.basename(sessionFile, ".jsonl");
+    } catch {}
+    return ctx?.sessionId || null;
+  }
+
+  function serializeMessageContent(msg: any): string {
+    if (typeof msg.content === "string") return msg.content;
+    if (Array.isArray(msg.content)) {
+      return msg.content.map((c: any) => {
+        if (typeof c === "string") return c;
+        if (c.type === "text") return c.text || "";
+        if (c.type === "toolCall") return `[Tool Call: ${c.name}(${JSON.stringify(c.arguments)})]`;
+        if (c.type === "toolResult") {
+          const text = c.content?.[0]?.text || "";
+          return `[Tool Result: ${text.slice(0, 1000)}]`;
+        }
+        return "";
+      }).join("\n");
+    }
+    return "";
+  }
+
+  function extractToolName(msg: any): string | null {
+    if (!Array.isArray(msg.content)) return null;
+    const tc = msg.content.find((c: any) => c.type === "toolCall");
+    return tc?.name || null;
+  }
+
+  function extractToolArgs(msg: any): string | null {
+    if (!Array.isArray(msg.content)) return null;
+    const tc = msg.content.find((c: any) => c.type === "toolCall");
+    return tc?.arguments ? JSON.stringify(tc.arguments) : null;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   let backgroundTaskCounter = 0;
   let isProcessingBackground = false;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Message persistence — store EVERY message (user, assistant, tool) to SQLite
+  // so search_past_sessions can find them across sessions.
+  // ─────────────────────────────────────────────────────────────────────────
+  pi.on("message_end", async (event, ctx) => {
+    try {
+      const msg = event.message;
+      if (!msg || !msg.role) return;
+      const sid = deriveSessionId(ctx);
+      if (!sid) return;
+      const text = serializeMessageContent(msg);
+      if (!text) return;
+      const toolName = extractToolName(msg);
+      const toolArgs = extractToolArgs(msg);
+      insertMessage(sid, msg.role, text, toolName || undefined, toolArgs || undefined);
+    } catch {
+      // persistence must never crash the message flow
+    }
+  });
 
   // Nudge-driven background processing: replaces 3 separate LLM calls with 1
   pi.on("message_end", async (event, ctx) => {
@@ -4733,6 +4824,69 @@ If nothing to report, return: {}`;
         lastToolResult: null,
       });
     } catch {}
+    // Save conversation archive to MD before shutdown
+    try {
+      const branch = ctx.sessionManager?.getBranch();
+      if (branch && branch.length > 0) {
+        const sid = deriveSessionId(ctx) || "unknown";
+        const convDir = path.join(os.homedir(), ".pi", "agent", "conversations");
+        if (!fs.existsSync(convDir)) fs.mkdirSync(convDir, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const archivePath = path.join(convDir, `${sid}-${timestamp}.md`);
+        const messages = branch
+          .filter((e: any) => e.type === "message")
+          .map((e: any) => e.message);
+        const lines: string[] = [
+          `# Conversation Archive`,
+          `**Date:** ${new Date().toLocaleString()}`,
+          `**Session:** ${sid}`,
+          `**Total Messages:** ${messages.length}`,
+          ``,
+          `---`,
+          ``,
+        ];
+        let msgIdx = 0;
+        for (const msg of messages) {
+          msgIdx++;
+          let text = "";
+          if (typeof msg.content === "string") {
+            text = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            text = msg.content.map((c: any) => {
+              if (typeof c === "string") return c;
+              if (c.type === "text") return c.text || "";
+              if (c.type === "toolCall") return `> **Tool Call:** ${c.name}(${JSON.stringify(c.arguments)})`;
+              if (c.type === "toolResult") {
+                const resultText = c.content?.[0]?.text || "";
+                return `> **Tool Result:** ${resultText.slice(0, 500)}`;
+              }
+              return "";
+            }).join("\n");
+          }
+          const roleIcon: Record<string, string> = { user: "🧑", assistant: "🤖", tool: "🔧" };
+          lines.push(`### ${msgIdx}. ${roleIcon[msg.role] || "💬"} ${msg.role.toUpperCase()}`);
+          lines.push(``);
+          lines.push(text);
+          lines.push(``);
+          lines.push(`---`);
+          lines.push(``);
+        }
+        fs.writeFileSync(archivePath, lines.join("\n"), "utf8");
+        // Prune old archives: keep only the 4 most recent
+        try {
+          const allArchives = fs.readdirSync(convDir)
+            .filter((f: string) => f.endsWith(".md"))
+            .map((f: string) => ({ name: f, mtime: fs.statSync(path.join(convDir, f)).mtimeMs }))
+            .sort((a: any, b: any) => b.mtime - a.mtime);
+          if (allArchives.length > 4) {
+            for (const old of allArchives.slice(4)) {
+              fs.unlinkSync(path.join(convDir, old.name));
+            }
+          }
+        } catch {}
+      }
+    } catch {}
+
     // Clean up cloned repos
     for (const repoPath of clonedRepos) {
       try {

@@ -179,6 +179,7 @@ export interface FtsResult {
   content: string;
   snippet: string;
   rank: number;
+  createdAt?: string;
 }
 
 export interface TaskStateRecord {
@@ -229,7 +230,8 @@ export function searchSession(query: string, sessionId?: string, k: number = 10)
   let sql: string;
   let params: any[];
   if (sessionId) {
-    sql = `SELECT m.id, m.session_id as sessionId, m.role, m.content, 
+    sql = `SELECT m.id, m.session_id as sessionId, m.role, m.content,
+                  m.created_at as createdAt,
                   snippet(messages_fts, 1, '<mark>', '</mark>', '...', 40) as snippet,
                   rank
            FROM messages_fts 
@@ -239,6 +241,7 @@ export function searchSession(query: string, sessionId?: string, k: number = 10)
     params = [q, sessionId, k];
   } else {
     sql = `SELECT m.id, m.session_id as sessionId, m.role, m.content,
+                  m.created_at as createdAt,
                   snippet(messages_fts, 1, '<mark>', '</mark>', '...', 40) as snippet,
                   rank
            FROM messages_fts 
