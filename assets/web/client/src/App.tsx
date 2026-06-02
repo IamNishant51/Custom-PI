@@ -19,8 +19,9 @@ const MCPPanel = lazy(() => import("./components/MCPPanel"));
 const AgentsPanel = lazy(() => import("./components/AgentsPanel"));
 const TeamPanel = lazy(() => import("./components/TeamPanel"));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
+const SocialPanel = lazy(() => import("./components/SocialPanel"));
 
-export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings";
+export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social";
 
 const PANELFallback = <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
 
@@ -76,6 +77,7 @@ function AppContent() {
               {activeView === "teams" && <TeamPanel onNavigate={(v) => setActiveView(v as View)} />}
               {activeView === "mcp" && <MCPPanel />}
               {activeView === "settings" && <SettingsPanel />}
+              {activeView === "social" && <SocialPanel />}
             </Suspense>
           </div>
         </div>
@@ -91,7 +93,7 @@ const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { 
     pipeline: "Pipeline", health: "Health & Resources",
     "work-products": "Work Products",
     agents: "Sub-Agents", "agent-discovery": "Agent Discovery", mcp: "MCP Servers",
-    teams: "Teams", settings: "Settings",
+    teams: "Teams", settings: "Settings", social: "Social Accounts",
   };
   return (
     <div className="topbar">

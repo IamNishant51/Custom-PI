@@ -3786,6 +3786,250 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Social Media & Email Tools
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const SOCIAL_BRIDGE_URL = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
+  const EMAIL_BRIDGE_URL = process.env.EMAIL_BRIDGE_URL || "http://localhost:9878";
+
+  async function callSocialBridge(endpoint: string, method: string, body?: any): Promise<any> {
+    const url = `${SOCIAL_BRIDGE_URL}${endpoint}`;
+    const opts: any = { method, headers: { "Content-Type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    return resp.json();
+  }
+
+  async function callEmailBridge(endpoint: string, method: string, body?: any): Promise<any> {
+    const url = `${EMAIL_BRIDGE_URL}${endpoint}`;
+    const opts: any = { method, headers: { "Content-Type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    return resp.json();
+  }
+
+  // Tool: Post to Twitter/X
+  pi.registerTool({
+    name: "post_to_twitter",
+    label: "Post to Twitter",
+    description: "Post a tweet to Twitter/X. The text will be auto-truncated to 280 characters.",
+    parameters: Type.Object({
+      text: Type.String({ description: "The tweet text to post (max 280 chars)" }),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callSocialBridge("/twitter/post", "POST", { text: params.text });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Social bridge not running. Start it with: node assets/web/social-bridge.mjs` }] };
+      }
+    },
+  });
+
+  // Tool: Reply to a Tweet
+  pi.registerTool({
+    name: "reply_to_tweet",
+    label: "Reply to Tweet",
+    description: "Reply to a specific tweet on Twitter/X.",
+    parameters: Type.Object({
+      tweetUrl: Type.String({ description: "The URL of the tweet to reply to" }),
+      text: Type.String({ description: "The reply text" }),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callSocialBridge("/twitter/reply", "POST", { url: params.tweetUrl, text: params.text });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Social bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Login to Twitter
+  pi.registerTool({
+    name: "login_twitter",
+    label: "Login to Twitter",
+    description: "Connect a Twitter/X account using username and password. One-time setup — session persists.",
+    parameters: Type.Object({
+      username: Type.String({ description: "Twitter username or email" }),
+      password: Type.String({ description: "Twitter password" }),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callSocialBridge("/twitter/login", "POST", { username: params.username, password: params.password });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Social bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Post to Reddit
+  pi.registerTool({
+    name: "post_to_reddit",
+    label: "Post to Reddit",
+    description: "Submit a post to a subreddit. Provide title and either body (text post) or url (link post).",
+    parameters: Type.Object({
+      subreddit: Type.String({ description: "Subreddit name (without r/)" }),
+      title: Type.String({ description: "Post title" }),
+      body: Type.Optional(Type.String({ description: "Post body text (for text posts)" })),
+      url: Type.Optional(Type.String({ description: "URL to share (for link posts)" })),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callSocialBridge("/reddit/post", "POST", {
+          subreddit: params.subreddit,
+          title: params.title,
+          body: params.body || "",
+          url: params.url || "",
+        });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Social bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Comment on Reddit
+  pi.registerTool({
+    name: "comment_on_reddit",
+    label: "Comment on Reddit",
+    description: "Post a comment on a Reddit post or thread.",
+    parameters: Type.Object({
+      postUrl: Type.String({ description: "Full URL of the Reddit post to comment on" }),
+      text: Type.String({ description: "Comment text" }),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callSocialBridge("/reddit/comment", "POST", { url: params.postUrl, text: params.text });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Social bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Login to Reddit
+  pi.registerTool({
+    name: "login_reddit",
+    label: "Login to Reddit",
+    description: "Connect a Reddit account using username and password. One-time setup — session persists.",
+    parameters: Type.Object({
+      username: Type.String({ description: "Reddit username" }),
+      password: Type.String({ description: "Reddit password" }),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callSocialBridge("/reddit/login", "POST", { username: params.username, password: params.password });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Social bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Send Email
+  pi.registerTool({
+    name: "send_email",
+    label: "Send Email",
+    description: "Send an email via Gmail. Requires Gmail App Password setup.",
+    parameters: Type.Object({
+      to: Type.String({ description: "Recipient email address" }),
+      subject: Type.String({ description: "Email subject" }),
+      body: Type.String({ description: "Email body text or HTML" }),
+      isHtml: Type.Optional(Type.Boolean({ description: "Set true if body is HTML" })),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callEmailBridge("/send", "POST", {
+          to: params.to,
+          subject: params.subject,
+          body: params.body,
+          isHtml: params.isHtml || false,
+        });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Email bridge not running. Start it with: node assets/web/email-bridge.mjs` }] };
+      }
+    },
+  });
+
+  // Tool: Read Emails
+  pi.registerTool({
+    name: "read_email",
+    label: "Read Email",
+    description: "Read recent emails from your inbox.",
+    parameters: Type.Object({
+      folder: Type.Optional(Type.String({ description: "IMAP folder (default: INBOX)" })),
+      limit: Type.Optional(Type.Number({ description: "Number of emails to read (default: 20)" })),
+    }),
+    async execute(id, params) {
+      try {
+        const folder = params.folder || "INBOX";
+        const limit = params.limit || 20;
+        const result = await callEmailBridge(`/read?folder=${folder}&limit=${limit}`, "GET");
+        if (!result.ok) return { content: [{ type: "text", text: `❌ ${result.error}` }] };
+        const lines = (result.emails || []).map((e: any) => `• **${e.from}** — ${e.subject} (${e.date})`);
+        return { content: [{ type: "text", text: lines.length > 0 ? lines.join("\n") : "No emails found." }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Email bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Configure Email
+  pi.registerTool({
+    name: "configure_email",
+    label: "Configure Email",
+    description: "Set up Gmail email credentials (email + App Password). One-time setup.",
+    parameters: Type.Object({
+      email: Type.String({ description: "Gmail address" }),
+      appPassword: Type.String({ description: "16-character Gmail App Password" }),
+      displayName: Type.Optional(Type.String({ description: "Display name for outgoing emails" })),
+    }),
+    async execute(id, params) {
+      try {
+        const result = await callEmailBridge("/configure", "POST", {
+          email: params.email,
+          appPassword: params.appPassword,
+          displayName: params.displayName || "",
+        });
+        return { content: [{ type: "text", text: result.ok ? `✅ ${result.message}` : `❌ ${result.error}` }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `❌ Email bridge not running.` }] };
+      }
+    },
+  });
+
+  // Tool: Social Media Status
+  pi.registerTool({
+    name: "social_status",
+    label: "Social Media Status",
+    description: "Check connection status of all social media accounts and email.",
+    parameters: Type.Object({}),
+    async execute(id, params) {
+      const lines: string[] = [];
+      try {
+        const social = await callSocialBridge("/status", "GET");
+        lines.push(`**Twitter/X**: ${social.platforms?.twitter?.configured ? "✅ Configured" : "❌ Not connected"}`);
+        lines.push(`**Reddit**: ${social.platforms?.reddit?.configured ? "✅ Configured" : "❌ Not connected"}`);
+        lines.push(`Twitter posts today: ${social.rateLimits?.twitter?.count || 0}/10`);
+        lines.push(`Reddit posts today: ${social.rateLimits?.reddit?.count || 0}/10`);
+      } catch {
+        lines.push("**Social Bridge**: ❌ Not running");
+      }
+      try {
+        const email = await callEmailBridge("/status", "GET");
+        lines.push(`**Email**: ${email.configured ? `✅ ${email.email}` : "❌ Not configured"}`);
+        lines.push(`Emails today: ${email.rateLimit?.sent || 0}/${email.rateLimit?.limit || 500}`);
+      } catch {
+        lines.push("**Email Bridge**: ❌ Not running");
+      }
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Session Memory / Task State Tracking Commands & Hooks
   // ─────────────────────────────────────────────────────────────────────────
 

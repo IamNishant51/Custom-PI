@@ -5231,6 +5231,88 @@ async function main() {
     } catch { return { limits: [] }; }
   });
 
+  // ── Social Media Proxy Routes ────────────────────────────────────────────
+
+  const SOCIAL_BRIDGE = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
+  const EMAIL_BRIDGE = process.env.EMAIL_BRIDGE_URL || "http://localhost:9878";
+
+  async function proxyToBridge(bridgeUrl, endpoint, method, body) {
+    const url = `${bridgeUrl}${endpoint}`;
+    const opts = { method, headers: { "Content-Type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    return resp.json();
+  }
+
+  // Social Bridge Status
+  app.get("/api/social/status", async () => {
+    try { return await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET"); }
+    catch { return { ok: false, error: "Social bridge not running" }; }
+  });
+
+  // Twitter
+  app.post("/api/social/twitter/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/login", "POST", req.body));
+  app.post("/api/social/twitter/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", req.body));
+  app.post("/api/social/twitter/reply", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", req.body));
+
+  // Reddit
+  app.post("/api/social/reddit/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/login", "POST", req.body));
+  app.post("/api/social/reddit/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", req.body));
+  app.post("/api/social/reddit/comment", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/comment", "POST", req.body));
+
+  // Email
+  app.get("/api/social/email/status", async () => {
+    try { return await proxyToBridge(EMAIL_BRIDGE, "/status", "GET"); }
+    catch { return { ok: false, error: "Email bridge not running" }; }
+  });
+  app.post("/api/social/email/configure", async (req) => proxyToBridge(EMAIL_BRIDGE, "/configure", "POST", req.body));
+  app.post("/api/social/email/send", async (req) => proxyToBridge(EMAIL_BRIDGE, "/send", "POST", req.body));
+  app.get("/api/social/email/read", async (req) => {
+    const folder = req.query.folder || "INBOX";
+    const limit = req.query.limit || "20";
+    return proxyToBridge(EMAIL_BRIDGE, `/read?folder=${folder}&limit=${limit}`, "GET");
+  });
+  app.post("/api/social/email/disconnect", async () => proxyToBridge(EMAIL_BRIDGE, "/disconnect", "POST"));
+
+  // Start Social Bridge automatically if not running
+  async function ensureSocialBridge() {
+    try {
+      await fetch(`${SOCIAL_BRIDGE}/status`);
+    } catch {
+      // Bridge not running — try to start it
+      const { spawn } = await import("node:child_process");
+      const bridgePath = path.join(__dirname, "social-bridge.mjs");
+      if (fs.existsSync(bridgePath)) {
+        const child = spawn(process.execPath, [bridgePath], {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.unref();
+        console.log("  ✦ Social bridge started on port 9877");
+      }
+    }
+  }
+
+  async function ensureEmailBridge() {
+    try {
+      await fetch(`${EMAIL_BRIDGE}/status`);
+    } catch {
+      const { spawn } = await import("node:child_process");
+      const bridgePath = path.join(__dirname, "email-bridge.mjs");
+      if (fs.existsSync(bridgePath)) {
+        const child = spawn(process.execPath, [bridgePath], {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.unref();
+        console.log("  ✦ Email bridge started on port 9878");
+      }
+    }
+  }
+
+  ensureSocialBridge();
+  ensureEmailBridge();
+
   // ── WebSocket ──────────────────────────────────────────────────────────
 
   app.get("/ws", { websocket: true }, (socket, req) => {
