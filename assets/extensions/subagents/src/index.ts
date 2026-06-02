@@ -1993,20 +1993,6 @@ function patchToolExecution(proto: any) {
       contentLines = contentRaw.map((line: string) => indent + bgNeutral(line.trimEnd()));
     }
 
-    // Wrap content in a rounded box when not running
-    if (!isRunning && contentLines.length > 0) {
-      const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
-      const maxVis = Math.max(...contentLines.map(l => stripAnsi(l).length));
-      const boxW = Math.max(16, Math.min(80, maxVis - indent.length + 2));
-      const topB = indent + "╭" + "─".repeat(boxW) + "╮";
-      const botB = indent + "╰" + "─".repeat(boxW) + "╯";
-      const boxed = contentLines.map(l => {
-        const visLen = stripAnsi(l).length;
-        const pad = boxW - (visLen - indent.length);
-        return indent + "│ " + l.slice(indent.length) + (pad > 0 ? " ".repeat(pad) : "") + " │";
-      });
-      return truncateLines([headerLine, topB, ...boxed, botB], width);
-    }
     // Don't pad lines with spaces (would extend background colors), just truncate
     const allLines = [headerLine, ...contentLines];
     return allLines.map(l => {
