@@ -30,7 +30,7 @@ import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate a
 import { initNudgeState, incrementTurn, shouldNudgeMemory, shouldNudgeSkill, resetMemoryNudge, resetSkillNudge, getNudgeState } from "./memory-nudge";
 import { runMemoryReview, runSkillReview, runPreCompressionFlush } from "./background-review";
 import { startCronJobs, stopCronJobs, isCronRunning } from "./cron-scheduler";
-import { ensureSession, insertMessage, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities } from "./state-db";
+import { ensureSession, insertMessage, getMessages, getMessageCount, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities } from "./state-db";
 import {
   vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
 } from "./secret-vault";
@@ -1952,13 +1952,9 @@ function patchToolExecution(proto: any) {
     const contentRaw = rawLines.length > 1 ? rawLines.slice(1) : [];
 
     if ((isEditTool || hasDiff) && !isRunning) {
-      // Render diff with green/red highlighting
-      const diffAdded = (theme && typeof theme.fg === "function")
-        ? (s: string) => theme.fg("success", s)
-        : (s: string) => `\x1b[32m${s}\x1b[0m`;
-      const diffRemoved = (theme && typeof theme.fg === "function")
-        ? (s: string) => theme.fg("error", s)
-        : (s: string) => `\x1b[31m${s}\x1b[0m`;
+      // Render diff with green/red BACKGROUND highlighting
+      const diffAdded = (s: string) => `\x1b[42m\x1b[30m${s}\x1b[0m`;
+      const diffRemoved = (s: string) => `\x1b[41m\x1b[30m${s}\x1b[0m`;
       const dimFn2 = (theme && typeof theme.fg === "function")
         ? (s: string) => theme.fg("muted", s)
         : (s: string) => `\x1b[90m${s}\x1b[0m`;
@@ -4882,18 +4878,18 @@ If nothing to report, return: {}`;
         lastToolResult: null,
       });
     } catch {}
-    // Save conversation archive to MD before shutdown
+    // Save conversation archive to MD before shutdown (from SQLite, not in-memory branch)
     try {
-      const branch = ctx.sessionManager?.getBranch();
-      if (branch && branch.length > 0) {
-        const sid = deriveSessionId(ctx) || "unknown";
+      const sid = deriveSessionId(ctx) || "unknown";
+      const totalMsgs = getMessageCount(sid);
+      if (totalMsgs === 0) {
+        logger.info("shutdown: no messages to archive for session " + sid);
+      } else {
         const convDir = path.join(os.homedir(), ".pi", "agent", "conversations");
         if (!fs.existsSync(convDir)) fs.mkdirSync(convDir, { recursive: true });
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const archivePath = path.join(convDir, `${sid}-${timestamp}.md`);
-        const messages = branch
-          .filter((e: any) => e.type === "message")
-          .map((e: any) => e.message);
+        const messages = getMessages(sid, 10000, 0);
         const lines: string[] = [
           `# Conversation Archive`,
           `**Date:** ${new Date().toLocaleString()}`,
@@ -4903,26 +4899,11 @@ If nothing to report, return: {}`;
           `---`,
           ``,
         ];
-        let msgIdx = 0;
-        for (const msg of messages) {
-          msgIdx++;
-          let text = "";
-          if (typeof msg.content === "string") {
-            text = msg.content;
-          } else if (Array.isArray(msg.content)) {
-            text = msg.content.map((c: any) => {
-              if (typeof c === "string") return c;
-              if (c.type === "text") return c.text || "";
-              if (c.type === "toolCall") return `> **Tool Call:** ${c.name}(${JSON.stringify(c.arguments)})`;
-              if (c.type === "toolResult") {
-                const resultText = c.content?.[0]?.text || "";
-                return `> **Tool Result:** ${resultText.slice(0, 500)}`;
-              }
-              return "";
-            }).join("\n");
-          }
-          const roleIcon: Record<string, string> = { user: "🧑", assistant: "🤖", tool: "🔧" };
-          lines.push(`### ${msgIdx}. ${roleIcon[msg.role] || "💬"} ${msg.role.toUpperCase()}`);
+        const roleIcon: Record<string, string> = { user: "🧑", assistant: "🤖", tool: "🔧" };
+        for (let i = 0; i < messages.length; i++) {
+          const msg = messages[i];
+          const text = msg.content || "";
+          lines.push(`### ${i + 1}. ${roleIcon[msg.role] || "💬"} ${msg.role.toUpperCase()} ${msg.toolName ? "(" + msg.toolName + ")" : ""}`);
           lines.push(``);
           lines.push(text);
           lines.push(``);
@@ -4930,6 +4911,7 @@ If nothing to report, return: {}`;
           lines.push(``);
         }
         fs.writeFileSync(archivePath, lines.join("\n"), "utf8");
+        logger.info(`shutdown: archived ${messages.length} messages to ${archivePath}`);
         // Prune old archives: keep only the 4 most recent
         try {
           const allArchives = fs.readdirSync(convDir)
@@ -4943,7 +4925,9 @@ If nothing to report, return: {}`;
           }
         } catch {}
       }
-    } catch {}
+    } catch (e: any) {
+      try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Archive error: ${e.message}\n`, "utf8"); } catch {}
+    }
 
     // Clean up cloned repos
     for (const repoPath of clonedRepos) {
