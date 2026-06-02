@@ -3,8 +3,7 @@ import { useToast } from "./Toast";
 import Markdown from "./Markdown";
 import ToolCallCard from "./ToolCallCard";
 import QuestionModal from "./QuestionModal";
-import PostApproval from "./PostApproval";
-import AssetSelector from "./AssetSelector";
+import PostEditorCanvas from "./PostEditorCanvas";
 import AssetGallery from "./AssetGallery";
 import { useChat } from "../context/ChatContext";
 
@@ -753,8 +752,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
           {/* Question Modal */}
           <QuestionModal ws={ws} />
-          <PostApproval ws={ws} />
-          <AssetSelector ws={ws} />
+          <PostEditorCanvas ws={ws} />
         </div>
       ) : null}
 

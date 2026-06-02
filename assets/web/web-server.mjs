@@ -31,6 +31,45 @@ let _swarmPauseResolve = null;
 let _toolCallCount = 0;
 let _approvalEnabled = false;
 
+// ── Token Bucket Rate Limiter ────────────────────────────────────────────────
+
+class TokenBucket {
+  constructor(capacity, refillRate, refillIntervalMs = 1000) {
+    this.capacity = capacity;
+    this.tokens = capacity;
+    this.refillRate = refillRate;
+    this.refillIntervalMs = refillIntervalMs;
+    this.lastRefill = Date.now();
+  }
+
+  async consume(count = 1) {
+    this._refill();
+    if (this.tokens >= count) {
+      this.tokens -= count;
+      return true;
+    }
+    const waitMs = Math.ceil((count - this.tokens) / this.refillRate) * this.refillIntervalMs;
+    await new Promise(r => setTimeout(r, Math.min(waitMs, 30000)));
+    this._refill();
+    if (this.tokens >= count) {
+      this.tokens -= count;
+      return true;
+    }
+    return false;
+  }
+
+  _refill() {
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    if (elapsed >= this.refillIntervalMs) {
+      this.tokens = Math.min(this.capacity, this.tokens + this.refillRate * Math.floor(elapsed / this.refillIntervalMs));
+      this.lastRefill = now;
+    }
+  }
+}
+
+const dagRateLimiter = new TokenBucket(5, 1, 1000); // 5 burst, 1/sec refill
+
 // ── Security Helpers ─────────────────────────────────────────────────────────
 
 function isReDosPattern(pattern) {
@@ -614,22 +653,60 @@ function getWorkProductSummary(sessionId) {
   return `Work Products: ${products.length} total\n${lines.join("\n")}`;
 }
 
-// ── Memory System (TF-IDF Vector Semantic Search) ──────────────────────────
+// ── Memory System (SQLite-Backed Vector Semantic Search) ─────────────────────
 
-const MEMORY_DIR = path.join(PI_DIR, "memory");
-const MEMORY_FILE = path.join(MEMORY_DIR, "semantic.json");
+const MEMORY_DB_PATH = path.join(PI_DIR, "memory.db");
 
-function ensureMemoryDir() { fs.mkdirSync(MEMORY_DIR, { recursive: true }); }
+function getMemoryDb() {
+  try {
+    const Database = _require("better-sqlite3");
+    const db = new Database(MEMORY_DB_PATH);
+    db.pragma("journal_mode = WAL");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_entries (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        type TEXT DEFAULT 'note',
+        importance INTEGER DEFAULT 5,
+        project TEXT DEFAULT '',
+        tags TEXT DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        access_count INTEGER DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS memory_vectors (
+        entry_id TEXT PRIMARY KEY,
+        vector TEXT NOT NULL,
+        FOREIGN KEY (entry_id) REFERENCES memory_entries(id)
+      );
+    `);
+    return db;
+  } catch { return null; }
+}
 
 function readMemory() {
-  ensureMemoryDir();
-  try { return JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8")); }
-  catch { return []; }
+  try {
+    const db = getMemoryDb();
+    if (!db) return [];
+    const rows = db.prepare("SELECT id, content, type, importance, project, tags, created_at AS createdAt, updated_at AS updatedAt, access_count AS accessCount FROM memory_entries ORDER BY updated_at DESC").all();
+    db.close();
+    return rows.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]"), importance: r.importance || 5 }));
+  } catch { return []; }
 }
 
 function writeMemory(entries) {
-  ensureMemoryDir();
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(entries, null, 2));
+  try {
+    const db = getMemoryDb();
+    if (!db) return;
+    const upsert = db.prepare(`INSERT OR REPLACE INTO memory_entries (id, content, type, importance, project, tags, created_at, updated_at, access_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const tx = db.transaction((rows) => {
+      for (const e of rows) {
+        upsert.run(e.id, e.content, e.type || "note", e.importance || 5, e.project || "", JSON.stringify(e.tags || []), e.createdAt || Date.now(), e.updatedAt || Date.now(), e.accessCount || 0);
+      }
+    });
+    tx(entries);
+    db.close();
+  } catch {}
 }
 
 // Simple TF-IDF vector space model for semantic search
@@ -662,43 +739,52 @@ function cosineSimilarity(a, b) {
   return dot;
 }
 
-// Compute pre-computed vectors lazily
-let _vectorCache = null;
 function getVectors() {
-  if (!_vectorCache) {
-    _vectorCache = {};
-    // Check for saved vectors
-    try {
-      const vf = MEMORY_FILE.replace(".json", ".vec.json");
-      if (fs.existsSync(vf)) _vectorCache = JSON.parse(fs.readFileSync(vf, "utf8"));
-    } catch {}
-  }
-  return _vectorCache;
+  try {
+    const db = getMemoryDb();
+    if (!db) return {};
+    const rows = db.prepare("SELECT entry_id, vector FROM memory_vectors").all();
+    db.close();
+    const result = {};
+    for (const r of rows) {
+      try { result[r.entry_id] = JSON.parse(r.vector); } catch {}
+    }
+    return result;
+  } catch { return {}; }
 }
 
 function saveVector(id, vec) {
-  const vf = MEMORY_FILE.replace(".json", ".vec.json");
-  const v = getVectors();
-  v[id] = vec;
-  fs.writeFileSync(vf, JSON.stringify(v));
+  try {
+    const db = getMemoryDb();
+    if (!db) return;
+    db.prepare("INSERT OR REPLACE INTO memory_vectors (entry_id, vector) VALUES (?, ?)").run(id, JSON.stringify(vec));
+    db.close();
+  } catch {}
 }
 
 function memoryStore(content, type, importance, project, tags) {
-  const entries = readMemory();
   const id = `mem_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-  const entry = { id, content, type, importance, project, tags: tags || [], createdAt: Date.now(), updatedAt: Date.now(), accessCount: 0 };
-  entries.push(entry);
-  writeMemory(entries);
-
-  // Pre-compute vector
-  const vec = computeVector(content + " " + (tags || []).join(" "));
-  saveVector(id, vec);
-
+  const now = Date.now();
+  try {
+    const db = getMemoryDb();
+    if (!db) return id;
+    db.prepare("INSERT INTO memory_entries (id, content, type, importance, project, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, content, type || "note", importance || 5, project || "", JSON.stringify(tags || []), now, now);
+    const vec = computeVector(content + " " + (tags || []).join(" "));
+    db.prepare("INSERT OR REPLACE INTO memory_vectors (entry_id, vector) VALUES (?, ?)").run(id, JSON.stringify(vec));
+    db.close();
+  } catch {}
   return id;
 }
 
 function memorySearch(query, k = 5) {
-  const entries = readMemory();
+  let entries;
+  try {
+    const db = getMemoryDb();
+    if (!db) return [];
+    entries = db.prepare("SELECT id, content, type, importance, project, tags, created_at AS createdAt, updated_at AS updatedAt, access_count AS accessCount FROM memory_entries ORDER BY updated_at DESC").all();
+    db.close();
+    entries = entries.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]"), importance: r.importance || 5 }));
+  } catch { return []; }
   if (!entries.length) return [];
 
   const queryVec = computeVector(query);
@@ -1520,7 +1606,8 @@ function findLspServer(language) {
     const cfg = config[language];
     if (!cfg) return null;
     const cmd = cfg.command.split(" ")[0];
-    const result = spawnSync("which", [cmd], { encoding: "utf8" });
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const result = spawnSync(whichCmd, [cmd], { encoding: "utf8" });
     if (result.status === 0 && result.stdout.trim()) return cfg;
     return null;
   } catch { return null; }
@@ -1560,8 +1647,23 @@ class LspConnection {
           this.cleanup();
         });
 
-        const rl = readline.createInterface({ input: this.proc.stdout });
-        rl.on("line", (line) => { this.handleMessage(line); });
+        let buffer = Buffer.alloc(0);
+        this.proc.stdout.on("data", (chunk) => {
+          buffer = Buffer.concat([buffer, chunk]);
+          while (true) {
+            const headerIndex = buffer.indexOf("Content-Length:");
+            if (headerIndex === -1) break;
+            const bodyIndex = buffer.indexOf("\r\n\r\n", headerIndex);
+            if (bodyIndex === -1) break;
+            const contentLengthStr = buffer.toString("utf8", headerIndex + 15, bodyIndex).trim();
+            const contentLength = parseInt(contentLengthStr, 10);
+            const messageStartIndex = bodyIndex + 4;
+            if (buffer.length < messageStartIndex + contentLength) break;
+            const messageJson = buffer.toString("utf8", messageStartIndex, messageStartIndex + contentLength);
+            this.handleMessage(messageJson);
+            buffer = buffer.slice(messageStartIndex + contentLength);
+          }
+        });
 
         if (this.proc.stderr) {
           const rlErr = readline.createInterface({ input: this.proc.stderr });
@@ -3530,7 +3632,31 @@ async function loadPluginCode(name) {
     try {
       const code = fs.readFileSync(codeFile, "utf8");
       const vm = await import('vm');
-      const sandbox = { console, setTimeout, clearTimeout, require, module: {}, exports: {} };
+      const safeModules = {
+        console,
+        setTimeout,
+        clearTimeout,
+        setInterval,
+        clearInterval,
+        Buffer,
+        TextEncoder,
+        TextDecoder,
+        URL,
+        URLSearchParams,
+        JSON,
+        Math,
+        Date,
+        RegExp,
+        String,
+        Number,
+        Boolean,
+        Array,
+        Object,
+        Map,
+        Set,
+        Promise,
+      };
+      const sandbox = { ...safeModules, module: {}, exports: {} };
       vm.createContext(sandbox);
       const script = new vm.Script(code);
       script.runInContext(sandbox);
@@ -4345,6 +4471,9 @@ async function runDagAgent(agent, context) {
   bcast({ type: "ceo_thought", message: `Activating DAG agent '${agentId}' for task: ${agent.task}` });
   bcast({ type: "agent_status", agentId, status: "running" });
 
+  // Rate limit: wait for token before starting
+  await dagRateLimiter.consume(1);
+
   const previousContext = previousWaveResults && Object.keys(previousWaveResults).length > 0
     ? `\n\n## RESULTS FROM PREVIOUS AGENTS\n${Object.entries(previousWaveResults).map(([id, res]) => `Agent [${id}] completed:\n${res.result || res}`).join("\n\n")}`
     : "";
@@ -4354,11 +4483,33 @@ async function runDagAgent(agent, context) {
     pipelineContext = `\n\n## PIPELINE ITERATION\nThis is iteration ${pipelineIteration + 1} of ${pipelineCount}.`;
   }
 
+  // Automated RAG context injection from memory
+  let ragContext = "";
+  try {
+    const taskQuery = (agent.task || "").slice(0, 200);
+    if (taskQuery.length > 10) {
+      const memResults = memorySearch(taskQuery, 5);
+      const highConfidence = memResults.filter(r => r.score > 0.3);
+      if (highConfidence.length > 0) {
+        ragContext = `\n\n## RELEVANT MEMORY CONTEXT\n${highConfidence.map(r => `[${r.entry.type || "note"}] ${r.entry.content.slice(0, 500)}`).join("\n\n")}`;
+      }
+    }
+  } catch {}
+
+  // Wave-based summary logs for downstream waves
+  let waveSummaryContext = "";
+  if (previousWaveResults && typeof previousWaveResults === "object") {
+    const summaries = Object.values(previousWaveResults).filter(Boolean);
+    if (summaries.length > 0) {
+      waveSummaryContext = `\n\n## CROSS-AGENT WAVE SUMMARY\n${summaries.map(s => typeof s === "string" ? s : (s.summary || s.result || "")).filter(Boolean).join("\n\n")}`;
+    }
+  }
+
   const agentPrompt = `You are the ${agentId} agent, a specialized swarm member.
 Your role: ${agent.role}
 Your task: ${agent.task}
 
-Perform your task using your tools, think step-by-step, and report back with a clear final summary of your result.${previousContext}${pipelineContext}`;
+Perform your task using your tools, think step-by-step, and report back with a clear final summary of your result.${previousContext}${ragContext}${waveSummaryContext}${pipelineContext}`;
 
   const messages = [
     { role: "user", content: [{ type: "text", text: agent.task }], timestamp: Date.now() }
@@ -4539,7 +4690,10 @@ async function executeDagCampaign(socket, goal, dagConfig) {
         pipelineCount,
       };
 
-      // Execute wave agents concurrently
+      // Broadcast wave-level summary log
+      bcast({ type: "ceo_thought", message: `Wave ${waveIdx + 1} summary: Agents [${wave.map(a => a.id).join(", ")}] — compiling results...` });
+
+      // Execute wave agents concurrently (rate limited inside runDagAgent)
       const wavePromises = wave.map(agent => runDagAgent(agent, context));
       const waveResults = await Promise.allSettled(wavePromises);
 
@@ -5919,6 +6073,7 @@ async function main() {
   try {
     const Database = _require("better-sqlite3");
     queueDb = new Database(QUEUE_DB_PATH);
+    queueDb.pragma("journal_mode = WAL");
     queueDb.exec(`
       CREATE TABLE IF NOT EXISTS social_queue (
         id TEXT PRIMARY KEY,
