@@ -26,6 +26,10 @@ function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive
 ensureDir(PROFILES_DIR);
 ensureDir(STATE_DIR);
 
+// ── Logging ─────────────────────────────────────────────────────────────────
+
+function log(msg) { console.log(`[${new Date().toISOString()}] ${msg}`); }
+
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 
 const RATE_FILE = path.join(STATE_DIR, "rate-limits.json");
@@ -81,23 +85,35 @@ async function getChromium() {
 }
 
 async function getBrowser(platform) {
+  if (browsers[platform]) {
+    // Verify browser is still alive
+    try { await browsers[platform].pages(); }
+    catch { delete browsers[platform]; }
+  }
   if (browsers[platform]) return browsers[platform];
+
   const chromiumModule = await getChromium();
   const profileDir = path.join(PROFILES_DIR, platform);
   ensureDir(profileDir);
 
+  log(`Launching browser for ${platform}...`);
   const browser = await chromiumModule.launchPersistentContext(profileDir, {
     headless: true,
     args: [
       "--no-sandbox",
       "--disable-blink-features=AutomationControlled",
       "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-extensions",
+      "--disable-background-networking",
     ],
     viewport: { width: 1280, height: 800 },
-    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    timeout: 60_000,
   });
 
   browsers[platform] = browser;
+  log(`Browser launched for ${platform}`);
   return browser;
 }
 
@@ -108,23 +124,45 @@ async function closeBrowser(platform) {
   }
 }
 
+// ── Helper: safe navigation (never use networkidle for Twitter) ─────────────
+
+async function safeGoto(page, url, opts = {}) {
+  // Twitter never reaches networkidle — use domcontentloaded + manual wait
+  const isTwitter = url.includes("x.com") || url.includes("twitter.com");
+  const waitUntil = isTwitter ? "domcontentloaded" : (opts.waitUntil || "domcontentloaded");
+  await page.goto(url, { waitUntil, timeout: opts.timeout || 45_000 });
+  // Give dynamic content time to render
+  await page.waitForTimeout(isTwitter ? 4000 : 2000);
+}
+
+// ── Helper: wait for selector with fallbacks ────────────────────────────────
+
+async function waitForAny(page, selectors, timeout = 10_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    for (const sel of selectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) return { element: el, selector: sel };
+      } catch {}
+    }
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
+
 // ── Twitter/X Implementation ────────────────────────────────────────────────
 
 const TWITTER_SELECTORS = {
-  // Multiple fallback selectors for each action
   login: {
     username: ['input[autocomplete="username"]', 'input[name="text"]', 'input[data-testid="ocfEnterTextTextInput"]'],
-    password: ['input[name="password"]', 'input[type="password"]', 'input[data-testid="ocfEnterTextTextInput"]'],
-    nextButton: ['div[data-testid="LoginForm_Login_Button"]', 'button[data-testid="LoginForm_Login_Button"]', 'div[role="button"]:has-text("Next")'],
+    password: ['input[name="password"]', 'input[type="password"]'],
+    nextButton: ['div[data-testid="LoginForm_Login_Button"]', 'button[data-testid="LoginForm_Login_Button"]', 'div[role="button"]'],
     loginButton: ['div[data-testid="LoginForm_Login_Button"]', 'button[data-testid="LoginForm_Login_Button"]'],
   },
   compose: {
     textBox: ['div[data-testid="tweetTextarea_0"]', 'div[role="textbox"][contenteditable="true"]', 'div.DraftEditor-root'],
     postButton: ['div[data-testid="tweetButtonInline"]', 'button[data-testid="tweetButtonInline"]', 'div[data-testid="tweetButton"]'],
-  },
-  home: {
-    timeline: ['div[data-testid="primaryColumn"]', 'div[aria-label="Timeline"]'],
-    tweetComposer: ['div[data-testid="tweetTextarea_0"]', 'a[href="/compose/post"]'],
   },
 };
 
@@ -137,15 +175,16 @@ async function trySelectors(page, selectors, action = "click", options = {}) {
       if (action === "fill") { await el.fill(options.text || ""); return true; }
       if (action === "type") {
         await el.click();
-        // Clear existing text
         await page.keyboard.press("Control+A");
         await page.keyboard.press("Backspace");
-        // Type with clipboard paste for reliability
+        // Clipboard paste — most reliable for React contenteditable
         await page.evaluate((text) => {
-          const clipboardData = new DataTransfer();
-          clipboardData.setData("text/plain", text);
-          const event = new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true });
-          document.activeElement.dispatchEvent(event);
+          const el = document.activeElement;
+          if (el) {
+            const cd = new DataTransfer();
+            cd.setData("text/plain", text);
+            el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: cd, bubbles: true, cancelable: true }));
+          }
         }, options.text || "");
         return true;
       }
@@ -160,46 +199,85 @@ async function twitterLogin(username, password) {
   const page = browser.pages()[0] || await browser.newPage();
 
   try {
-    await page.goto("https://x.com/login", { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(2000);
+    log("Navigating to Twitter login...");
+    await safeGoto(page, "https://x.com/login");
 
     // Check if already logged in
-    if (page.url().includes("/home") || page.url().includes("/x.com/home")) {
+    const currentUrl = page.url();
+    if (currentUrl.includes("/home") || currentUrl.includes("x.com/home")) {
+      log("Already logged in");
       return { ok: true, message: "Already logged in", username };
     }
 
+    // Wait for login form
+    log("Waiting for login form...");
+    const usernameField = await waitForAny(page, TWITTER_SELECTORS.login.username, 15_000);
+    if (!usernameField) {
+      // Maybe we're already on home page
+      if (page.url().includes("/home")) return { ok: true, message: "Already logged in", username };
+      return { ok: false, error: "Could not find login form — page may have changed" };
+    }
+
     // Type username
-    const usernameFilled = await trySelectors(page, TWITTER_SELECTORS.login.username, "type", { text: username });
-    if (!usernameFilled) return { ok: false, error: "Could not find username field" };
+    log("Typing username...");
+    await usernameField.element.click();
+    await page.keyboard.type(username, { delay: 50 });
+    await page.waitForTimeout(500);
 
-    // Click Next
-    await page.waitForTimeout(1000);
-    await trySelectors(page, TWITTER_SELECTORS.login.nextButton, "click");
-    await page.waitForTimeout(2000);
+    // Click Next/Continue
+    const nextBtn = await waitForAny(page, TWITTER_SELECTORS.login.nextButton, 5_000);
+    if (nextBtn) {
+      await nextBtn.element.click();
+      await page.waitForTimeout(2000);
+    }
 
-    // Check for unusual login activity (phone/email verification)
+    // Check for verification challenges
     const pageContent = await page.content();
-    if (pageContent.includes("unusual") || pageContent.includes("phone") || pageContent.includes("Verify")) {
-      return { ok: false, error: "Login requires verification — try logging in manually first with --no-headless" };
+    if (/unusual|verify|phone|checkpoint/i.test(pageContent)) {
+      return { ok: false, error: "Login requires verification — open a real browser, log in manually, then the session will persist" };
+    }
+
+    // Wait for password field
+    log("Waiting for password field...");
+    const passwordField = await waitForAny(page, TWITTER_SELECTORS.login.password, 10_000);
+    if (!passwordField) {
+      // Maybe it went straight to home (SSO?)
+      if (page.url().includes("/home")) return { ok: true, message: "Logged in successfully", username };
+      return { ok: false, error: "Could not find password field" };
     }
 
     // Type password
-    const passwordFilled = await trySelectors(page, TWITTER_SELECTORS.login.password, "type", { text: password });
-    if (!passwordFilled) return { ok: false, error: "Could not find password field" };
+    log("Typing password...");
+    await passwordField.element.click();
+    await page.keyboard.type(password, { delay: 50 });
+    await page.waitForTimeout(500);
 
-    // Click login
-    await page.waitForTimeout(1000);
-    await trySelectors(page, TWITTER_SELECTORS.login.loginButton, "click");
-    await page.waitForTimeout(5000);
-
-    // Verify login success
-    const finalUrl = page.url();
-    if (finalUrl.includes("/home") || finalUrl.includes("/x.com/home")) {
-      return { ok: true, message: "Logged in successfully", username };
+    // Click login button
+    const loginBtn = await waitForAny(page, TWITTER_SELECTORS.login.loginButton, 5_000);
+    if (loginBtn) {
+      await loginBtn.element.click();
+      await page.waitForTimeout(5000);
     }
 
-    return { ok: false, error: "Login may have failed — check credentials or try --no-headless" };
+    // Verify login success — wait up to 15s for home page
+    log("Verifying login...");
+    for (let i = 0; i < 15; i++) {
+      await page.waitForTimeout(1000);
+      const url = page.url();
+      if (url.includes("/home")) {
+        log("Login successful");
+        return { ok: true, message: "Logged in successfully", username };
+      }
+      // Check for errors
+      const content = await page.content();
+      if (/wrong.*password|incorrect|suspended|locked/i.test(content)) {
+        return { ok: false, error: "Login failed — wrong credentials or account locked" };
+      }
+    }
+
+    return { ok: false, error: "Login timed out — check credentials or try again" };
   } catch (e) {
+    log(`Login error: ${e.message}`);
     return { ok: false, error: e.message || String(e) };
   }
 }
@@ -212,21 +290,29 @@ async function twitterPost(text) {
   const page = browser.pages()[0] || await browser.newPage();
 
   try {
-    // Navigate to home
-    await page.goto("https://x.com/home", { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(2000);
+    log("Navigating to Twitter home...");
+    await safeGoto(page, "https://x.com/home");
 
     // Check if logged in
-    if (page.url().includes("login")) {
-      return { ok: false, error: "Not logged in — run login first" };
+    if (page.url().includes("login") || page.url().includes("Log")) {
+      return { ok: false, error: "Not logged in — run login_twitter first" };
     }
 
-    // Click compose box
-    const composeFound = await trySelectors(page, TWITTER_SELECTORS.compose.textBox, "click");
-    if (!composeFound) return { ok: false, error: "Could not find tweet compose box" };
-    await page.waitForTimeout(1000);
+    // Wait for compose box
+    log("Looking for compose box...");
+    const composeBox = await waitForAny(page, TWITTER_SELECTORS.compose.textBox, 15_000);
+    if (!composeBox) {
+      // Take screenshot for debugging
+      await page.screenshot({ path: path.join(STATE_DIR, "twitter-debug.png") }).catch(() => {});
+      return { ok: false, error: "Could not find tweet compose box — screenshot saved to social-state/twitter-debug.png" };
+    }
 
-    // Type tweet text via clipboard paste
+    // Click and type
+    log("Typing tweet...");
+    await composeBox.element.click();
+    await page.waitForTimeout(500);
+
+    // Use clipboard paste for the text (most reliable for React)
     await page.evaluate((t) => {
       const el = document.activeElement;
       if (el) {
@@ -235,24 +321,32 @@ async function twitterPost(text) {
         el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: cd, bubbles: true, cancelable: true }));
       }
     }, text);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
-    // Click post button
-    const posted = await trySelectors(page, TWITTER_SELECTORS.compose.postButton, "click");
-    if (!posted) return { ok: false, error: "Could not find Post button" };
-    await page.waitForTimeout(3000);
+    // Find and click post button
+    log("Clicking post button...");
+    const postBtn = await waitForAny(page, TWITTER_SELECTORS.compose.postButton, 5_000);
+    if (!postBtn) {
+      await page.screenshot({ path: path.join(STATE_DIR, "twitter-debug.png") }).catch(() => {});
+      return { ok: false, error: "Could not find Post button — screenshot saved" };
+    }
+    await postBtn.element.click();
+    await page.waitForTimeout(4000);
 
-    // Verify success (check for toast or URL change)
+    // Verify success
     const content = await page.content();
-    const success = content.includes("sent") || content.includes("posted") || page.url().includes("/home");
+    const success = /sent|posted|your post/i.test(content) || page.url().includes("/home");
 
     if (success) {
       recordPost("twitter");
+      log("Tweet posted successfully");
       return { ok: true, message: "Tweet posted successfully" };
     }
 
-    return { ok: false, error: "Post may have failed — check manually" };
+    await page.screenshot({ path: path.join(STATE_DIR, "twitter-debug.png") }).catch(() => {});
+    return { ok: false, error: "Post may have failed — check social-state/twitter-debug.png" };
   } catch (e) {
+    log(`Twitter post error: ${e.message}`);
     return { ok: false, error: e.message || String(e) };
   }
 }
@@ -265,22 +359,19 @@ async function twitterReply(tweetUrl, text) {
   const page = browser.pages()[0] || await browser.newPage();
 
   try {
-    await page.goto(tweetUrl, { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(2000);
+    await safeGoto(page, tweetUrl);
 
     if (page.url().includes("login")) {
       return { ok: false, error: "Not logged in" };
     }
 
-    // Find reply compose box
-    const replyBox = await trySelectors(page, [
-      'div[data-testid="tweetTextarea_0"]',
-      'div[role="textbox"][contenteditable="true"]',
-    ], "click");
+    // Find reply box
+    const replyBox = await waitForAny(page, TWITTER_SELECTORS.compose.textBox, 10_000);
     if (!replyBox) return { ok: false, error: "Could not find reply box" };
-    await page.waitForTimeout(1000);
 
-    // Type reply
+    await replyBox.element.click();
+    await page.waitForTimeout(500);
+
     await page.evaluate((t) => {
       const el = document.activeElement;
       if (el) {
@@ -289,77 +380,63 @@ async function twitterReply(tweetUrl, text) {
         el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: cd, bubbles: true, cancelable: true }));
       }
     }, text);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
-    // Click reply button
-    await trySelectors(page, [
-      'div[data-testid="tweetButtonInline"]',
-      'button[data-testid="tweetButtonInline"]',
-    ], "click");
-    await page.waitForTimeout(3000);
+    const postBtn = await waitForAny(page, TWITTER_SELECTORS.compose.postButton, 5_000);
+    if (postBtn) await postBtn.element.click();
+    await page.waitForTimeout(4000);
 
     recordPost("twitter");
     return { ok: true, message: "Reply posted successfully" };
   } catch (e) {
+    log(`Twitter reply error: ${e.message}`);
     return { ok: false, error: e.message || String(e) };
   }
 }
 
 // ── Reddit Implementation ───────────────────────────────────────────────────
 
-const REDDIT_SELECTORS = {
-  login: {
-    username: ['input[name="username"]', '#login-username'],
-    password: ['input[name="password"]', '#login-password'],
-    loginButton: ['button[type="submit"]', '.submit'],
-  },
-  submit: {
-    title: ['textarea[name="title"]', '#title-field', 'input[name="title"]'],
-    body: ['textarea[name="text"]', '#text-field', '.md textarea'],
-    url: ['input[name="url"]', '#url-field', 'input[name="link_url"]'],
-    submitButton: ['button[type="submit"]', '.submit-button', 'button.submit'],
-  },
-  comment: {
-    textBox: ['textarea[name="text"]', '.comment-input textarea', 'div[contenteditable="true"]'],
-    submitButton: ['button[type="submit"]', '.save-button'],
-  },
-};
-
 async function redditLogin(username, password) {
   const browser = await getBrowser("reddit");
   const page = browser.pages()[0] || await browser.newPage();
 
   try {
-    await page.goto("https://old.reddit.com/login", { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(2000);
+    log("Navigating to Reddit login...");
+    await safeGoto(page, "https://old.reddit.com/login");
 
     // Check if already logged in
     const hasNav = await page.$('a[href="/submit"]');
-    if (hasNav) return { ok: true, message: "Already logged in", username };
+    if (hasNav) {
+      log("Already logged in to Reddit");
+      return { ok: true, message: "Already logged in", username };
+    }
 
-    // Fill username
-    const u = await page.$('input[name="user"]') || await page.$('#login-username');
-    if (!u) return { ok: false, error: "Could not find username field" };
-    await u.fill(username);
+    // Wait for login form
+    const usernameField = await waitForAny(page, ['input[name="user"]', '#login-username', 'input[name="username"]'], 10_000);
+    if (!usernameField) return { ok: false, error: "Could not find Reddit login form" };
 
-    // Fill password
-    const p = await page.$('input[name="passwd"]') || await page.$('#login-password');
-    if (!p) return { ok: false, error: "Could not find password field" };
-    await p.fill(password);
+    await usernameField.element.fill(username);
+    await page.waitForTimeout(300);
 
-    // Click login
-    const btn = await page.$('button[type="submit"]') || await page.$('.submit');
-    if (btn) await btn.click();
+    const passwordField = await waitForAny(page, ['input[name="passwd"]', '#login-password', 'input[name="password"]'], 5_000);
+    if (!passwordField) return { ok: false, error: "Could not find password field" };
+
+    await passwordField.element.fill(password);
+    await page.waitForTimeout(300);
+
+    const loginBtn = await waitForAny(page, ['button[type="submit"]', '.submit'], 5_000);
+    if (loginBtn) await loginBtn.element.click();
     await page.waitForTimeout(5000);
 
     // Verify
-    const finalUrl = page.url();
-    if (!finalUrl.includes("login")) {
+    if (!page.url().includes("login")) {
+      log("Reddit login successful");
       return { ok: true, message: "Logged in successfully", username };
     }
 
-    return { ok: false, error: "Login failed — check credentials" };
+    return { ok: false, error: "Reddit login failed — check credentials" };
   } catch (e) {
+    log(`Reddit login error: ${e.message}`);
     return { ok: false, error: e.message || String(e) };
   }
 }
@@ -372,48 +449,50 @@ async function redditPost(subreddit, title, body, url) {
   const page = browser.pages()[0] || await browser.newPage();
 
   try {
-    // Use old.reddit.com for simpler DOM
     const submitUrl = url
       ? `https://old.reddit.com/r/${subreddit}/submit?submit_type=link`
       : `https://old.reddit.com/r/${subreddit}/submit?submit_type=self`;
-    await page.goto(submitUrl, { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(2000);
+
+    log(`Posting to r/${subreddit}...`);
+    await safeGoto(page, submitUrl);
 
     if (page.url().includes("login")) {
-      return { ok: false, error: "Not logged in — run login first" };
+      return { ok: false, error: "Not logged in — run login_reddit first" };
     }
 
-    // Fill title
-    const titleField = await page.$('textarea[name="title"]') || await page.$('#title-field');
-    if (!titleField) return { ok: false, error: "Could not find title field" };
-    await titleField.fill(title);
+    // Wait for title field
+    const titleField = await waitForAny(page, ['textarea[name="title"]', '#title-field', 'input[name="title"]'], 10_000);
+    if (!titleField) {
+      await page.screenshot({ path: path.join(STATE_DIR, "reddit-debug.png") }).catch(() => {});
+      return { ok: false, error: "Could not find title field — screenshot saved" };
+    }
+
+    await titleField.element.fill(title);
 
     if (url) {
-      // Link post
       const urlField = await page.$('input[name="url"]') || await page.$('#url-field');
       if (urlField) await urlField.fill(url);
-    } else {
-      // Text post
+    } else if (body) {
       const bodyField = await page.$('textarea[name="text"]') || await page.$('#text-field');
-      if (bodyField && body) await bodyField.fill(body);
+      if (bodyField) await bodyField.fill(body);
     }
 
     await page.waitForTimeout(1000);
 
-    // Submit
-    const submitBtn = await page.$('button[type="submit"]') || await page.$('.submit-button');
-    if (submitBtn) await submitBtn.click();
+    const submitBtn = await waitForAny(page, ['button[type="submit"]', '.submit-button'], 5_000);
+    if (submitBtn) await submitBtn.element.click();
     await page.waitForTimeout(5000);
 
-    // Check for errors
     const content = await page.content();
-    if (content.includes("error") || content.includes("too fast")) {
+    if (/error|too fast|rate.?limit/i.test(content)) {
       return { ok: false, error: "Post may have been rate limited" };
     }
 
     recordPost("reddit");
+    log(`Posted to r/${subreddit}`);
     return { ok: true, message: `Posted to r/${subreddit} successfully` };
   } catch (e) {
+    log(`Reddit post error: ${e.message}`);
     return { ok: false, error: e.message || String(e) };
   }
 }
@@ -426,29 +505,26 @@ async function redditComment(postUrl, text) {
   const page = browser.pages()[0] || await browser.newPage();
 
   try {
-    // Convert to old.reddit.com for simpler DOM
-    const oldUrl = postUrl.replace("www.reddit.com", "old.reddit.com").replace("reddit.com", "old.reddit.com");
-    await page.goto(oldUrl, { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForTimeout(2000);
+    const oldUrl = postUrl.replace(/(?:www\.)?reddit\.com/, "old.reddit.com");
+    log("Commenting on Reddit post...");
+    await safeGoto(page, oldUrl);
 
-    if (page.url().includes("login")) {
-      return { ok: false, error: "Not logged in" };
-    }
+    if (page.url().includes("login")) return { ok: false, error: "Not logged in" };
 
-    // Find comment box
-    const commentBox = await page.$('textarea[name="text"]') || await page.$('.comment-input textarea');
+    const commentBox = await waitForAny(page, ['textarea[name="text"]', '.comment-input textarea'], 10_000);
     if (!commentBox) return { ok: false, error: "Could not find comment box" };
-    await commentBox.fill(text);
+
+    await commentBox.element.fill(text);
     await page.waitForTimeout(1000);
 
-    // Submit comment
-    const submitBtn = await page.$('button[type="submit"]') || await page.$('.save-button');
-    if (submitBtn) await submitBtn.click();
+    const submitBtn = await waitForAny(page, ['button[type="submit"]', '.save-button'], 5_000);
+    if (submitBtn) await submitBtn.element.click();
     await page.waitForTimeout(3000);
 
     recordPost("reddit");
     return { ok: true, message: "Comment posted successfully" };
   } catch (e) {
+    log(`Reddit comment error: ${e.message}`);
     return { ok: false, error: e.message || String(e) };
   }
 }
@@ -470,7 +546,6 @@ function jsonResponse(res, status, data) {
 }
 
 const server = http.createServer(async (req, res) => {
-  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -546,7 +621,7 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, result.ok ? 200 : 400, result);
     }
 
-    // ── Disconnect Platform ────────────────────────────────────────────
+    // ── Disconnect ──────────────────────────────────────────────────────
     if (url.pathname === "/twitter/disconnect" && req.method === "POST") {
       await closeBrowser("twitter");
       const profileDir = path.join(PROFILES_DIR, "twitter");
@@ -570,15 +645,15 @@ const server = http.createServer(async (req, res) => {
 
     jsonResponse(res, 404, { ok: false, error: "Not found" });
   } catch (e) {
+    log(`Server error: ${e.message}`);
     jsonResponse(res, 500, { ok: false, error: e.message || String(e) });
   }
 });
 
 server.listen(PORT, () => {
-  console.log(`Social Bridge running on http://localhost:${PORT}`);
-  console.log(`Browser profiles: ${PROFILES_DIR}`);
+  log(`Social Bridge running on http://localhost:${PORT}`);
+  log(`Browser profiles: ${PROFILES_DIR}`);
 });
 
-// Cleanup on exit
 process.on("SIGINT", async () => { for (const p of Object.keys(browsers)) await closeBrowser(p); process.exit(0); });
 process.on("SIGTERM", async () => { for (const p of Object.keys(browsers)) await closeBrowser(p); process.exit(0); });

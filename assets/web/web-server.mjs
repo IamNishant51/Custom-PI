@@ -5303,12 +5303,16 @@ async function main() {
 
     // ── Twitter post ────────────────────────────────────────────────────
     if (/\b(post|tweet|share|publish|x\.com|twitter)\b/.test(msg) && !/\breddit\b/.test(msg) && !/\bemail\b/.test(msg) && !/\breply\b/.test(msg) && !/\bcomment\b/.test(msg)) {
-      // Extract the actual content — remove common prefixes
+      // Extract the actual content — remove common prefixes and filler
       let content = message
-        .replace(/^(post|tweet|share|publish)\s+(on\s+)?(twitter|x\.com|x)\s*[:\-]?\s*/i, "")
-        .replace(/^(post|tweet|share|publish)\s+/i, "")
-        .replace(/^(about|about\s+my|about\s+this)\s+/i, "")
+        .replace(/^(please\s+)?/i, "")
+        .replace(/\b(post|tweet|share|publish)\b\s*(something\s+)?(related\s+to|about|on|to)?\s*(on\s+)?(twitter|x\.com|x)?\s*[:\-]?\s*/i, "")
+        .replace(/^(about|about\s+my|about\s+this|something\s+related\s+to)\s+/i, "")
         .trim();
+      if (!content || content.length < 3) {
+        // Fallback: strip the first word if it's an action verb
+        content = message.replace(/^(post|tweet|share|publish)\s+/i, "").trim();
+      }
       if (!content) content = message;
 
       // Truncate to 280 chars
