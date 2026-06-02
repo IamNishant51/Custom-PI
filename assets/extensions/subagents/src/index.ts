@@ -46,6 +46,7 @@ import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, 
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 let appMode: "agent" | "plan" = "agent";
+let unsubTabHandler: (() => void) | null = null;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  UNICODE BOX DRAWING — Beautiful Rounded Borders
@@ -4171,21 +4172,22 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
   // (no /tui fullscreen command — all enhancements apply directly to the default TUI)
 
-  // ── Tab key to toggle between Agent mode and Plan mode ─────────────────
-  pi.registerShortcut("tab", {
-    description: "Toggle between Plan mode and Agent mode",
-    handler: (ctx) => {
-      appMode = appMode === "agent" ? "plan" : "agent";
-      ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-      ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
-      // Force a re-render so the widget updates immediately
-      try { (ctx as any).requestRender?.(); } catch {}
-    },
-  });
-
   // Event Hook: Setup HUD on session start, run consolidation for crash recovery
   pi.on("session_start", async (_event, ctx) => {
     logger.info("session_start", { cwd: ctx.cwd });
+
+    // Tab key listener to toggle between Agent mode and Plan mode
+    try {
+      unsubTabHandler = ctx.ui.onTerminalInput((data: string) => {
+        if (data === "\t") {
+          appMode = appMode === "agent" ? "plan" : "agent";
+          ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
+          ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
+          return { consume: true };
+        }
+      });
+    } catch {}
+
     // Initialize file-based memory and nudge system
     ensureSoulFile();
     ensureMemoryFiles();
@@ -4789,8 +4791,8 @@ If nothing to report, return: {}`;
       // Inject current mode (agent/plan) instructions into the system prompt
       if (event.messages && event.messages.length > 0) {
         const modeNote = appMode === "plan"
-          ? "\n\n[SYSTEM: Current Mode = PLAN MODE]\nYou are in PLAN MODE. Do NOT execute any tools, run commands, or make changes. Your task is to analyze the user's request and create a detailed, step-by-step plan. Present the plan to the user and wait for explicit approval before executing."
-          : "\n\n[SYSTEM: Current Mode = AGENT MODE]\nYou are in AGENT MODE. Execute tasks normally using all available tools.";
+          ? "\n\n[SYSTEM: Current Mode = PLAN MODE]\nYou are in PLAN MODE. Follow these rules strictly:\n1. You CAN use: Read, Grep, Glob, Bash (read-only), WebSearch, WebFetch, memory_search, memory_store, search_past_sessions, search_current_session, sub-agent tools.\n2. You CANNOT use: Edit, Write, or any tool that modifies files or system state.\n3. If the user asks you to edit/create/modify files, DO NOT attempt it. Instead respond: \"I am in PLAN MODE. Press Tab to switch to AGENT MODE, then I can make changes.\"\n4. Your job: analyze requests, search, create plans, present for approval.\n5. Do NOT execute any state-modifying tool."
+          : "\n\n[SYSTEM: Current Mode = AGENT MODE]\nYou are in AGENT MODE. Execute tasks normally using all available tools. You may read, write, edit, and run commands as needed.";
         const first = event.messages[0];
         if (first && first.role === "system") {
           first.content += modeNote;
@@ -4944,6 +4946,7 @@ If nothing to report, return: {}`;
     }
     // Stop background cron jobs
     stopCronJobs();
+    if (unsubTabHandler) { try { unsubTabHandler(); } catch {} unsubTabHandler = null; }
     closeDb();
     activeTrackers.clear();
     activeInvalidators.clear();
