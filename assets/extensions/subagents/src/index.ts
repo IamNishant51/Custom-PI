@@ -4787,7 +4787,7 @@ If nothing to report, return: {}`;
       // Inject current mode (agent/plan) instructions into the system prompt
       if (event.messages && event.messages.length > 0) {
         const modeNote = appMode === "plan"
-          ? "\n\n[SYSTEM: Current Mode = PLAN MODE]\nYou are in PLAN MODE. Follow these rules strictly:\n1. You CAN use: Read, Grep, Glob, Bash (read-only), WebSearch, WebFetch, memory_search, memory_store, search_past_sessions, search_current_session, sub-agent tools.\n2. You CANNOT use: Edit, Write, or any tool that modifies files or system state.\n3. If the user asks you to edit/create/modify files, DO NOT attempt it. Instead respond: \"I am in PLAN MODE. Press Tab to switch to AGENT MODE, then I can make changes.\"\n4. Your job: analyze requests, search, create plans, present for approval.\n5. Do NOT execute any state-modifying tool."
+          ? "\n\n[SYSTEM: Current Mode = PLAN MODE]\nYou are in PLAN MODE. Follow these rules:\n1. You CAN use: Read, Grep, Glob, Bash (read-only), WebSearch, WebFetch, memory_search, memory_store, search_past_sessions, search_current_session, sub-agent tools.\n2. You CANNOT use: Write, Edit, or any tool that modifies files.\n3. If you call Write or Edit in PLAN MODE, the system will block it and return: \"Tool X is blocked in PLAN MODE.\" When you see this message, STOP. Do NOT retry. Instead, tell the user: \"I am in PLAN MODE. Please press Tab to switch to AGENT MODE, then I can make changes.\"\n4. Your job: analyze requests, search, create plans, present for approval. Do NOT execute state-modifying tools."
           : "\n\n[SYSTEM: Current Mode = AGENT MODE]\nYou are in AGENT MODE. Execute tasks normally using all available tools. You may read, write, edit, and run commands as needed.";
         const first = event.messages[0];
         if (first && first.role === "system") {
@@ -4808,7 +4808,7 @@ If nothing to report, return: {}`;
       if (appMode === "plan" && (event.toolName === "write" || event.toolName === "edit")) {
         return {
           block: true,
-          reason: "Tool '" + event.toolName + "' is blocked in PLAN MODE. Press Tab to switch to AGENT MODE to make changes.",
+          reason: "Tool '" + event.toolName + "' is blocked in PLAN MODE. DO NOT retry this tool. Tell the user: \"I am in PLAN MODE. Please press Tab to switch to AGENT MODE, then I can make changes.\"",
         };
       }
     } catch {}
