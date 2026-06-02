@@ -196,6 +196,11 @@ export function startCronJobs(
   }, cfg.healthCheckIntervalMs);
 
   timers = [curatorTimer, consolidationTimer, dbTimer, healthTimer];
+
+  // Schedule any custom cron jobs registered before start
+  for (const job of registeredJobs) {
+    if (job.enabled) scheduleCustomJob(job);
+  }
 }
 
 export function stopCronJobs(): void {
@@ -209,10 +214,25 @@ export function isCronRunning(): boolean {
   return isRunning;
 }
 
+function scheduleCustomJob(job: CronJob): void {
+  const parsed = parseCron(job.expression);
+  if (!parsed) return;
+  const tick = nextCronTick(parsed, new Date());
+  if (!tick) return;
+  const delayMs = tick.getTime() - Date.now();
+  const timer = setTimeout(async () => {
+    try { await job.action(); } catch { /* silent */ }
+    scheduleCustomJob(job); // re-schedule for next tick
+  }, Math.max(0, delayMs));
+  timers.push(timer as any);
+}
+
 export function registerJob(name: string, expression: string, action: () => Promise<void>): void {
   const err = validateCron(expression);
   if (err) throw new Error(`Cron job "${name}": ${err}`);
-  registeredJobs.push({ name, expression, action, enabled: true });
+  const job: CronJob = { name, expression, action, enabled: true };
+  registeredJobs.push(job);
+  if (isRunning) scheduleCustomJob(job);
 }
 
 export function listJobs(): CronJob[] {

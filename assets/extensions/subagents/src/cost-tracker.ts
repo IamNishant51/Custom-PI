@@ -83,10 +83,17 @@ function estimateCost(provider: string, model: string, inputTokens: number, outp
   return (inputTokens * rate.input) + (outputTokens * rate.output);
 }
 
+// ── In-memory cache to avoid re-reading the full JSONL on every trackCost ──
+
+let cachedDailyCosts: CostEvent[] | null = null;
+let cachedDailyDate: string | null = null;
+let cachedSessionCosts: Map<string, CostEvent[]> = new Map();
+
 function getDailyCost(): CostEvent[] {
-  ensureCostDir();
-  if (!fs.existsSync(SESSION_COST_FILE)) return [];
   const today = new Date().toISOString().slice(0, 10);
+  if (cachedDailyCosts && cachedDailyDate === today) return cachedDailyCosts;
+  ensureCostDir();
+  if (!fs.existsSync(SESSION_COST_FILE)) { cachedDailyCosts = []; cachedDailyDate = today; return []; }
   const costs: CostEvent[] = [];
   try {
     const lines = fs.readFileSync(SESSION_COST_FILE, "utf8").trim().split("\n").filter(Boolean);
@@ -97,6 +104,8 @@ function getDailyCost(): CostEvent[] {
       } catch {}
     }
   } catch {}
+  cachedDailyCosts = costs;
+  cachedDailyDate = today;
   return costs;
 }
 
@@ -138,6 +147,10 @@ export function trackCost(
   };
 
   fs.appendFileSync(SESSION_COST_FILE, JSON.stringify(event) + "\n", "utf8");
+
+  // Invalidate caches
+  cachedDailyCosts = null;
+  cachedSessionCosts.delete(sessionId);
 
   const sessionCosts = getSessionCosts(sessionId);
   const dailyCosts = getDailyCost();
@@ -190,6 +203,7 @@ export function trackAgentStepCost(sessionId: string, agent: string): CostResult
 }
 
 export function getSessionCosts(sessionId: string): CostEvent[] {
+  if (cachedSessionCosts.has(sessionId)) return cachedSessionCosts.get(sessionId)!;
   ensureCostDir();
   if (!fs.existsSync(SESSION_COST_FILE)) return [];
   const costs: CostEvent[] = [];
@@ -202,6 +216,7 @@ export function getSessionCosts(sessionId: string): CostEvent[] {
       } catch {}
     }
   } catch {}
+  cachedSessionCosts.set(sessionId, costs);
   return costs;
 }
 

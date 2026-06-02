@@ -133,16 +133,8 @@ export function getAvailableModels(): { id: string; tier: string; label: string;
 }
 
 function getEstimatedCost(route: ModelRoute): number {
-  const RATES: Record<string, { input: number; output: number }> = {
-    "anthropic/claude-sonnet-4": { input: 3.0 / 1_000_000, output: 15.0 / 1_000_000 },
-    "anthropic/claude-haiku-3.5": { input: 0.8 / 1_000_000, output: 4.0 / 1_000_000 },
-    "openai/gpt-4o": { input: 2.5 / 1_000_000, output: 10.0 / 1_000_000 },
-    "openai/gpt-4o-mini": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
-    "google/gemini-2.5-flash": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
-    "google/gemini-2.5-pro": { input: 1.25 / 1_000_000, output: 5.0 / 1_000_000 },
-  };
   const key = `${route.provider}/${route.model}`;
-  const rate = RATES[key];
+  const rate = RATE_TABLE[key];
   if (!rate) return 0;
   return (rate.input + rate.output) * 1000; // per 1K tokens
 }
@@ -171,8 +163,18 @@ export function trackCostWithRetry(
   };
 }
 
+const RATE_TABLE: Record<string, { input: number; output: number }> = {
+  "anthropic/claude-sonnet-4": { input: 3.0 / 1_000_000, output: 15.0 / 1_000_000 },
+  "anthropic/claude-haiku-3.5": { input: 0.8 / 1_000_000, output: 4.0 / 1_000_000 },
+  "openai/gpt-4o": { input: 2.5 / 1_000_000, output: 10.0 / 1_000_000 },
+  "openai/gpt-4o-mini": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
+  "google/gemini-2.5-flash": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
+  "google/gemini-2.5-pro": { input: 1.25 / 1_000_000, output: 5.0 / 1_000_000 },
+};
+
 export function getModelCostProfile(modelId: string): { input: number; output: number } | null {
   const route = MODELS[modelId];
   if (!route) return null;
-  return null;
+  const key = `${route.provider}/${route.model}`;
+  return RATE_TABLE[key] || null;
 }

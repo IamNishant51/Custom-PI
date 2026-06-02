@@ -4,6 +4,9 @@ import { readMemoryRaw, memoryWrite, loadMemorySnapshot } from "./memory-file-st
 const COMBINED_REVIEW_PROMPT = `You are a context-review system for an AI coding agent.
 Your role is to analyze the conversation and extract durable facts, user preferences, project decisions, and useful skills.
 
+Recent conversation:
+{conversation}
+
 Current memory contents (MEMORY.md):
 {memory_content}
 
@@ -97,7 +100,9 @@ export async function runMemoryReview(
   conversation: string,
 ): Promise<ReviewResult> {
   const snapshot = loadMemorySnapshot();
+  const truncatedConversation = conversation.length > 8000 ? conversation.slice(-8000) : conversation;
   const prompt = COMBINED_REVIEW_PROMPT
+    .replace("{conversation}", truncatedConversation || "(no conversation)")
     .replace("{memory_content}", snapshot.memory || "(empty)")
     .replace("{user_content}", snapshot.user || "(empty)");
 

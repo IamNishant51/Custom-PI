@@ -1299,10 +1299,10 @@ class SubAgentRuntime {
     const usage = process.memoryUsage();
     const heapMB = Math.round(usage.heapUsed / 1024 / 1024);
     if (heapMB > SubAgentRuntime.MEMORY_HARD_LIMIT_MB) {
-      return `Error: Memory usage (${heapMB}MB) exceeds hard limit. Operation refused.`;
+      return `Error: Memory usage (${heapMB}MB) exceeds hard limit (${SubAgentRuntime.MEMORY_HARD_LIMIT_MB}MB). Operation refused.`;
     }
     if (heapMB > SubAgentRuntime.MEMORY_WARN_MB) {
-      return null;
+      this.ctx.ui.notify(`High memory: ${heapMB}MB (limit ${SubAgentRuntime.MEMORY_HARD_LIMIT_MB}MB)`, "warning");
     }
     return null;
   }

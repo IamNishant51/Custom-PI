@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { listSkills, getSkillUsage, deleteSkill, getAllUsage } from "./skill-store";
-import { SkillFile, SkillLifecycle, STALE_DAYS, ARCHIVE_DAYS, type SkillInputSchema, type SkillOutputContract } from "./skill-types";
+import { SkillFile, SkillLifecycle, STALE_DAYS, ARCHIVE_DAYS, SKILLS_DIR, type SkillInputSchema, type SkillOutputContract } from "./skill-types";
 
 export interface CuratorReport {
   archived: string[];
@@ -73,12 +76,19 @@ export async function runCurator(model: any, auth: { apiKey?: string; headers?: 
 
     const decision = JSON.parse(text);
 
-    // Archive skills
+    // Archive skills — move to archived subdirectory
     if (Array.isArray(decision.toArchive)) {
+      const archiveDir = path.join(os.homedir(), SKILLS_DIR, "archived");
+      if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
       for (const name of decision.toArchive) {
         const skill = skills.find(s => s.frontmatter.name === name);
-        if (skill) {
-          report.archived.push(name);
+        if (skill && skill.filePath) {
+          try {
+            const dest = path.join(archiveDir, path.basename(skill.filePath));
+            fs.copyFileSync(skill.filePath, dest);
+            fs.unlinkSync(skill.filePath);
+            report.archived.push(name);
+          } catch { /* skip failed archives */ }
         }
       }
     }

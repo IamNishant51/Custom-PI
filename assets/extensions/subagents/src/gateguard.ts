@@ -1,6 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 
-// ── Existing GateGuard (first-edit investigation) ──────────────────────────
+// ── GateGuard (first-edit investigation) with disk persistence ─────────────
 
 export interface GateGuardEntry {
   path: string;
@@ -11,6 +12,28 @@ export interface GateGuardEntry {
 }
 
 const STATE = new Map<string, GateGuardEntry>();
+const STATE_FILE = path.join(process.env.HOME || "~", ".pi", "agent", "gateguard-state.json");
+
+function loadState(): void {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+      for (const [key, val] of Object.entries(raw)) {
+        STATE.set(key, val as GateGuardEntry);
+      }
+    }
+  } catch { /* ignore corrupt state */ }
+}
+
+function saveState(): void {
+  try {
+    const dir = path.dirname(STATE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const obj: Record<string, GateGuardEntry> = {};
+    for (const [k, v] of STATE) obj[k] = v;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2));
+  } catch { /* ignore write errors */ }
+}
 const INVESTIGATION_PROMPT = "\n[GateGuard] This is the first edit to this file. Before making changes, investigate:\n- What imports/schemas does this file use?\n- What existing code depends on this file?\n- Is this the right approach, or is there a simpler way?\nState your findings, then the edit will proceed.\n";
 
 export class GateGuard {
@@ -26,6 +49,7 @@ export class GateGuard {
         blockedAt: Date.now(),
         approvedAt: null,
       });
+      saveState();
       return { blocked: true, message: INVESTIGATION_PROMPT };
     }
 
@@ -43,6 +67,7 @@ export class GateGuard {
       entry.blocked = false;
       entry.approved = true;
       entry.approvedAt = Date.now();
+      saveState();
     }
   }
 
@@ -53,6 +78,7 @@ export class GateGuard {
     } else {
       STATE.clear();
     }
+    saveState();
   }
 
   getStats(): { total: number; blocked: number; approved: number } {
@@ -67,6 +93,37 @@ export class GateGuard {
 }
 
 export const gateguard = new GateGuard();
+
+// ── Custom Policy Loader ──────────────────────────────────────────────────
+
+const POLICY_FILE = path.join(process.env.HOME || "~", ".pi", "agent", "policy.json");
+
+export interface CustomPolicy {
+  name: string;
+  denyCommands?: string[];
+  allowCommands?: string[];
+  denyPaths?: string[];
+  denyExtensions?: string[];
+}
+
+export function loadCustomPolicies(validator: PolicyValidator): void {
+  try {
+    if (fs.existsSync(POLICY_FILE)) {
+      const policies: CustomPolicy[] = JSON.parse(fs.readFileSync(POLICY_FILE, "utf8"));
+      for (const policy of policies) {
+        if (policy.denyCommands) {
+          for (const cmd of policy.denyCommands) validator.denyCommand(cmd);
+        }
+        if (policy.allowCommands) {
+          for (const cmd of policy.allowCommands) validator.allowCommand(cmd);
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+// Load persisted GateGuard state on startup
+loadState();
 
 // ── Policy-as-Code Engine ──────────────────────────────────────────────────
 
@@ -127,6 +184,9 @@ export class PolicyValidator {
     this.deniedCommands = opts?.deniedCommands ?? new Set(DENIED_COMMANDS);
     this.projectRoot = opts?.projectRoot ?? PROJECT_ROOT;
   }
+
+  denyCommand(cmd: string): void { this.deniedCommands.add(cmd); }
+  allowCommand(cmd: string): void { this.allowedCommands.add(cmd); }
 
   validate(action: ActionRequest): PolicyResult {
     switch (action.type) {

@@ -1787,7 +1787,7 @@ async function executeTool(name, args, cwd) {
       const fp = safeResolve(cwd, expandPath(args.path));
       const content = fs.readFileSync(fp, "utf8");
       if (!content.includes(args.oldText)) return `Error: Could not find the specified text in ${args.path}`;
-      const updated = content.replace(args.oldText, args.newText);
+      const updated = content.split(args.oldText).join(args.newText);
       fs.writeFileSync(fp, updated, "utf8");
       return `Successfully edited: ${args.path}`;
     }
@@ -4647,19 +4647,32 @@ async function main() {
 
   const app = Fastify({ logger: { level: "warn" } });
 
-  // Auth middleware — optional bearer token via PI_API_KEY env var
-  const apiKey = process.env.PI_API_KEY || process.env.API_KEY || "";
+  // Auth middleware — auto-generates API key on first run if not set
+  const apiKeyFile = path.join(PI_DIR, "web-api-key.txt");
+  let apiKey = process.env.PI_API_KEY || process.env.API_KEY || "";
+  if (!apiKey) {
+    try {
+      if (fs.existsSync(apiKeyFile)) {
+        apiKey = fs.readFileSync(apiKeyFile, "utf8").trim();
+      } else {
+        apiKey = crypto.randomBytes(32).toString("hex");
+        fs.mkdirSync(PI_DIR, { recursive: true });
+        fs.writeFileSync(apiKeyFile, apiKey, { mode: 0o600 });
+        console.log(`  ✦ Generated API key: ${apiKey.slice(0, 8)}... (saved to ${apiKeyFile})`);
+      }
+    } catch { apiKey = ""; }
+  }
   app.addHook("onRequest", (req, reply, done) => {
     reply.header("Access-Control-Allow-Origin", "*");
     reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    // Skip auth for preflight and health check
+    // Skip auth for preflight, health check, and websocket
     if (req.method === "OPTIONS" || req.url === "/api/health" || req.url.startsWith("/ws")) return done();
-    // If API_KEY is set, require bearer token
+    // Require bearer token
     if (apiKey) {
       const auth = req.headers.authorization;
       if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== apiKey) {
-        return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header or set PI_API_KEY" });
+        return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header" });
       }
     }
     done();
@@ -4776,13 +4789,37 @@ async function main() {
     return { providers: online };
   });
 
-  // Vault
-  app.post("/api/vault/set", async (req) => { vaultSet(req.body.key, req.body.value); return { ok: true }; });
-  app.post("/api/vault/get", async (req) => {
-    const value = vaultGet(req.body.key);
-    return { ok: value !== null, value };
+  // ── Vault with audit logging ─────────────────────────────────────────────
+  const VAULT_AUDIT_FILE = path.join(PI_DIR, "vault-audit.jsonl");
+  function vaultAudit(action, key, success) {
+    try {
+      const entry = { ts: new Date().toISOString(), action, key, ip: "local" };
+      fs.appendFileSync(VAULT_AUDIT_FILE, JSON.stringify(entry) + "\n");
+    } catch {}
+  }
+
+  app.post("/api/vault/set", async (req) => {
+    const err = validateBody(req.body, ["key", "value"]);
+    if (err) return { ok: false, error: err };
+    try { vaultSet(req.body.key, req.body.value); vaultAudit("set", req.body.key, true); return { ok: true }; }
+    catch (e) { vaultAudit("set", req.body.key, false); throw e; }
   });
-  app.post("/api/vault/delete", async (req) => ({ ok: vaultDelete(req.body.key) }));
+  app.post("/api/vault/get", async (req) => {
+    const err = validateBody(req.body, ["key"]);
+    if (err) return { ok: false, error: err };
+    vaultAudit("get", req.body.key, true);
+    const value = vaultGet(req.body.key);
+    if (value === null) return { ok: false, value: null };
+    const redacted = value.length > 4 ? value.slice(0, 4) + "***" : "***";
+    return { ok: true, value: redacted, fullValue: value };
+  });
+  app.post("/api/vault/delete", async (req) => {
+    const err = validateBody(req.body, ["key"]);
+    if (err) return { ok: false, error: err };
+    const result = vaultDelete(req.body.key);
+    vaultAudit("delete", req.body.key, result);
+    return { ok: result };
+  });
   app.get("/api/vault/list", async () => ({ keys: vaultList() }));
   app.get("/api/vault/health", async () => vaultHealth());
 
