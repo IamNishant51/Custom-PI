@@ -1952,21 +1952,20 @@ function patchToolExecution(proto: any) {
     const contentRaw = rawLines.length > 1 ? rawLines.slice(1) : [];
 
     if ((isEditTool || hasDiff) && !isRunning) {
-      // Render diff with green/red BACKGROUND highlighting
-      const diffAdded = (s: string) => `\x1b[42m\x1b[30m${s}\x1b[0m`;
-      const diffRemoved = (s: string) => `\x1b[41m\x1b[30m${s}\x1b[0m`;
+      // Render diff with green/red BACKGROUND highlighting (dark shades for readability)
+      const diffAdded = (s: string) => `\x1b[48;2;0;90;0m\x1b[38;2;180;255;180m${s}\x1b[0m`;
+      const diffRemoved = (s: string) => `\x1b[48;2;90;0;0m\x1b[38;2;255;180;180m${s}\x1b[0m`;
       const dimFn2 = (theme && typeof theme.fg === "function")
         ? (s: string) => theme.fg("muted", s)
         : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-      const bgNeutral = (s: string) => `\x1b[48;2;40;45;55m\x1b[37m${s}\x1b[0m`;
+      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m${s}\x1b[0m`;
       contentLines = [];
       const isWriteTool = this.toolName === "write";
       let diffBlockOpen = false;
       for (const line of contentRaw) {
         const trimmed = line.trim();
         if (isWriteTool) {
-          // For write tool, ALL content is new — show every line as addition
           contentLines.push(indent + diffAdded(line));
         } else if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
           contentLines.push(indent + dimFn2(line));
@@ -1989,10 +1988,24 @@ function patchToolExecution(proto: any) {
         }
       }
     } else {
-      const bgNeutral = (s: string) => `\x1b[48;2;40;45;55m\x1b[37m${s}\x1b[0m`;
+      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m${s}\x1b[0m`;
       contentLines = contentRaw.map((line: string) => indent + bgNeutral(line));
     }
 
+    // Wrap content in a rounded box when not running
+    if (!isRunning && contentLines.length > 0) {
+      const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+      const maxVis = Math.max(...contentLines.map(l => stripAnsi(l).length));
+      const boxW = Math.max(16, Math.min(80, maxVis - indent.length + 2));
+      const topB = indent + "╭" + "─".repeat(boxW) + "╮";
+      const botB = indent + "╰" + "─".repeat(boxW) + "╯";
+      const boxed = contentLines.map(l => {
+        const visLen = stripAnsi(l).length;
+        const pad = boxW - (visLen - indent.length);
+        return indent + "│ " + l.slice(indent.length) + (pad > 0 ? " ".repeat(pad) : "") + " │";
+      });
+      return truncateLines([headerLine, topB, ...boxed, botB], width);
+    }
     return truncateLines([headerLine, ...contentLines], width);
   };
 }
