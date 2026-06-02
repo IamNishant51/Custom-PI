@@ -156,7 +156,7 @@ h4, h5, h6 { font-size: 16px; line-height: 20px; letter-spacing: 0; margin: 10px
   white-space: pre;
 }
 
-.sidebar-nav { flex: 1; padding: var(--spacing-xs) 0; }
+.sidebar-nav { flex: 1; padding: var(--spacing-xs) 0; overflow-y: auto; }
 
 .nav-item {
   display: flex;
