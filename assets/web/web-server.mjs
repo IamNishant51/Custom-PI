@@ -841,7 +841,7 @@ const TOOLS = [
   },
   {
     name: "post_to_twitter",
-    description: "Post a tweet to Twitter/X. Requires Twitter API credentials stored in vault (TWITTER_CONSUMER_KEY, TWITTER_SECRET_KEY, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET).",
+    description: "Post a tweet to Twitter/X. Uses Playwright browser automation — requires Twitter account connected via Social Accounts panel first.",
     parameters: {
       type: "object",
       properties: {
@@ -906,7 +906,7 @@ const TOOLS = [
   },
   {
     name: "post_to_reddit",
-    description: "Post a message to a Reddit subreddit. Requires REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in vault.",
+    description: "Post a message to a Reddit subreddit. Uses Playwright browser automation — requires Reddit account connected via Social Accounts panel first.",
     parameters: {
       type: "object",
       properties: {
@@ -2362,69 +2362,19 @@ Restored: ${result.restored.join(", ")}`;
 }
 
 async function postToTwitter(text) {
-  const consumerKey = vaultGet("TWITTER_CONSUMER_KEY");
-  const consumerSecret = vaultGet("TWITTER_SECRET_KEY");
-  const accessToken = vaultGet("TWITTER_ACCESS_TOKEN");
-  const accessSecret = vaultGet("TWITTER_ACCESS_SECRET");
-  if (!consumerKey || !consumerSecret || !accessToken || !accessSecret) {
-    return `Twitter API credentials not configured. Store them in vault using the vault_set tool:
-  vault_set key="TWITTER_CONSUMER_KEY" value="<your_consumer_key>"
-  vault_set key="TWITTER_SECRET_KEY" value="<your_consumer_secret>"
-  vault_set key="TWITTER_ACCESS_TOKEN" value="<your_access_token>"
-  vault_set key="TWITTER_ACCESS_SECRET" value="<your_access_token_secret>"
-Get these from https://developer.twitter.com (free tier: 1500 tweets/month).`;
-  }
-
-  const method = "POST";
-  const url = "https://api.twitter.com/2/tweets";
-  const body = JSON.stringify({ text: text.slice(0, 280) });
-
-  const oauth = {
-    oauth_consumer_key: consumerKey,
-    oauth_token: accessToken,
-    oauth_nonce: crypto.randomBytes(16).toString("hex"),
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_version: "1.0",
-  };
-
-  // Build signature base string (OAuth params only — JSON body is not included)
-  const paramStr = Object.keys(oauth).sort()
-    .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(oauth[k])}`)
-    .join("&");
-
-  const sigBase = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(paramStr)}`;
-  const sigKey = `${encodeURIComponent(consumerSecret)}&${encodeURIComponent(accessSecret)}`;
-  oauth.oauth_signature = crypto.createHmac("sha1", sigKey).update(sigBase).digest("base64");
-
-  const authHeader = "OAuth " + Object.keys(oauth)
-    .map(k => `${encodeURIComponent(k)}="${encodeURIComponent(oauth[k])}"`)
-    .join(", ");
-
-  const https = await import("node:https");
-  return new Promise(resolve => {
-    const req = https.request(url, {
+  const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
+  try {
+    const res = await fetch(`${bridgeUrl}/twitter/post`, {
       method: "POST",
-      headers: {
-        Authorization: authHeader,
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
-    }, res => {
-      let data = "";
-      res.on("data", c => data += c);
-      res.on("end", () => {
-        try {
-          const p = JSON.parse(data);
-          if (p.data?.id) resolve(`Tweet posted successfully! Tweet ID: ${p.data.id}`);
-          else resolve(`Twitter API error: ${JSON.stringify(p)}`);
-        } catch { resolve(`Twitter API response: ${data}`); }
-      });
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
     });
-    req.on("error", e => resolve(`Network error: ${e.message}`));
-    req.write(body);
-    req.end();
-  });
+    const data = await res.json();
+    if (data.ok) return `Tweet posted successfully! ${data.message || ""}`;
+    return `Twitter post failed: ${data.error || "unknown error"}`;
+  } catch (e) {
+    return `Twitter post failed — bridge unreachable: ${e.message}. Make sure you've connected your Twitter account in Social Accounts panel first.`;
+  }
 }
 
 // ── Web Search ──────────────────────────────────────────────────────────────
@@ -2674,44 +2624,18 @@ async function githubAction(args) {
 // ── Reddit Posting ──────────────────────────────────────────────────────────
 
 async function postToReddit(subreddit, title, text) {
-  const clientId = vaultGet("REDDIT_CLIENT_ID");
-  const clientSecret = vaultGet("REDDIT_CLIENT_SECRET");
-  const username = vaultGet("REDDIT_USERNAME");
-  const password = vaultGet("REDDIT_PASSWORD");
-  if (!clientId || !clientSecret || !username || !password) {
-    return `Reddit credentials not configured. Store REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in vault.`;
-  }
-
+  const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
   try {
-    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const tokenRes = await fetch("https://www.reddit.com/api/v1/access_token", {
+    const res = await fetch(`${bridgeUrl}/reddit/post`, {
       method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "pi-custom-pack/1.0 (by /u/" + username + ")",
-      },
-      body: `grant_type=password&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-      signal: AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subreddit, title, body: text }),
     });
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return "Reddit auth failed: invalid credentials";
-
-    const postRes = await fetch(`https://oauth.reddit.com/r/${subreddit}/submit`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "pi-custom-pack/1.0 (by /u/" + username + ")",
-      },
-      body: `kind=self&sr=${encodeURIComponent(subreddit)}&title=${encodeURIComponent(title.slice(0, 300))}&text=${encodeURIComponent(text.slice(0, 40000))}`,
-      signal: AbortSignal.timeout(15000),
-    });
-    const postData = await postRes.json();
-    if (postRes.ok) return `Posted to r/${subreddit}!`;
-    return `Reddit error: ${postData?.error || postData?.reason || "unknown"}`;
+    const data = await res.json();
+    if (data.ok) return `Posted to r/${subreddit}! ${data.message || ""}`;
+    return `Reddit post failed: ${data.error || "unknown error"}`;
   } catch (e) {
-    return `Reddit error: ${e.message}`;
+    return `Reddit post failed — bridge unreachable: ${e.message}. Make sure you've connected your Reddit account in Social Accounts panel first.`;
   }
 }
 
@@ -5510,6 +5434,112 @@ async function main() {
 
   ensureSocialBridge();
   ensureEmailBridge();
+
+  // ── Social Queue (Scheduling) ─────────────────────────────────────────
+
+  const QUEUE_DB_PATH = path.join(PI_DIR, "social-queue.db");
+  let queueDb = null;
+  try {
+    const Database = _require("better-sqlite3");
+    queueDb = new Database(QUEUE_DB_PATH);
+    queueDb.exec(`
+      CREATE TABLE IF NOT EXISTS social_queue (
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        media_path TEXT,
+        platforms TEXT NOT NULL,
+        title TEXT,
+        subreddit TEXT,
+        scheduled_at INTEGER NOT NULL,
+        status TEXT DEFAULT 'pending',
+        error TEXT,
+        created_at INTEGER DEFAULT (unixepoch())
+      )
+    `);
+    console.log("  ✦ Social queue initialized");
+  } catch (e) {
+    console.log("  ⚠ Social queue not available (better-sqlite3?):", e.message);
+  }
+
+  function addToQueue(text, platforms, scheduledAt, opts = {}) {
+    if (!queueDb) return { ok: false, error: "Queue database not available" };
+    const id = crypto.randomUUID();
+    const stmt = queueDb.prepare(`
+      INSERT INTO social_queue (id, text, media_path, platforms, title, subreddit, scheduled_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+    `);
+    stmt.run(id, text, opts.mediaPath || null, JSON.stringify(platforms), opts.title || null, opts.subreddit || null, scheduledAt);
+    return { ok: true, id };
+  }
+
+  app.post("/api/social/queue", async (req) => {
+    const { text, platforms, scheduled_at, title, subreddit, media_path } = req.body || {};
+    if (!text || !platforms || !scheduled_at) return { ok: false, error: "text, platforms, and scheduled_at required" };
+    if (!Array.isArray(platforms) || platforms.length === 0) return { ok: false, error: "platforms must be a non-empty array" };
+    return addToQueue(text, platforms, scheduled_at, { title, subreddit, mediaPath: media_path });
+  });
+
+  app.get("/api/social/queue", async () => {
+    if (!queueDb) return { ok: false, error: "Queue database not available", items: [] };
+    const rows = queueDb.prepare("SELECT * FROM social_queue ORDER BY scheduled_at ASC").all();
+    return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };
+  });
+
+  app.delete("/api/social/queue/:id", async (req) => {
+    if (!queueDb) return { ok: false, error: "Queue database not available" };
+    const { id } = req.params;
+    const stmt = queueDb.prepare("DELETE FROM social_queue WHERE id = ? AND status = 'pending'");
+    const info = stmt.run(id);
+    if (info.changes === 0) return { ok: false, error: "Post not found or already processed" };
+    return { ok: true, message: "Post cancelled" };
+  });
+
+  // Background processor — check every 30s for due posts
+  async function processQueue() {
+    if (!queueDb) return;
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'pending' AND scheduled_at <= ? LIMIT 5").all(now);
+      for (const row of rows) {
+        const id = row.id;
+        queueDb.prepare("UPDATE social_queue SET status = 'processing' WHERE id = ?").run(id);
+        const platforms = JSON.parse(row.platforms);
+        const errors = [];
+        for (const platform of platforms) {
+          try {
+            let result;
+            if (platform === "twitter") result = await postToTwitter(row.text);
+            else if (platform === "reddit") result = await postToReddit(row.subreddit || "programming", row.title || "Shared via Custom-PI", row.text);
+            else if (platform === "bluesky") result = await postToBluesky(row.text);
+            else if (platform === "discord") result = await postToDiscord(row.text);
+            else if (platform === "telegram") result = await postToTelegram(row.text);
+            else if (platform === "linkedin") {
+              const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
+              const bridgeRes = await fetch(`${bridgeUrl}/linkedin/post`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: row.text, mediaPath: row.media_path }),
+              });
+              const bridgeData = await bridgeRes.json();
+              result = bridgeData.ok ? "Posted to LinkedIn!" : `LinkedIn error: ${bridgeData.error}`;
+            } else {
+              result = `Unknown platform: ${platform}`;
+            }
+            errors.push(`${platform}: ${result}`);
+          } catch (e) {
+            errors.push(`${platform}: ${e.message}`);
+          }
+        }
+        const allOk = errors.every(e => !e.includes("error") && !e.includes("fail") && !e.includes("unreachable"));
+        queueDb.prepare("UPDATE social_queue SET status = ?, error = ? WHERE id = ?")
+          .run(allOk ? "published" : "failed", errors.join("; "), id);
+      }
+    } catch (e) {
+      console.error("Queue processor error:", e.message);
+    }
+  }
+
+  setInterval(processQueue, 30_000);
+  setTimeout(processQueue, 5_000); // also check shortly after startup
 
   // ── WebSocket ──────────────────────────────────────────────────────────
 

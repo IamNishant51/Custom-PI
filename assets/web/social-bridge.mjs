@@ -179,7 +179,7 @@ async function twitterAutoLogin(username, password) {
   }
 }
 
-async function twitterPost(text) {
+async function twitterPost(text, mediaPath) {
 
   // Close stale context to load fresh cookies from disk
   if (contexts.twitter) { try { await contexts.twitter.close(); } catch {} delete contexts.twitter; }
@@ -237,6 +237,21 @@ async function twitterPost(text) {
     await page.waitForTimeout(500);
     await page.keyboard.type(text, { delay: 10 });
     await page.waitForTimeout(1500);
+
+    // Image upload if mediaPath is provided
+    if (mediaPath && fs.existsSync(mediaPath)) {
+      log(`Uploading media from ${mediaPath}...`);
+      try {
+        const fileInput = await page.waitForSelector('input[data-testid="fileInput"]', { state: "attached", timeout: 5000 });
+        if (fileInput) {
+          await fileInput.setInputFiles(mediaPath);
+          await page.waitForTimeout(4000); // Wait for upload preview
+          log("Media uploaded successfully");
+        }
+      } catch (me) {
+        log(`Failed to upload media: ${me.message}`);
+      }
+    }
 
     // Dismiss hashtag autocomplete dropdown by pressing Escape
     await page.keyboard.press("Escape");
@@ -452,6 +467,87 @@ async function redditComment(postUrl, text) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
+async function linkedinIsLoggedIn(page) {
+  try {
+    await page.goto("https://www.linkedin.com/feed/", { waitUntil: "domcontentloaded", timeout: 20_000 });
+    await page.waitForTimeout(4000);
+    const url = page.url();
+    if (url.includes("/login") || url.includes("/signup")) return false;
+    const hasFeed = await page.$('.feed-shared-update-v2, .share-box-feed-entry__trigger');
+    const hasNav = await page.$('#global-nav');
+    return !!(hasFeed || hasNav);
+  } catch { return false; }
+}
+
+async function linkedinManualLogin() {
+  const ctx = await getCtx("linkedin", false);
+  const page = ctx.pages()[0] || await ctx.newPage();
+  try {
+    log("Opening LinkedIn login — please log in manually...");
+    await page.goto("https://www.linkedin.com/login", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    for (let i = 0; i < 60; i++) {
+      await page.waitForTimeout(2000);
+      if (page.url().includes("/feed")) {
+        log("LinkedIn login successful! Session saved.");
+        return { ok: true, message: "Logged in successfully to LinkedIn. Session saved." };
+      }
+    }
+    return { ok: false, error: "Login timed out after 2 minutes" };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function linkedinPost(text, mediaPath) {
+  if (contexts.linkedin) { try { await contexts.linkedin.close(); } catch {} delete contexts.linkedin; }
+  const ctx = await getCtx("linkedin", true);
+  const page = ctx.pages()[0] || await ctx.newPage();
+
+  try {
+    const loggedIn = await linkedinIsLoggedIn(page);
+    if (!loggedIn) return { ok: false, error: "Not logged in to LinkedIn. Run setup first." };
+
+    log("On LinkedIn feed, looking for share box...");
+    const shareBtn = await page.waitForSelector('button.share-box-feed-entry__trigger, button:has-text("Start a post")', { timeout: 15000 });
+    await shareBtn.click();
+    await page.waitForTimeout(2000);
+
+    const editor = await page.waitForSelector('div[role="textbox"][contenteditable="true"]', { timeout: 5000 });
+    await editor.click();
+    await page.waitForTimeout(500);
+    await page.keyboard.type(text, { delay: 10 });
+    await page.waitForTimeout(1500);
+
+    if (mediaPath && fs.existsSync(mediaPath)) {
+      log(`Uploading LinkedIn media from ${mediaPath}...`);
+      try {
+        const fileInput = await page.waitForSelector('input[type="file"]', { state: "attached", timeout: 5000 });
+        if (fileInput) {
+          await fileInput.setInputFiles(mediaPath);
+          await page.waitForTimeout(4000); // wait for upload
+          const doneBtn = await page.waitForSelector('button:has-text("Done"), button.share-box-footer__primary-btn', { timeout: 5000 }).catch(() => null);
+          if (doneBtn) {
+            await doneBtn.click();
+            await page.waitForTimeout(2000);
+          }
+        }
+      } catch (me) {
+        log(`Failed to upload media on LinkedIn: ${me.message}`);
+      }
+    }
+
+    const postBtn = await page.waitForSelector('button.share-actions__post-action, button:has-text("Post")', { timeout: 5000 });
+    await postBtn.click();
+    await page.waitForTimeout(4000);
+    log("LinkedIn post successful!");
+    return { ok: true, message: "Posted to LinkedIn successfully" };
+  } catch (e) {
+    log(`LinkedIn post error: ${e.message}`);
+    await page.screenshot({ path: path.join(STATE_DIR, "linkedin-debug.png") }).catch(() => {});
+    return { ok: false, error: e.message };
+  }
+}
+
 // ── HTTP Server ─────────────────────────────────────────────────────────────
 
 function parseBody(req) {
@@ -474,11 +570,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/status" && req.method === "GET") {
       const tp = fs.existsSync(path.join(PROFILES_DIR, "twitter"));
       const rp = fs.existsSync(path.join(PROFILES_DIR, "reddit"));
+      const lp = fs.existsSync(path.join(PROFILES_DIR, "linkedin"));
       return json(res, 200, {
         ok: true,
         platforms: {
           twitter: { configured: tp, sessionActive: !!contexts.twitter },
           reddit: { configured: rp, sessionActive: !!contexts.reddit },
+          linkedin: { configured: lp, sessionActive: !!contexts.linkedin },
         },
       });
     }
@@ -489,6 +587,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/reddit/setup" && req.method === "POST") {
       return json(res, 200, await redditManualLogin());
+    }
+    if (url.pathname === "/linkedin/setup" && req.method === "POST") {
+      return json(res, 200, await linkedinManualLogin());
     }
 
     // Auto login (headless, username + password)
@@ -505,9 +606,9 @@ const server = http.createServer(async (req, res) => {
 
     // Post
     if (url.pathname === "/twitter/post" && req.method === "POST") {
-      const { text } = await parseBody(req);
+      const { text, mediaPath } = await parseBody(req);
       if (!text) return json(res, 400, { ok: false, error: "text required" });
-      return json(res, 200, await twitterPost(text));
+      return json(res, 200, await twitterPost(text, mediaPath));
     }
     if (url.pathname === "/twitter/reply" && req.method === "POST") {
       const { url: u, text } = await parseBody(req);
@@ -524,6 +625,11 @@ const server = http.createServer(async (req, res) => {
       if (!u || !text) return json(res, 400, { ok: false, error: "url and text required" });
       return json(res, 200, await redditComment(u, text));
     }
+    if (url.pathname === "/linkedin/post" && req.method === "POST") {
+      const { text, mediaPath } = await parseBody(req);
+      if (!text) return json(res, 400, { ok: false, error: "text required" });
+      return json(res, 200, await linkedinPost(text, mediaPath));
+    }
 
     // Disconnect
     if (url.pathname === "/twitter/disconnect" && req.method === "POST") {
@@ -537,6 +643,12 @@ const server = http.createServer(async (req, res) => {
       const d = path.join(PROFILES_DIR, "reddit");
       if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
       return json(res, 200, { ok: true, message: "Reddit disconnected" });
+    }
+    if (url.pathname === "/linkedin/disconnect" && req.method === "POST") {
+      if (contexts.linkedin) { try { await contexts.linkedin.close(); } catch {} delete contexts.linkedin; }
+      const d = path.join(PROFILES_DIR, "linkedin");
+      if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
+      return json(res, 200, { ok: true, message: "LinkedIn disconnected" });
     }
 
     json(res, 404, { ok: false, error: "Not found" });
@@ -554,10 +666,13 @@ if (process.argv.includes("--setup-twitter")) {
 } else if (process.argv.includes("--setup-reddit")) {
   log("Starting manual Reddit login...");
   redditManualLogin().then(r => { log(r.message || r.error); process.exit(r.ok ? 0 : 1); });
+} else if (process.argv.includes("--setup-linkedin")) {
+  log("Starting manual LinkedIn login...");
+  linkedinManualLogin().then(r => { log(r.message || r.error); process.exit(r.ok ? 0 : 1); });
 } else {
   server.listen(PORT, () => {
     log(`Social Bridge running on http://localhost:${PORT}`);
-    log(`Manual setup: node social-bridge.mjs --setup-twitter | --setup-reddit`);
+    log(`Manual setup: node social-bridge.mjs --setup-twitter | --setup-reddit | --setup-linkedin`);
   });
 }
 

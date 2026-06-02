@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 interface SocialStatus {
   ok: boolean;
@@ -21,6 +21,21 @@ interface EmailStatus {
   error?: string;
 }
 
+interface QueueItem {
+  id: string;
+  text: string;
+  platforms: string[];
+  title?: string;
+  subreddit?: string;
+  scheduled_at: number;
+  status: string;
+  error?: string;
+  created_at: number;
+}
+
+const ALL_PLATFORMS = ["twitter", "reddit", "linkedin", "bluesky", "discord", "telegram"] as const;
+const PLATFORM_LABELS: Record<string, string> = { twitter: "Twitter", reddit: "Reddit", linkedin: "LinkedIn", bluesky: "Bluesky", discord: "Discord", telegram: "Telegram" };
+
 export default function SocialPanel() {
   const [social, setSocial] = useState<SocialStatus | null>(null);
   const [email, setEmail] = useState<EmailStatus | null>(null);
@@ -31,7 +46,19 @@ export default function SocialPanel() {
   const [formPass, setFormPass] = useState("");
   const [formName, setFormName] = useState("");
   const [formLoading, setFormLoading] = useState(false);
-  const [formMsg, setFormMsg] = useState("");
+  const [formMsg, setFormMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleText, setScheduleText] = useState("");
+  const [schedulePlatforms, setSchedulePlatforms] = useState<string[]>(["twitter"]);
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleSubreddit, setScheduleSubreddit] = useState("");
+  const [scheduleTitle, setScheduleTitle] = useState("");
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [queueLoading, setQueueLoading] = useState(false);
 
   async function fetchStatus() {
     try {
@@ -45,11 +72,27 @@ export default function SocialPanel() {
     setLoading(false);
   }
 
-  useEffect(() => { fetchStatus(); }, []);
+  const fetchQueue = useCallback(async () => {
+    setQueueLoading(true);
+    try {
+      const res = await fetch("/api/social/queue");
+      const d = await res.json();
+      if (d.ok) setQueueItems(d.items || []);
+    } catch {}
+    setQueueLoading(false);
+  }, []);
+
+  useEffect(() => { fetchStatus(); fetchQueue(); }, [fetchQueue]);
+
+  useEffect(() => {
+    if (!scheduleOpen) return;
+    const interval = setInterval(fetchQueue, 15_000);
+    return () => clearInterval(interval);
+  }, [scheduleOpen, fetchQueue]);
 
   async function connectPlatform() {
     setFormLoading(true);
-    setFormMsg("");
+    setFormMsg(null);
     try {
       let r: any;
       if (activeConnect === "twitter") {
@@ -59,7 +102,7 @@ export default function SocialPanel() {
       } else if (activeConnect === "linkedin") {
         r = await fetch("/api/social/linkedin/setup", { method: "POST" }).then(r => r.json());
       } else if (activeConnect === "bluesky") {
-        r = await fetch("/api/social/bluesky/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier: formUser, appPassword: formPass }) }).then(r => r.json());
+        r = await fetch("/api/social/bluesky/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: formUser, password: formPass }) }).then(r => r.json());
       } else if (activeConnect === "discord") {
         r = await fetch("/api/social/discord/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ webhookUrl: formUser }) }).then(r => r.json());
       } else if (activeConnect === "telegram") {
@@ -67,12 +110,14 @@ export default function SocialPanel() {
       } else {
         r = await fetch("/api/social/email/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: formUser, appPassword: formPass, displayName: formName }) }).then(r => r.json());
       }
-      setFormMsg(r.ok ? "Connected" : `Error: ${r.error || r.message}`);
       if (r.ok) {
-        setTimeout(() => { setActiveConnect(null); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(""); }, 1500);
+        setFormMsg({ text: "Connected", ok: true });
+        setTimeout(() => { setActiveConnect(null); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(null); }, 1200);
         fetchStatus();
+      } else {
+        setFormMsg({ text: r.error || r.message || "Failed", ok: false });
       }
-    } catch { setFormMsg("Connection failed"); }
+    } catch { setFormMsg({ text: "Connection failed", ok: false }); }
     setFormLoading(false);
   }
 
@@ -80,115 +125,255 @@ export default function SocialPanel() {
     try { await fetch(`/api/social/${platform}/disconnect`, { method: "POST" }); fetchStatus(); } catch {}
   }
 
-  if (loading) return <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
+  function toggleSchedulePlatform(platform: string) {
+    setSchedulePlatforms(prev =>
+      prev.includes(platform) ? prev.filter(p => p !== platform) : [...prev, platform]
+    );
+  }
 
-  const twitterOk = social?.platforms?.twitter?.configured;
-  const redditOk = social?.platforms?.reddit?.configured;
-  const linkedinOk = social?.platforms?.linkedin?.configured;
+  async function schedulePost() {
+    if (!scheduleText || schedulePlatforms.length === 0 || !scheduleTime) return;
+    setScheduleLoading(true);
+    setScheduleMsg(null);
+    try {
+      const res = await fetch("/api/social/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: scheduleText,
+          platforms: schedulePlatforms,
+          scheduled_at: new Date(scheduleTime).getTime() / 1000,
+          title: schedulePlatforms.includes("reddit") ? scheduleTitle || undefined : undefined,
+          subreddit: schedulePlatforms.includes("reddit") ? scheduleSubreddit || undefined : undefined,
+        }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setScheduleMsg({ text: "Post scheduled", ok: true });
+        setScheduleText("");
+        setSchedulePlatforms(["twitter"]);
+        setScheduleTime("");
+        setScheduleSubreddit("");
+        setScheduleTitle("");
+        fetchQueue();
+        setTimeout(() => setScheduleMsg(null), 2000);
+      } else {
+        setScheduleMsg({ text: d.error || "Failed to schedule", ok: false });
+      }
+    } catch { setScheduleMsg({ text: "Failed to schedule", ok: false }); }
+    setScheduleLoading(false);
+  }
+
+  async function cancelScheduled(id: string) {
+    try {
+      await fetch(`/api/social/queue/${id}`, { method: "DELETE" });
+      fetchQueue();
+    } catch {}
+  }
+
+  if (loading) return <div className="social-empty"><div className="loading-spinner" /></div>;
+
+  const platforms = social?.platforms;
+  const twitterOk = platforms?.twitter?.configured;
+  const redditOk = platforms?.reddit?.configured;
+  const linkedinOk = platforms?.linkedin?.configured;
   const emailOk = email?.configured;
-  const bskyOk = social?.platforms?.bluesky?.configured;
-  const discordOk = social?.platforms?.discord?.configured;
-  const telegramOk = social?.platforms?.telegram?.configured;
+  const bskyOk = platforms?.bluesky?.configured;
+  const discordOk = platforms?.discord?.configured;
+  const telegramOk = platforms?.telegram?.configured;
+
+  const now = new Date();
+  const defaultScheduleTime = new Date(now.getTime() + 60 * 60 * 1000).toISOString().slice(0, 16);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--hairline)", fontSize: 12, color: "var(--muted)" }}>
+    <div className="social-panel">
+      <div className="social-info">
         Connect your accounts below. Then use the main chat to post — just tell the AI what to write and where.
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
-        <AccountCard name="Twitter / X" connected={!!twitterOk} detail={twitterOk ? "Connected" : null} color="#1DA1F2"
-          onConnect={() => { setActiveConnect("twitter"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+
+      <div className="social-grid">
+        <AccountCard name="Twitter / X" connected={!!twitterOk} detail={twitterOk ? "Connected" : null}
+          onConnect={() => { setActiveConnect("twitter"); setFormUser(""); setFormPass(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("twitter")} />
-        <AccountCard name="LinkedIn" connected={!!linkedinOk} detail={linkedinOk ? "Connected" : null} color="#0A66C2"
-          onConnect={() => { setActiveConnect("linkedin"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+        <AccountCard name="LinkedIn" connected={!!linkedinOk} detail={linkedinOk ? "Connected" : null}
+          onConnect={() => { setActiveConnect("linkedin"); setFormUser(""); setFormPass(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("linkedin")} />
-        <AccountCard name="Reddit" connected={!!redditOk} detail={redditOk ? "Connected" : null} color="#FF4500"
-          onConnect={() => { setActiveConnect("reddit"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+        <AccountCard name="Reddit" connected={!!redditOk} detail={redditOk ? "Connected" : null}
+          onConnect={() => { setActiveConnect("reddit"); setFormUser(""); setFormPass(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("reddit")} />
-        <AccountCard name="Bluesky" connected={!!bskyOk} detail={bskyOk ? "Connected" : null} color="#0285FF"
-          onConnect={() => { setActiveConnect("bluesky"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+        <AccountCard name="Bluesky" connected={!!bskyOk} detail={bskyOk ? "Connected" : null}
+          onConnect={() => { setActiveConnect("bluesky"); setFormUser(""); setFormPass(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("bluesky")} />
-        <AccountCard name="Discord" connected={!!discordOk} detail={discordOk ? "Connected" : null} color="#5865F2"
-          onConnect={() => { setActiveConnect("discord"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+        <AccountCard name="Discord" connected={!!discordOk} detail={discordOk ? "Connected" : null}
+          onConnect={() => { setActiveConnect("discord"); setFormUser(""); setFormPass(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("discord")} />
-        <AccountCard name="Telegram" connected={!!telegramOk} detail={telegramOk ? "Connected" : null} color="#24A1DE"
-          onConnect={() => { setActiveConnect("telegram"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+        <AccountCard name="Telegram" connected={!!telegramOk} detail={telegramOk ? "Connected" : null}
+          onConnect={() => { setActiveConnect("telegram"); setFormUser(""); setFormPass(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("telegram")} />
-        <AccountCard name="Email" connected={!!emailOk} detail={emailOk ? `${email?.email || "Configured"}` : null} color="#EA4335"
-          onConnect={() => { setActiveConnect("email"); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(""); }}
+        <AccountCard name="Email" connected={!!emailOk} detail={emailOk ? (email?.email || "Configured") : null}
+          onConnect={() => { setActiveConnect("email"); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(null); }}
           onDisconnect={() => disconnectPlatform("email")} />
       </div>
 
       {activeConnect && (
-        <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--hairline)", background: "var(--surface)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-            <strong style={{ fontSize: 13 }}>
+        <div className="social-form">
+          <div className="social-form-header">
+            <span className="social-form-title">
               {activeConnect === "email" ? "Email (Gmail App Password)" : activeConnect.charAt(0).toUpperCase() + activeConnect.slice(1)}
-            </strong>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setActiveConnect(null)}>X</button>
+            </span>
+            <button className="btn btn-ghost social-form-close" onClick={() => setActiveConnect(null)}>Close</button>
           </div>
+
           {activeConnect === "linkedin" ? (
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <span style={{ fontSize: 13 }}>Opens browser for manual login.</span>
-              <button className="btn btn-primary" onClick={connectPlatform} disabled={formLoading}
-                style={{ height: 32, fontSize: 13, padding: "0 16px" }}>
-                {formLoading ? "Starting..." : "Open LinkedIn Login"}
+            <div className="social-form-info">
+              <span className="social-form-info-text">Opens a browser window for manual LinkedIn login.</span>
+              <button className="btn btn-primary social-form-btn" onClick={connectPlatform} disabled={formLoading}>
+                {formLoading ? "Opening..." : "Open LinkedIn Login"}
               </button>
             </div>
           ) : (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input className="input" placeholder={
+            <div className="social-form-body">
+              <input className="social-form-input" type="text" placeholder={
                 activeConnect === "email" ? "Gmail address" :
                 activeConnect === "discord" ? "Webhook URL" :
                 activeConnect === "telegram" ? "Bot Token" :
                 activeConnect === "twitter" ? "Username or email" :
                 activeConnect === "reddit" ? "Reddit username" :
                 activeConnect === "bluesky" ? "Bluesky handle" : "Username"
-              } value={formUser} onChange={e => setFormUser(e.target.value)} style={{ flex: 2, height: 32, fontSize: 13 }} />
+              } value={formUser} onChange={e => setFormUser(e.target.value)} />
               {activeConnect !== "discord" && (
-                <input className="input" type={activeConnect === "telegram" ? "text" : "password"} placeholder={
+                <input className="social-form-input" type={activeConnect === "telegram" ? "text" : "password"} placeholder={
                   activeConnect === "email" ? "App Password" :
                   activeConnect === "telegram" ? "Chat ID" :
                   activeConnect === "bluesky" ? "App Password" : "Password"
-                } value={formPass} onChange={e => setFormPass(e.target.value)} style={{ flex: 2, height: 32, fontSize: 13 }} />
+                } value={formPass} onChange={e => setFormPass(e.target.value)} />
               )}
               {activeConnect === "email" && (
-                <input className="input" placeholder="Display name (optional)" value={formName}
-                  onChange={e => setFormName(e.target.value)} style={{ flex: 1, height: 32, fontSize: 13 }} />
+                <input className="social-form-input-narrow" type="text" placeholder="Display name (optional)"
+                  value={formName} onChange={e => setFormName(e.target.value)} />
               )}
-              <button className="btn btn-primary" onClick={connectPlatform} disabled={formLoading || !formUser || (activeConnect !== "discord" && !formPass)}
-                style={{ height: 32, fontSize: 13, padding: "0 16px" }}>
-                {formLoading ? "..." : "Connect"}
+              <button className="btn btn-primary social-form-btn" onClick={connectPlatform}
+                disabled={formLoading || !formUser || (activeConnect !== "discord" && !formPass)}>
+                {formLoading ? "Connecting..." : "Connect"}
               </button>
             </div>
           )}
-          {formMsg && <div style={{ fontSize: 12, marginTop: 6 }}>{formMsg}</div>}
+
+          {formMsg && (
+            <div className={`social-form-msg ${formMsg.ok ? "social-form-msg-ok" : "social-form-msg-err"}`}>
+              {formMsg.text}
+            </div>
+          )}
         </div>
       )}
+
+      <div className="social-queue">
+        <button className="social-queue-toggle" onClick={() => setScheduleOpen(o => !o)}>
+          <span>Schedule &amp; Queue</span>
+          <span className={`social-queue-arrow ${scheduleOpen ? "open" : ""}`}>▾</span>
+        </button>
+
+        {scheduleOpen && (
+          <div className="social-queue-body">
+            <div className="social-schedule-form">
+              <div className="social-schedule-field">
+                <textarea className="social-schedule-textarea" placeholder="Post content..."
+                  value={scheduleText} onChange={e => setScheduleText(e.target.value)} rows={3} />
+              </div>
+
+              <div className="social-schedule-row">
+                <div className="social-schedule-platforms">
+                  {ALL_PLATFORMS.map(p => (
+                    <label key={p} className={`social-schedule-platform ${schedulePlatforms.includes(p) ? "active" : ""}`}>
+                      <input type="checkbox" checked={schedulePlatforms.includes(p)}
+                        onChange={() => toggleSchedulePlatform(p)} />
+                      {PLATFORM_LABELS[p]}
+                    </label>
+                  ))}
+                </div>
+                <input className="social-schedule-datetime" type="datetime-local"
+                  value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                  min={defaultScheduleTime} />
+              </div>
+
+              {schedulePlatforms.includes("reddit") && (
+                <div className="social-schedule-row">
+                  <input className="social-form-input" type="text" placeholder="Subreddit (e.g. artificial)"
+                    value={scheduleSubreddit} onChange={e => setScheduleSubreddit(e.target.value)} />
+                  <input className="social-form-input" type="text" placeholder="Post title"
+                    value={scheduleTitle} onChange={e => setScheduleTitle(e.target.value)} />
+                </div>
+              )}
+
+              <div className="social-schedule-row">
+                <button className="btn btn-primary social-form-btn" onClick={schedulePost}
+                  disabled={scheduleLoading || !scheduleText || schedulePlatforms.length === 0 || !scheduleTime}>
+                  {scheduleLoading ? "Scheduling..." : "Schedule Post"}
+                </button>
+                {scheduleMsg && (
+                  <span className={`social-form-msg ${scheduleMsg.ok ? "social-form-msg-ok" : "social-form-msg-err"}`}>
+                    {scheduleMsg.text}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="social-queue-list">
+              <div className="social-queue-list-header">
+                <span className="social-form-title">Scheduled Posts</span>
+                <button className="btn btn-ghost social-card-btn" onClick={fetchQueue} disabled={queueLoading}>
+                  {queueLoading ? "..." : "Refresh"}
+                </button>
+              </div>
+              {queueItems.length === 0 ? (
+                <div className="social-queue-empty">No scheduled posts.</div>
+              ) : (
+                queueItems.map(item => (
+                  <div key={item.id} className="social-queue-item">
+                    <div className="social-queue-item-top">
+                      <span className={`social-queue-item-status status-${item.status}`}>{item.status}</span>
+                      <span className="social-queue-item-time">{new Date(item.scheduled_at * 1000).toLocaleString()}</span>
+                    </div>
+                    <div className="social-queue-item-text">{item.text}</div>
+                    <div className="social-queue-item-bottom">
+                      <div className="social-queue-item-platforms">
+                        {item.platforms.map(p => (
+                          <span key={p} className="social-queue-item-platform">{PLATFORM_LABELS[p] || p}</span>
+                        ))}
+                      </div>
+                      {item.status === "pending" && (
+                        <button className="btn btn-ghost social-card-btn" style={{ color: "var(--danger)" }}
+                          onClick={() => cancelScheduled(item.id)}>Cancel</button>
+                      )}
+                    </div>
+                    {item.error && item.status === "failed" && (
+                      <div className="social-queue-item-error">{item.error}</div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function AccountCard({ name, connected, detail, color, onConnect, onDisconnect }: {
-  name: string; connected: boolean; detail: string | null; color: string;
+function AccountCard({ name, connected, detail, onConnect, onDisconnect }: {
+  name: string; connected: boolean; detail: string | null;
   onConnect: () => void; onDisconnect: () => void;
 }) {
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 10,
-      padding: "8px 14px", borderRadius: 8,
-      border: "1px solid var(--hairline)", background: "var(--surface)",
-      fontSize: 13, minWidth: 150,
-    }}>
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? "#22c55e" : "#666", flexShrink: 0 }} />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, fontSize: 13 }}>{name}</div>
-        {detail && <div style={{ fontSize: 11, color: "var(--muted)" }}>{detail}</div>}
+    <div className={`social-card ${connected ? "social-card-connected" : ""}`}>
+      <div className={`social-card-dot ${connected ? "social-card-dot-on" : "social-card-dot-off"}`} />
+      <div className="social-card-body">
+        <div className="social-card-name">{name}</div>
+        {detail && <div className="social-card-detail">{detail}</div>}
       </div>
       <button
-        className={connected ? "btn btn-ghost" : "btn btn-primary"}
+        className={`btn ${connected ? "btn-ghost" : "btn-primary"} social-card-btn`}
         onClick={connected ? onDisconnect : onConnect}
-        style={{ height: 28, fontSize: 11, padding: "0 10px", whiteSpace: "nowrap" }}
       >
         {connected ? "Disconnect" : "Connect"}
       </button>
