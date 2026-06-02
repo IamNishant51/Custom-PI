@@ -1959,6 +1959,7 @@ function patchToolExecution(proto: any) {
         ? (s: string) => theme.fg("muted", s)
         : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
+      const bgNeutral = (s: string) => `\x1b[48;2;40;45;55m\x1b[37m${s}\x1b[0m`;
       contentLines = [];
       const isWriteTool = this.toolName === "write";
       let diffBlockOpen = false;
@@ -1984,11 +1985,12 @@ function patchToolExecution(proto: any) {
           }
           contentLines.push(indent + diffRemoved(line));
         } else {
-          contentLines.push(indent + line);
+          contentLines.push(indent + bgNeutral(line));
         }
       }
     } else {
-      contentLines = contentRaw.map((line: string) => indent + line);
+      const bgNeutral = (s: string) => `\x1b[48;2;40;45;55m\x1b[37m${s}\x1b[0m`;
+      contentLines = contentRaw.map((line: string) => indent + bgNeutral(line));
     }
 
     return truncateLines([headerLine, ...contentLines], width);
