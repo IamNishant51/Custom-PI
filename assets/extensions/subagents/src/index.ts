@@ -1953,43 +1953,44 @@ function patchToolExecution(proto: any) {
 
     if ((isEditTool || hasDiff) && !isRunning) {
       // Render diff with green/red BACKGROUND highlighting (dark shades for readability)
-      const diffAdded = (s: string) => `\x1b[48;2;0;90;0m\x1b[38;2;180;255;180m${s}\x1b[0m`;
-      const diffRemoved = (s: string) => `\x1b[48;2;90;0;0m\x1b[38;2;255;180;180m${s}\x1b[0m`;
+      const diffAdded = (s: string) => `\x1b[48;2;0;90;0m\x1b[38;2;180;255;180m ${s} \x1b[0m`;
+      const diffRemoved = (s: string) => `\x1b[48;2;90;0;0m\x1b[38;2;255;180;180m ${s} \x1b[0m`;
       const dimFn2 = (theme && typeof theme.fg === "function")
         ? (s: string) => theme.fg("muted", s)
         : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
-      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m${s}\x1b[0m`;
+      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m ${s} \x1b[0m`;
       contentLines = [];
       const isWriteTool = this.toolName === "write";
       let diffBlockOpen = false;
       for (const line of contentRaw) {
-        const trimmed = line.trim();
+        const clean = line.trimEnd();
+        const trimmed = clean.trim();
         if (isWriteTool) {
-          contentLines.push(indent + diffAdded(line));
+          contentLines.push(indent + diffAdded(clean));
         } else if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
-          contentLines.push(indent + dimFn2(line));
+          contentLines.push(indent + dimFn2(clean));
         } else if (trimmed.startsWith("+") && !trimmed.startsWith("+++")) {
           if (!diffBlockOpen) {
             const sepLen = Math.max(3, Math.floor((width - 10) / 2));
             contentLines.push(indent + dimFn2("\u2501").repeat(sepLen) + " diff " + dimFn2("\u2501").repeat(sepLen));
             diffBlockOpen = true;
           }
-          contentLines.push(indent + diffAdded(line));
+          contentLines.push(indent + diffAdded(clean));
         } else if (trimmed.startsWith("-") && !trimmed.startsWith("---")) {
           if (!diffBlockOpen) {
             const sepLen = Math.max(3, Math.floor((width - 10) / 2));
             contentLines.push(indent + dimFn2("\u2501").repeat(sepLen) + " diff " + dimFn2("\u2501").repeat(sepLen));
             diffBlockOpen = true;
           }
-          contentLines.push(indent + diffRemoved(line));
+          contentLines.push(indent + diffRemoved(clean));
         } else {
-          contentLines.push(indent + bgNeutral(line));
+          contentLines.push(indent + bgNeutral(clean));
         }
       }
     } else {
-      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m${s}\x1b[0m`;
-      contentLines = contentRaw.map((line: string) => indent + bgNeutral(line));
+      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m ${s} \x1b[0m`;
+      contentLines = contentRaw.map((line: string) => indent + bgNeutral(line.trimEnd()));
     }
 
     // Wrap content in a rounded box when not running
