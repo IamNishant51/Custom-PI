@@ -1,5 +1,3 @@
-# Custom-PI
-
 *HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.*  
 *Knowledge graph memory · Deployment orchestration · Service health monitoring · Adaptive throttling · Web UI*
 
