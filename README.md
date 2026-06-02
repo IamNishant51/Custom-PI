@@ -1,14 +1,50 @@
 *HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.*  
-*Knowledge graph memory · Deployment orchestration · Service health monitoring · Adaptive throttling · Web UI*
+*Knowledge graph memory · Free AI image generation · Social media automation · DAG swarms · Web dashboard*
 
 ![Custom-PI logo](assets/Custom-pi-logo.png)
 
 [![NPM Version](https://img.shields.io/npm/v/custom-pi.svg?style=for-the-badge&color=00d7ff&logo=npm)](https://www.npmjs.com/package/custom-pi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-005fff.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-00d787.svg?style=for-the-badge&logo=node.js)](https://nodejs.org)
-![Knowledge Graph](https://img.shields.io/badge/Knowledge%20Graph-Triplet%20Memory-00ff88.svg?style=for-the-badge)
+![Free Image Gen](https://img.shields.io/badge/Image%20Gen-Free-00ff88.svg?style=for-the-badge)
+![Asset Pipeline](https://img.shields.io/badge/Asset-Pipeline-ff6b6b.svg?style=for-the-badge)
+![Social Automata](https://img.shields.io/badge/Social-Automata-00d7ff.svg?style=for-the-badge)
 ![DAG Swarm](https://img.shields.io/badge/DAG-Swarm-af00ff.svg?style=for-the-badge)
-![Operational Autonomy](https://img.shields.io/badge/Operational-Autonomy-00f0ff.svg?style=for-the-badge)
+
+---
+
+## 🔥 What's New — Free AI Image Generation
+
+**Generate stunning visuals for social media posts at zero cost — no API keys, no subscriptions, no hidden fees.**
+
+custom-pi now includes a complete **free image generation pipeline** powered by [Pollinations.ai](https://pollinations.ai). The agent can generate, select, and attach images to social media posts entirely for free.
+
+```mermaid
+graph LR
+  A[Agent prompts<br/>generate_image] --> B[Pollinations.ai<br/>4 images · free]
+  B --> C[Saved to<br/>~/.pi/assets/]
+  C --> D[AssetSelector modal<br/>shows 4 images]
+  D --> E[User picks one]
+  E --> F[Others auto-deleted]
+  F --> G[Image attached<br/>to social post]
+  
+  style A fill:#1a1a2e,stroke:#00d7ff
+  style B fill:#1a1a2e,stroke:#00ff88
+  style D fill:#1a1a2e,stroke:#ff6b6b
+  style G fill:#1a1a2e,stroke:#af00ff
+```
+
+### Features
+
+| Feature | Description |
+|:---|:---|
+| **🎨 Free Generation** | Generate images via Pollinations.ai — Flux, GPT Image, Seedream models. Zero cost, unlimited use. |
+| **🔑 No API Keys** | Defaults to free provider. No signup, no credit card, no configuration. |
+| **🖼️ Batch Generation** | Creates 4 images by default with different seeds — more variety, better picks. |
+| **👆 Visual Selection** | AssetSelector modal shows all generated images in a grid — click to pick, rest auto-deleted. |
+| **📁 Asset Gallery** | All generated images saved to `~/.pi/assets/` with preview, copy-path, and delete controls. |
+| **📱 Post Integration** | Selected image attaches directly to social media posts in the approval preview. |
+| **⚡ Premium Option** | Set `provider: "designapi"` with a `DESIGN_API_KEY` for Flux Pro, DALL-E 3, Recraft, Ideogram. |
 
 ---
 
@@ -16,50 +52,150 @@
 
 Hermes represents the swift, articulate messenger. The Paperclip Maximizer represents the theoretical model of absolute, relentless optimization toward a target goal.
 
-custom-pi is a premium engineering extension suite for the Pi Coding Agent. It equips the host agent with persistent context recall, multi-agent wave orchestration, safe system execution tooling, and **full operational autonomy** — the ability to proactively monitor, react to external events, and manage the entire development lifecycle without continuous user intervention.
+custom-pi is a premium engineering extension suite for the Pi Coding Agent. It equips the host agent with persistent context recall, multi-agent wave orchestration, safe system execution tooling, **full operational autonomy**, and **zero-cost media generation** — the ability to proactively research, write, generate visuals for, and publish social media content without continuous user intervention.
 
-* **Knowledge Graph Memory**: SQLite-backed triplet store (Subject→Predicate→Object) with confidence scoring, TTL-based pruning, and automatic extraction from conversations and tool outputs.
-* **Tiered Context Recall**: Intent classification decides whether to search FTS5 chat history, the knowledge graph, or system state — with cascading fallback.
-* **DAG Swarms**: Multi-agent pipelines (Researcher, Coder, Reviewer) running in parallel to prevent single-agent execution dead-ends.
-* **Deployment Orchestration**: Stateful CI/CD pipeline management — PR → build → tests → staging → smoke tests → production — with automatic rollback on failure.
-* **Webhook Ingestion**: Receive events from Sentry, Datadog, GitHub, or custom CI. LLM-parsed into failure triplets with proactive triage when 3+ related errors occur.
-* **Service Health Monitoring**: Periodic endpoint checks tracking latency, jitter, and consecutive failures. Contextual advisories modify planning based on service health.
-* **Adaptive Throttling**: Rate limit tracking with exponential backoff circuit breaker. Resource-aware task scoring adjusts parallelism based on CPU/memory load.
-* **35+ Built-in Tools**: Full-featured OS, browser, LSP, AST-grep, email, cryptographic vault, SSH, and social posting integration.
-* **Dual Dashboards**: Stream reasoning and execution logs in real-time through an interactive fullscreen TUI or a React-based web dashboard.
-* **Secure Sandbox**: Enforced user approval gates, AES-256 encrypted configuration storage, and isolated custom plugins execution.
+* **Free AI Image Generation**: Built-in Pollinations.ai integration. Generate 4 images, pick the best, attach to posts — all free.
+* **Social Media Automation**: Post to Twitter/X, Reddit, Bluesky, Discord, Telegram — full browser automation with persistent login.
+* **Asset Pipeline**: Generate → Select → Attach → Publish. Complete visual content workflow.
+* **Knowledge Graph Memory**: SQLite-backed triplet store (Subject→Predicate→Object) with confidence scoring, TTL-based pruning, and automatic extraction.
+* **Tiered Context Recall**: Intent classification drives FTS5 chat history, knowledge graph, or system state queries with cascading fallback.
+* **DAG Swarms**: Multi-agent pipelines (Researcher, Writer, Publisher) running in parallel — no single-agent dead-ends.
+* **Deployment Orchestration**: Stateful CI/CD pipeline — PR → build → tests → staging → smoke tests → production — with auto-rollback.
+* **Webhook Ingestion**: Receive events from Sentry, Datadog, GitHub. LLM-parsed failure triplets with proactive triage.
+* **Service Health Monitoring**: Periodic endpoint checks — latency, jitter, consecutive failures. Contextual advisories adjust planning.
+* **Adaptive Throttling**: Circuit breaker with exponential backoff. Resource-aware task scoring adjusts parallelism.
+* **40+ Built-in Tools**: OS, browser, LSP, AST-grep, email, cryptographic vault, SSH, social posting, image generation.
+* **Dual Dashboards**: Fullscreen TUI + real-time React web dashboard.
+* **Secure Sandbox**: Enforced approval gates, AES-256 encrypted vault, isolated plugin execution.
+
+---
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+npm install -g custom-pi
+```
+
+For browser automation (social posting, image automation):
+
+```bash
+npx playwright install chromium
+```
+
+For IDE code intelligence:
+
+```bash
+npm install -g typescript-language-server
+pip install pyright
+```
+
+### Launch
+
+```bash
+custom-pi          # Terminal dashboard
+custom-pi-web      # Web dashboard at http://localhost:4321
+```
+
+---
+
+## 🎨 Free Image Generation — In Action
+
+### Agent Workflow
+
+The `generate_image` tool defaults to Pollinations.ai — no API key needed:
+
+```
+Agent: generate_image(provider: "free", prompt: "futuristic cityscape cyberpunk", count: 4)
+  → 4 images generated, saved to ~/.pi/assets/
+  → "Call request_asset_selection with filenames: [...]"
+
+Agent: request_asset_selection(filenames: [...], prompt: "futuristic cityscape")
+  → AssetSelector modal opens in web UI
+  → User clicks preferred image
+  → Others auto-deleted
+  → "Selected: asset_171234_2.png"
+
+Agent: request_post_approval(platform: "twitter", content: "...", assetUrl: "asset_171234_2.png")
+  → PostApproval shows tweet + image side by side
+  → User approves
+  → Published to Twitter/X
+```
+
+### Manual Use
+
+Any agent or chat can generate images on demand:
+
+```
+"generate an image of a robot cooking breakfast and save it"
+```
+
+### Premium Models
+
+Set `provider: "designapi"` and add a `DESIGN_API_KEY` to your vault for access to Flux Pro, DALL-E 3, Recraft v3, and Ideogram.
+
+---
+
+## 📱 Social Media Automation
+
+custom-pi automates the entire social media workflow — research, draft, generate visuals, approve, publish.
+
+### Connected Platforms
+
+| Platform | Authentication | Capabilities |
+|:---|:---|:---|
+| **Twitter / X** | Browser login | Post tweets with images, threads |
+| **Reddit** | Browser login | Submit posts with titles, subreddit targeting |
+| **Bluesky** | Browser login | Publish text updates |
+| **Discord** | Bot token / Webhook | Channel messages, embeds |
+| **Telegram** | Bot token | Channel posts, media |
+
+### Swarm Commander
+
+The **Social Media Manager** swarm handles the full pipeline:
+
+1. **Researcher** — Finds trending topics, news, and content ideas using web search
+2. **Writer** — Drafts platform-optimized posts AND generates matching visuals
+3. **Publisher** — Shows previews for approval, publishes to connected platforms
 
 ---
 
 ## Interactive Architecture Flow
-
-The workflow diagram below illustrates how custom-pi coordinates task completion through the CEO Orchestrator, the subagent swarm, and the diagnostic verification layer:
 
 ```mermaid
 graph TD
   Goal[User Input / Goal] --> CEO[CEO Orchestrator]
   CEO --> Config[DAG Planner / dag-config.yaml]
   Config --> Swarm{DAG Swarm Execution}
-  Swarm -->|Task A| Res[Researcher Agent]
-  Swarm -->|Task B| Cod[Coder Agent]
-  Res -.->|Analyzed Data| Cod
-  Cod --> Rev[Reviewer Agent]
-  Rev --> Test[Test Suite / LSP Linting]
-  Test -->|Validation Failed| CEO
-  Test -->|Validation Passed| Deliver[Final Deliverable]
+  Swarm -->|Research| Res[Researcher Agent]
+  Swarm -->|Write + Generate| Cod[Writer Agent]
+  Res -.->|Findings| Cod
+  Cod --> Pub[Publisher Agent]
+  Pub --> Approve[Post Approval Modal]
+  Approve -->|Approved| Social[Twitter / Reddit / Bluesky / Discord / Telegram]
+  Approve -->|Edit| Cod
+  
+  subgraph Asset Pipeline
+    Gen[generate_image<br/>Pollinations.ai] --> Sel[request_asset_selection]
+    Sel --> Asset[~/.pi/assets/]
+  end
+  
+  Cod --> Gen
+  Pub --> Asset
 
   subgraph Memory System
     KG[Knowledge Graph<br/>Triplet Store]
     FTS[FTS5 Chat History]
     Auto[Auto-Learning<br/>LLM Extraction]
-    Prune[TTL Pruning<br/>Redundancy Merge]
+    Prune[TTL Pruning]
   end
 
   subgraph Operational Autonomy
-    WH[Webhook Listener<br/>Sentry / Datadog / CI]
-    SM[Service Health<br/>Latency / Jitter]
-    RL[Rate Limiter<br/>Circuit Breaker]
-    RM[Resource Monitor<br/>CPU / RAM]
+    WH[Webhook Listener]
+    SM[Service Health]
+    RL[Rate Limiter]
+    RM[Resource Monitor]
   end
 
   CEO --> KG
@@ -74,121 +210,62 @@ graph TD
 
 ---
 
-## Quick Start
-
-### Installation
-
-Install the package globally using npm:
-
-```bash
-npm install -g custom-pi
-```
-
-To run browser automation tasks, install Playwright's Chromium binary:
-
-```bash
-npx playwright install chromium
-```
-
-For full IDE code intelligence support, make sure you have appropriate language servers installed locally:
-
-```bash
-npm install -g typescript-language-server
-pip install pyright
-```
-
-### Launch Commands
-
-Start the terminal dashboard interface:
-
-```bash
-custom-pi
-```
-
-Start the React web server (served locally at http://localhost:4321):
-
-```bash
-custom-pi-web
-```
-
----
-
-## Technical Specifications
-
-| Objective | Legacy Limitation | custom-pi Resolution |
-| :--- | :--- | :--- |
-| **Context Retention** | Agents lose state and forget decisions across sessions. | **Knowledge graph** (SQLite triplet store) with confidence scoring, weighted retrieval, and multi-hop graph traversal. |
-| **Knowledge Synthesis** | Memory is manual; no automatic extraction from conversations. | **Auto-learning** LLM pipeline extracts Subject→Predicate→Object triplets from tool outputs and flushes them on a 5-min cron + shutdown. |
-| **Memory Maintenance** | Stale or redundant facts accumulate and degrade retrieval quality. | **TTL-based pruning** per entity type (7d–5y) plus **redundancy merging** via similarity scoring; logged for manual review. |
-| **Context Retrieval** | Single flat search — no strategy for different query types. | **Intent classification** (conversational / knowledge / system) drives **tiered recall**: FTS5 → triplets → state, with cascading fallback. |
-| **Problem Solving** | Single agents get stuck in recursive bugs or loops. | **DAG swarms** that delegate specialized roles (Research, Coding, Reviewing) concurrently. |
-| **Log Analysis** | Errors discovered only when the user reports them. | **Webhook ingestion** + LLM log parsing creates **failure triplets** and **incidents**; 3+ related failures trigger proactive triage. |
-| **Deployment** | Manual CI/CD tracking with no agent oversight. | **Stateful pipeline orchestrator** tracks 6 stages (PR→build→tests→staging→smoke→prod) with auto-rollback on failure. |
-| **Rate Limits** | API quota exhaustion causes silent failures. | **Circuit breaker** tracks `X-RateLimit-Remaining` headers; exponential backoff (`1s·2ⁿ`) defers calls until reset. |
-| **Resource Awareness** | No visibility into host load when scheduling tasks. | **Host metrics** (`/proc/stat`, `/proc/meminfo`) feed a penalty scoring function that adjusts task parallelism dynamically. |
-| **Service Health** | No awareness of external service degradation. | **Health monitor** pings endpoints, tracks latency/jitter, and injects contextual warnings into planning. |
-| **Interface Telemetry** | Plain terminal scrolling output makes tracking swarms difficult. | **Double-buffered fullscreen TUI** alongside a WebSocket-driven React dashboard. |
-| **Credentials Storage** | Storing API keys in plaintext files or config variables. | **AES-256-GCM encrypted vault** with programmatic key generation. |
-| **Code Understanding** | Regex-based file search lacks structural and type context. | **LSP client integration** with ast-grep queries for 11+ languages. |
-| **Web Access** | Incapable of logging in or interacting with complex JavaScript apps. | **Playwright integration** for screenshot capture, selector querying, and action execution. |
-
----
-
-## Tool Arsenal (35+)
-
-### Knowledge & Memory
-
-* `memory_store` / `memory_search` / `memory_edit`: Create, retrieve, and update TF-IDF memory vectors.
-* `/triplets`: Query the knowledge graph — list all triplets or drill into an entity's connections.
-* `vault_set` / `vault_get` / `vault_delete` / `vault_list` / `vault_import`: Cryptographically secure storage mapped to AES-256-GCM encryption.
-
-### Search and Web Automation
-
-* `web_search`: Multi-tier search fallback chain (DuckDuckGo → Algolia HackerNews → Wikipedia).
-* `web_fetch`: Programmatic page fetching with HTML-to-Markdown parsing and automatic user-agent rotation.
-* `internal_url`: URL router handling internal schemas (`memory://`, `vault://`, `local://`, `issue://`, `pr://`, `skill://`, `rule://`).
-
-### Headless Browser & Shell
-
-* `browser`: Navigate, type, click, screenshot (base64 PNG), and extract node content via headless Chromium.
-* `ssh_exec`: Execution of remote host commands with secure temporary SSH key and password management.
-
-### Code Intelligence
-
-* `lsp`: Programmatic interface for language servers supporting hover definitions, symbols, rename, and diagnostic arrays.
-* `ast_grep`: Structural syntax tree search across 11 programming languages.
-* `hashline_edit`: Content-hash validated code editing to ensure merge safety and prevent corrupt patches.
-
-### Integrations and Messaging
-
-* `github`: Full integration with the GitHub API for issues, pull request tracking, and branch-specific code search.
-* `send_email`: Compose and dispatch emails using the Gmail API via OAuth 2.0 Device Flow authorization.
-
-### Broadcast & Social API
-
-* `post_to_reddit`: Submit post payloads via Reddit OAuth password grant.
-* `post_to_bluesky`: AT Protocol client helper for publishing text updates.
-* `post_to_discord`: Webhook integration for system logs broadcasting.
-* `post_to_telegram`: Bot API integration for secure command updates.
+## Tool Arsenal (40+)
 
 ### Media Synthesis
 
-* `generate_image`: Automated image rendering using DALL-E 3, Gemini, or Grok based on active vault credentials.
-* `text_to_speech`: Edge-tts CLI client returning audio base64 buffers.
-* `render_mermaid`: Compiles Mermaid diagrams into SVG vectors with ASCII fallbacks.
+* `generate_image` — **Free image generation** via Pollinations.ai (default, no key needed) or premium DesignAPI/OpenAI/Gemini/Grok. Generates 4 images, saves to asset gallery.
+* `request_asset_selection` — Shows generated images in a selection modal. User picks one, rest auto-deleted.
+* `text_to_speech` — Edge-tts CLI returning audio buffers.
+* `render_mermaid` — Compiles Mermaid diagrams to SVG with ASCII fallback.
 
-### Orchestration & State
+### Social & Broadcast
 
-* `plan`: Formulate, track, and complete multi-step checklists.
-* `session`: Checkpoint serialization containing execution states, tools, and variables.
-* `plugin`: Register, configure, and isolate dynamic JavaScript extensions.
-* `todo_write`: Structured task lists with phased action plans.
+* `request_post_approval` — Shows formatted post preview with attached image. User Approves, Edits, or Skips.
+* `post_to_twitter` — Tweet with optional image attachment.
+* `post_to_reddit` — Submit posts with title and subreddit targeting.
+* `post_to_bluesky` / `post_to_discord` / `post_to_telegram` — Platform-specific publishing.
+
+### Knowledge & Memory
+
+* `memory_store` / `memory_search` / `memory_edit`: TF-IDF vector memory with recency decay.
+* `/triplets`: Knowledge graph queries — list triplets, drill into entities.
+* `vault_set` / `vault_get` / `vault_delete` / `vault_list` / `vault_import`: AES-256-GCM encrypted credential storage.
+
+### Search & Web
+
+* `web_search`: Multi-tier search (DuckDuckGo → Algolia → Wikipedia).
+* `web_fetch`: Page fetching with HTML-to-Markdown and user-agent rotation.
+* `internal_url`: Internal schema router (`memory://`, `vault://`, `local://`, etc.).
+
+### Browser & Shell
+
+* `browser`: Headless Chromium — navigate, type, click, screenshot, extract.
+* `ssh_exec`: Remote command execution with secure key management.
+
+### Code Intelligence
+
+* `lsp`: Language server protocol — hover, symbols, rename, diagnostics.
+* `ast_grep`: Structural syntax search across 11 languages.
+* `hashline_edit`: Content-hash validated safe editing.
+
+### Integrations
+
+* `github`: Full GitHub API — issues, PRs, code search.
+* `send_email`: Gmail via OAuth 2.0 Device Flow.
+* `plugin`: Dynamic JavaScript extension system.
+
+### Orchestration
+
+* `plan`: Multi-step checklist creation and tracking.
+* `session`: State checkpoint serialization.
+* `todo_write`: Structured task lists.
 
 ---
 
 ## Multi-Agent Swarms
 
-Configure parallel multi-agent workflows using `~/.pi/agent/dag-config.yaml`:
+Configure parallel workflows with `~/.pi/agent/dag-config.yaml`:
 
 ```yaml
 version: 1
@@ -200,63 +277,72 @@ agents:
     tools: [web_search, web_fetch, memory_search]
     waits_for: []
   - id: coder
-    role: Implement software features and bug fixes
+    role: Implement features and fix bugs
     tools: [write, edit, bash, glob, grep]
     waits_for: [researcher]
   - id: reviewer
-    role: Validate type checks, tests, and run compiler
+    role: Validate type checks, tests, compiler
     tools: [bash, glob, grep, lsp]
     waits_for: [coder]
 ```
 
-### Swarm Execution Configurations
+### Execution Modes
 
-* **pipeline**: Iterative loop. Reviewer validates output, and the CEO Orchestrator routes feedback to the Coder/Researcher if defects are found.
-* **parallel**: Executes all agents concurrently when task definitions do not overlap.
-* **sequential**: Strict single-lane dependency execution.
+| Mode | Behavior |
+|:---|:---|
+| **pipeline** | Iterative loop — reviewer validates, CEO routes feedback |
+| **parallel** | All agents concurrent when tasks don't overlap |
+| **sequential** | Strict single-lane dependency chain |
+
+### Default Swarm: Social Media Manager
+
+custom-pi ships with a pre-configured **Social Media Manager** team:
+
+| Agent | Role | Tools |
+|:---|:---|:---|
+| **Researcher** | Finds trending topics and content ideas | `web_search`, `web_fetch`, `write` |
+| **Writer** | Drafts posts + generates visuals | `write`, `edit`, `read`, `generate_image`, `request_asset_selection` |
+| **Publisher** | Shows previews, publishes | `post_to_twitter`, `post_to_reddit`, `post_to_bluesky`, `post_to_discord`, `post_to_telegram`, `request_post_approval` |
 
 ---
 
-## Operational Autonomy Features
+## 🌐 Web Dashboard
+
+The React dashboard provides real-time control over all features:
+
+| Tab | What you can do |
+|:---|:---|
+| **Swarm Commander** | Launch teams, view agent logs, select generated assets, approve posts |
+| **Asset Gallery** | Browse generated images, preview, copy paths, delete |
+| **Chat** | Real-time streaming agent output |
+| **Dashboard** | System telemetry, budget, vault, MCP servers |
+| **Memory** | TF-IDF semantic search and storage |
+| **Knowledge Graph** | Triplet table with confidence slider, entity drill-down |
+| **Pipeline** | Deployment stages status |
+| **Health** | Service health, CPU/RAM, rate limits |
+| **Social Accounts** | Connect/disconnect Twitter, Reddit, Bluesky, Discord, Telegram |
+| **Secrets Vault** | Encrypted credential management |
+| **Budget** | Token/cost tracking |
+
+---
+
+## Operational Autonomy
 
 ### Webhook Ingestion & Anomaly Detection
 
-custom-pi runs a webhook listener at `POST /api/webhooks/:source` that accepts events from Sentry, Datadog, GitHub Actions, or any custom CI. Each event is:
-
-1. **Normalized** into a standard format by `listener.js`.
-2. **Parsed by an LLM** to extract structured failure data: component, error code, severity.
-3. **Persisted as a failure triplet** in the knowledge graph, tagged with severity.
-4. **Aggregated into incidents** — if 3+ related failures occur in a short window, a triage task is automatically raised.
+Runs a webhook listener at `POST /api/webhooks/:source` accepting events from Sentry, Datadog, GitHub Actions. Each event is normalized → LLM-parsed → persisted as a failure triplet → aggregated into incidents. 3+ related failures trigger automatic triage.
 
 ### Service Health Monitoring
 
-The `service-health-monitor` periodically checks external endpoints, tracking:
-- **Latency** (ms) and **jitter** (variance between checks)
-- **Consecutive failures** for flapping detection
-- **Status classification**: excellent (<50ms), good, degraded, slow, critical (>2s)
-
-Health data feeds into the planner: *"PostgreSQL pool latency is 150ms — prioritizing reads over writes for 2 hours."*
-
-### Deployment Pipeline
-
-The `deployment-orchestrator` manages stateful pipelines:
-1. PR Created → Build Started → Unit Tests → Staging Deploy → Smoke Tests → Production Deploy
-2. Each stage runs verification gates (idempotent bash scripts checking critical invariants).
-3. On failure, the orchestrator auto-rolls back to the last stable commit SHA.
+Periodic external endpoint checks tracking latency, jitter, consecutive failures. Status classifications from excellent (<50ms) to critical (>2s) feed contextual planning advisories.
 
 ### Rate Limit Management
 
-All tool-calling wrappers use a **circuit breaker pattern**:
-- Tracks `X-RateLimit-Remaining` from API responses.
-- When remaining < 5, flips a `RATE_LIMIT_BREACH` flag and applies **exponential backoff** (delay = `1s × 2ⁿ`, capped at 60s).
-- Subsequent tool calls wait for the delay or defer to a lower-priority queue.
+Circuit breaker pattern tracking `X-RateLimit-Remaining` headers. Below threshold flips `RATE_LIMIT_BREACH` flag with exponential backoff (`1s × 2ⁿ`, capped at 60s).
 
 ### Resource-Aware Scheduling
 
-The `resource-monitor` reads `/proc/stat` and `/proc/meminfo` every check cycle:
-- **CPU usage %** and **memory usage %**
-- **Load average** compared to CPU core count
-- Task priority is penalized: `Score = Importance / (Resources × Cost)` — at 90% CPU, parallel subagent cost skyrockets, favoring sequential execution.
+Reads `/proc/stat` and `/proc/meminfo` every check cycle. Task priority scored as `Score = Importance / (Resources × Cost)`. At 90% CPU, parallel execution cost skyrockets — favors sequential.
 
 ---
 
@@ -264,131 +350,85 @@ The `resource-monitor` reads `/proc/stat` and `/proc/meminfo` every check cycle:
 
 ### Knowledge Graph (Triplet Store)
 
-custom-pi maintains a SQLite knowledge graph with the schema `(Subject) → [Predicate] → (Object)`, each triplet having:
-- **Confidence score** (0.0–1.0) — how reliable the fact is
-- **Entity types**: tool, file, function, class, concept, dependency, setting, person
-- **TTL by type**: tool data (7d), files (90d), functions/classes (180d), concepts/dependencies (365d), people (5y)
+SQLite-backed: `(Subject) → [Predicate] → (Object)`. Each triplet has confidence score (0.0–1.0), entity type (tool, file, function, class, concept, dependency, setting, person), and TTL (7d–5y).
 
-**Commands:**
 ```
-/triplets            — List top 20 knowledge graph entries
-/triplets <entity>   — Drill into an entity's connections
+/triplets            — List top 20 entries
+/triplets <entity>   — Drill into connections
 ```
 
 ### TF-IDF Semantic Memory
 
-Legacy vector memory using cosine similarity with recency decay:
+Vector memory using cosine similarity with recency decay:
 
 $$\text{Retrieved Weight} = \text{Cosine Similarity}(Q, M_i) \times e^{-\lambda t}$$
 
 ### Auto-Learning
 
-Every significant tool output is queued for LLM-based triplet extraction. The `triplet-generator`:
-1. Feeds raw text to an LLM with a structured extraction prompt.
-2. Validates the JSON output against the TripletRecord schema.
-3. Deduplicates and upserts into the knowledge graph (min confidence: 0.4).
+Every significant tool output is LLM-parsed for triplet extraction. Validated against TripletRecord schema, deduplicated, upserted into knowledge graph (min confidence: 0.4).
 
 ### Memory Pruning
 
-A daily cron job runs:
-- **Staleness pruning**: Deletes triplets past their TTL.
-- **Redundancy merging**: Finds near-duplicate triplets (same subject/object, similar predicate), keeps the highest confidence entry.
-- **Prune logging**: All actions are logged to `prune-log.json` for manual review.
-
----
-
-## Web Dashboard
-
-The React dashboard provides real-time visibility into all subsystems:
-
-| Tab | View |
-|:---|:---|
-| **Chat** | Real-time conversation with streaming agent output |
-| **Dashboard** | System telemetry, budget, vault, MCP servers, work products |
-| **Memory** | TF-IDF semantic memory search and storage |
-| **Knowledge Graph** | Triplet table with confidence slider, entity drill-down |
-| **Pipeline** | Deployment pipeline status across all stages |
-| **Health** | Service health, host CPU/RAM, rate limit status |
-| **Sub-Agents** | Swarm agent logs, tool calls, status |
-| **Secrets Vault** | Encrypted credential management |
-| **Budget** | Token/cost tracking with daily and per-session limits |
+Daily cron: TTL-based staleness deletion + redundancy merging (near-duplicate triplets keep highest confidence). All actions logged to `prune-log.json`.
 
 ---
 
 ## Runtime File Structure
 
-All assets, extensions, and configurations are synchronized locally in your home directory:
-
 ```
 ~/.pi/agent/
-├── SOUL.md                 # Identity definition injected on turn start
-├── SYSTEM.md               # Core programming and formatting rules
-├── settings.json           # Model profiles and active configurations
-├── models.json             # API keys and provider targets
-├── session-state.db        # SQLite database (messages, triplets, health, rate limits)
-├── session-state.json      # Periodic state snapshots (every 10 turns)
-├── dag-config.yaml         # Active swarm configurations
-├── mcp-servers.json        # MCP server definition list
-├── lsp-servers.json        # LSP server executables mapping
-├── prune-log.json          # Triplet pruning audit log
-├── checkpoints/            # Directory containing past session snapshots
-├── costs/                  # Log files tracking token usage and cost bounds
-├── work-products/          # Ledger mapping created and modified files
-├── webhooks/               # Incoming webhook event storage
-├── plugins/                # Directory containing dynamic script extensions
-├── .vault/                 # Secure storage directory
-│   ├── master.key          # 32-byte hex master key
-│   └── vault.json          # Encrypted key-value database
-└── web/                    # Distribution containing Vite client assets
+├── SOUL.md                 # Identity definition
+├── SYSTEM.md               # Core programming rules
+├── settings.json           # Model profiles
+├── models.json             # API keys and providers
+├── session-state.db        # SQLite (messages, triplets, health, rate limits)
+├── dag-config.yaml         # Swarm configurations
+├── mcp-servers.json        # MCP server definitions
+├── lsp-servers.json        # LSP server mappings
+├── assets/                 # Generated images
+│   ├── asset_171234_0.png
+│   ├── asset_171234_1.png
+│   └── asset_171234_2.png
+├── .vault/
+│   ├── master.key          # 32-byte hex key
+│   └── vault.json          # Encrypted key-value store
+├── plugins/                # Dynamic script extensions
+├── checkpoints/            # Session snapshots
+├── costs/                  # Token usage logs
+├── work-products/          # Created/modified files ledger
+├── webhooks/               # Incoming event storage
+└── web/                    # Vite client distribution
 ```
 
 ---
 
-## Testing & Verification
-
-Verify the system by running the full unit and integration test suites:
+## Testing
 
 ```bash
-npm test
-```
-
-Check TypeScript type compiler compliance:
-
-```bash
-npx tsc --noEmit
+npm test                 # Unit + integration tests
+npx tsc --noEmit         # TypeScript compliance
 ```
 
 ---
 
 ## License
 
-MIT - Licensed under the MIT License. Free to use, modify, and distribute.
+MIT — Free to use, modify, and distribute.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! To keep the project secure and maintainable, please follow these rules:
-
-### Branch Protection
-
-- **No direct pushes to `main`** — all changes must go through a pull request.
-- Each PR requires **at least 1 review approval** before merging.
-- All **status checks** (typecheck, test, validate, audit) must pass.
-- **Stale reviews are dismissed** when new commits are pushed.
-
-### How to Contribute
-
-1. Fork the repo and create a feature branch from `main`.
-2. Make your changes and ensure all tests pass (`npm test && npx tsc --noEmit`).
-3. Open a pull request with a clear title and description.
-4. Wait for review and address any feedback.
+1. Fork the repo, create a feature branch from `main`.
+2. Ensure all tests pass: `npm test && npx tsc --noEmit`.
+3. Open a PR with a clear title and description.
+4. At least 1 review approval required. No direct pushes to `main`.
 
 ### Reporting Issues
 
-Open an issue at [github.com/IamNishant51/Custom-PI/issues](https://github.com/IamNishant51/Custom-PI/issues) with a clear description, reproduction steps, and environment details.
+[github.com/IamNishant51/Custom-PI/issues](https://github.com/IamNishant51/Custom-PI/issues)
 
 ---
 
 **Hermes speed + Paperclip obsession = custom-pi**  
-*One agent to configure them all. And in the terminal bind them.*
+*Free images. Social automation. One agent to bind them all.*

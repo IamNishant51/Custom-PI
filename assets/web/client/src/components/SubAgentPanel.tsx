@@ -3,6 +3,9 @@ import { useToast } from "./Toast";
 import Markdown from "./Markdown";
 import ToolCallCard from "./ToolCallCard";
 import QuestionModal from "./QuestionModal";
+import PostApproval from "./PostApproval";
+import AssetSelector from "./AssetSelector";
+import AssetGallery from "./AssetGallery";
 import { useChat } from "../context/ChatContext";
 
 interface Agent {
@@ -40,6 +43,7 @@ interface SavedTeam {
   goal: string;
   agents: Array<{ id: string; role: string; tools: string[]; task: string }>;
   createdAt: string;
+  default?: boolean;
 }
 
 function AgentStatusBadge({ status }: { status: Agent["status"] }) {
@@ -82,6 +86,18 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const [teamNameInput, setTeamNameInput] = useState("");
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [isCurrentTeamSaved, setIsCurrentTeamSaved] = useState(false);
+  const [launchTarget, setLaunchTarget] = useState<SavedTeam | null>(null);
+  const [topicInput, setTopicInput] = useState("");
+  const [platformStatus, setPlatformStatus] = useState<Record<string, boolean>>({});
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+
+  const PLATFORM_META: Record<string, { label: string; tool: string; color: string }> = {
+    twitter: { label: "Twitter / X", tool: "post_to_twitter", color: "#1da1f2" },
+    reddit: { label: "Reddit", tool: "post_to_reddit", color: "#ff4500" },
+    bluesky: { label: "Bluesky", tool: "post_to_bluesky", color: "#0085ff" },
+    discord: { label: "Discord", tool: "post_to_discord", color: "#5865f2" },
+    telegram: { label: "Telegram", tool: "post_to_telegram", color: "#26a5e4" },
+  };
   const [elapsedTime, setElapsedTime] = useState(0);
   const [paused, setPaused] = useState(false);
   const [chatMessages, setChatMessages] = useState<Record<string, Array<{ role: "user" | "agent"; content: string }>>>({});
@@ -148,6 +164,9 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             break;
           case "agent_status":
             setAgents(prev => prev.map(a => a.id === data.agentId ? { ...a, status: data.status || a.status, currentTool: data.currentTool ?? a.currentTool, currentTask: data.currentTask ?? a.currentTask } : a));
+            if (data.agentId && (data.status === "running" || data.status === "calling_tool")) {
+              setSelectedAgentId(data.agentId);
+            }
             break;
           case "agent_log":
             setAgents(prev => prev.map(a => a.id === data.agentId ? { ...a, logs: [...a.logs, data.message || ""] } : a));
@@ -267,14 +286,49 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   }, []);
   useEffect(() => { fetchSavedTeams(); }, [fetchSavedTeams]);
 
-  const launchSavedTeam = useCallback((team: SavedTeam) => {
+  const doLaunchTeam = useCallback((team: SavedTeam, topic: string) => {
     if (!ws) return;
-    ws.send(JSON.stringify({ type: "swarm_saved_team", goal: team.goal, agents: team.agents }));
-    setSwarmStatus("planning"); setActiveGoal(team.goal);
-    setCeoLogs([`Launching saved team: "${team.name}". Goal: "${team.goal}"`]);
+    const platforms = selectedPlatforms;
+    const platformList = platforms.map(p => PLATFORM_META[p]?.label || p).join(", ");
+    const goal = topic
+      ? `${team.goal} — Topic: ${topic} [Platforms: ${platformList}]`
+      : `${team.goal} [Platforms: ${platformList}]`;
+    const platformToolSuffix = platforms.map(p => PLATFORM_META[p]?.tool).filter(Boolean);
+    const agentTasks = team.agents.map(a => {
+      let task = a.task;
+      if (topic && a.id === "researcher") task = `Research the topic: "${topic}". ${task}`;
+      if (a.id === "writer" || a.id === "publisher") {
+        task = `Target platforms: ${platformList}. ${task}`;
+      }
+      let tools = [...a.tools];
+      if (a.id === "publisher") {
+        tools = [...platformToolSuffix, "request_post_approval"];
+      }
+      return { ...a, task, tools };
+    });
+    ws.send(JSON.stringify({ type: "swarm_saved_team", goal, agents: agentTasks }));
+    setSwarmStatus("planning"); setActiveGoal(goal);
+    setCeoLogs([`Launching saved team: "${team.name}". Goal: "${goal}"`]);
     setAgents([]); setFinalSummary(null); setProvisioning(null); setSelectedAgentId(null); setIsCurrentTeamSaved(true);
+    setLaunchTarget(null); setTopicInput(""); setSelectedPlatforms([]);
     toast(`Running saved team: ${team.name}`, "success");
-  }, [ws, toast]);
+  }, [ws, toast, selectedPlatforms]);
+
+  const launchSavedTeam = useCallback((team: SavedTeam) => {
+    setLaunchTarget(team);
+    setTopicInput("");
+    fetch("/api/social/status").then(r => r.json()).then(d => {
+      if (!d.ok) return;
+      const connected: Record<string, boolean> = {};
+      const p = d.platforms || {};
+      for (const key of Object.keys(PLATFORM_META)) {
+        const info = p[key];
+        connected[key] = !!(info?.configured || info?.sessionActive);
+      }
+      setPlatformStatus(connected);
+      setSelectedPlatforms(Object.keys(connected).filter(k => connected[k]));
+    }).catch(() => {});
+  }, []);
 
   const saveCurrentTeam = async () => {
     if (!teamNameInput.trim()) { toast("Enter a team name.", "error"); return; }
@@ -429,8 +483,8 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
                 {savedTeams.map((team, i) => (
                   <div key={i} className="saved-team-item" onClick={() => launchSavedTeam(team)}>
                     <div className="saved-team-item-top">
-                      <span className="saved-team-item-name">{team.name}</span>
-                      <button className="saved-team-item-delete" onClick={e => { e.stopPropagation(); deleteSavedTeam(team.name); }} title="Delete">✕</button>
+                      <span className="saved-team-item-name">{team.name}{team.default ? <span className="saved-team-item-badge" style={{marginLeft:6,fontSize:10,opacity:0.5}}>built-in</span> : null}</span>
+                      {!team.default && <button className="saved-team-item-delete" onClick={e => { e.stopPropagation(); deleteSavedTeam(team.name); }} title="Delete">✕</button>}
                     </div>
                     <div className="saved-team-item-goal">{team.goal}</div>
                     <div className="saved-team-item-agents">
@@ -443,6 +497,9 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
               </div>
             </div>
           )}
+          <div className="subagent-saved-section">
+            <AssetGallery />
+          </div>
         </div>
       ) : null}
 
@@ -696,8 +753,236 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
           {/* Question Modal */}
           <QuestionModal ws={ws} />
+          <PostApproval ws={ws} />
+          <AssetSelector ws={ws} />
         </div>
       ) : null}
+
+      {/* ── LAUNCH SETUP MODAL ── */}
+      {launchTarget && (
+        <div className="subagent-modal-overlay" onClick={() => { setLaunchTarget(null); }}>
+          <div className="launch-team-modal" onClick={e => e.stopPropagation()} style={{
+            background: "var(--surface-card)",
+            border: "1px solid var(--hairline-strong)",
+            borderRadius: 12,
+            padding: 28,
+            maxWidth: 540,
+            width: "90%",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+            animation: "slideUp 0.25s ease-out",
+          }}>
+            {/* Header */}
+            <div className="launch-team-header" style={{
+              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+              marginBottom: 20,
+            }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "var(--ink)", letterSpacing: "-0.3px" }}>{launchTarget.name}</div>
+                <div style={{ fontSize: 13, color: "var(--mute)", marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>{launchTarget.agents.length} agent{launchTarget.agents.length > 1 ? "s" : ""}</span>
+                  <span style={{ opacity: 0.3 }}>/</span>
+                  {launchTarget.agents.map((a, i) => (
+                    <span key={a.id} style={{
+                      background: "var(--surface-soft)", padding: "1px 8px", borderRadius: 4,
+                      fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--accent-teal)",
+                    }}>{a.id}</span>
+                  ))}
+                </div>
+              </div>
+              <button className="btn btn-small btn-ghost" onClick={() => setLaunchTarget(null)}
+                style={{ fontSize: 16, opacity: 0.5, padding: "4px 8px" }}>x</button>
+            </div>
+
+            {/* Topic Input */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                fontSize: 12, color: "var(--mute)", display: "flex", alignItems: "center", gap: 6,
+                marginBottom: 8, fontFamily: "var(--font-mono)", textTransform: "uppercase",
+                letterSpacing: "0.5px",
+              }}>
+                Topic
+                <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, opacity: 0.6 }}>(optional)</span>
+              </label>
+              <div style={{ position: "relative" }}>
+                <textarea
+                  className="text-input"
+                  value={topicInput}
+                  onChange={e => setTopicInput(e.target.value)}
+                  placeholder="e.g. AI in healthcare, Rust vs Go, latest tech trends..."
+                  rows={2}
+                  style={{
+                    width: "100%", background: "var(--surface-soft)", border: "1px solid var(--hairline)",
+                    borderRadius: 8, padding: "10px 12px", color: "var(--ink)", fontSize: 13,
+                    fontFamily: "var(--font-sans)", resize: "vertical", outline: "none",
+                    transition: "border-color 0.15s",
+                  }}
+                  onFocus={e => e.currentTarget.style.borderColor = "var(--accent-teal)"}
+                  onBlur={e => e.currentTarget.style.borderColor = "var(--hairline)"}
+                  autoFocus
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  const btn = document.getElementById("ai-generate-btn") as HTMLButtonElement;
+                  if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
+                  try {
+                    const r = await fetch("/api/generate/topic", { method: "POST" });
+                    const d = await r.json();
+                    if (d.ok) setTopicInput(d.topic);
+                  } catch {}
+                  if (btn) { btn.disabled = false; btn.textContent = "Generate with AI"; }
+                }}
+                id="ai-generate-btn"
+                style={{
+                  marginTop: 8, padding: "6px 14px", background: "var(--surface-soft)",
+                  border: "1px solid var(--hairline)", borderRadius: 6, color: "var(--accent-teal)",
+                  fontSize: 12, fontFamily: "var(--font-mono)", cursor: "pointer",
+                  transition: "all 0.15s",
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent-teal)"; e.currentTarget.style.background = "var(--surface-card)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--hairline)"; e.currentTarget.style.background = "var(--surface-soft)"; }}
+              >
+                <span className="ai-sparkle" style={{ fontSize: 14, lineHeight: 1 }}>+</span>
+                Generate with AI
+              </button>
+            </div>
+
+            {/* Platform Selector */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                fontSize: 12, color: "var(--mute)", display: "flex", alignItems: "center", gap: 6,
+                marginBottom: 8, fontFamily: "var(--font-mono)", textTransform: "uppercase",
+                letterSpacing: "0.5px",
+              }}>
+                Platforms
+                <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, opacity: 0.6 }}>
+                  ({selectedPlatforms.length} selected)
+                </span>
+              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {Object.entries(PLATFORM_META).map(([key, meta]) => {
+                  const connected = platformStatus[key];
+                  const selected = selectedPlatforms.includes(key);
+                  return (
+                    <button
+                      key={key}
+                      disabled={!connected}
+                      onClick={() => {
+                        setSelectedPlatforms(prev =>
+                          prev.includes(key)
+                            ? prev.filter(p => p !== key)
+                            : [...prev, key]
+                        );
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "6px 12px", borderRadius: 6, fontSize: 12,
+                        fontFamily: "var(--font-mono)",
+                        border: selected
+                          ? `1px solid ${meta.color}`
+                          : "1px solid var(--hairline)",
+                        background: selected
+                          ? `${meta.color}15`
+                          : "var(--surface-soft)",
+                        color: selected ? meta.color : "var(--mute)",
+                        cursor: connected ? "pointer" : "not-allowed",
+                        opacity: connected ? 1 : 0.35,
+                        transition: "all 0.15s",
+                        outline: "none",
+                      }}
+                      onMouseEnter={e => { if (connected) e.currentTarget.style.background = selected ? `${meta.color}25` : "var(--surface-card)"; }}
+                      onMouseLeave={e => { if (connected) e.currentTarget.style.background = selected ? `${meta.color}15` : "var(--surface-soft)"; }}
+                    >
+                      <span style={{
+                        width: 8, height: 8, borderRadius: "50%",
+                        background: selected ? meta.color : "var(--hairline-strong)",
+                        flexShrink: 0,
+                      }} />
+                      {meta.label}
+                      {!connected && <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 2 }}>(not connected)</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {Object.values(platformStatus).some(Boolean) && (
+                <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => setSelectedPlatforms(Object.keys(platformStatus).filter(k => platformStatus[k]))}
+                    style={{ fontSize: 10, padding: "2px 8px", background: "transparent", border: "none", color: "var(--accent-teal)", cursor: "pointer", fontFamily: "var(--font-mono)", opacity: 0.7 }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+                    onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}
+                  >Select all connected</button>
+                  <button
+                    onClick={() => setSelectedPlatforms([])}
+                    style={{ fontSize: 10, padding: "2px 8px", background: "transparent", border: "none", color: "var(--mute)", cursor: "pointer", fontFamily: "var(--font-mono)", opacity: 0.5 }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+                    onMouseLeave={e => e.currentTarget.style.opacity = "0.5"}
+                  >Clear</button>
+                </div>
+              )}
+            </div>
+
+            {/* Pipeline */}
+            <div className="launch-team-agents" style={{
+              background: "var(--surface-soft)", borderRadius: 8, padding: 14, marginBottom: 20,
+              border: "1px solid var(--hairline)",
+            }}>
+              <div style={{
+                fontSize: 11, color: "var(--mute)", marginBottom: 10,
+                fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.5px",
+              }}>Pipeline</div>
+              {launchTarget.agents.map((a, i) => (
+                <div key={a.id} className="launch-agent-row" style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
+                  fontSize: 12, color: "var(--mute)",
+                  animation: "slideUp 0.2s ease-out",
+                  animationDelay: `${i * 0.05}s`,
+                  animationFillMode: "both",
+                }}>
+                  <span style={{
+                    width: 22, height: 22, borderRadius: "50%",
+                    background: i === launchTarget.agents.length - 1
+                      ? "rgba(90,176,176,0.15)"
+                      : "var(--surface-card)",
+                    border: i === launchTarget.agents.length - 1
+                      ? "1px solid var(--accent-teal)"
+                      : "1px solid var(--hairline-strong)",
+                    color: i === launchTarget.agents.length - 1 ? "var(--accent-teal)" : "var(--mute)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, fontWeight: 600, flexShrink: 0,
+                    transition: "all 0.2s",
+                  }}>{i + 1}</span>
+                  <span style={{ fontWeight: 500, color: "var(--ink)", width: 110, fontFamily: "var(--font-mono)", fontSize: 11 }}>{a.id}</span>
+                  <span style={{ flex: 1, color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.3 }}>{a.role}</span>
+                  <span style={{
+                    fontSize: 10, color: "var(--mute)", background: "var(--surface-card)",
+                    padding: "2px 6px", borderRadius: 4, whiteSpace: "nowrap",
+                  }}>{a.tools.length} tools</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center" }}>
+              <button className="btn btn-small btn-ghost" onClick={() => setLaunchTarget(null)}
+                style={{ fontSize: 12, padding: "8px 16px", borderRadius: 6 }}>Cancel</button>
+              <button className="btn btn-small btn-primary" onClick={() => doLaunchTeam(launchTarget, topicInput.trim())}
+                style={{
+                  background: "var(--accent-teal)", color: "#000", border: "none",
+                  padding: "8px 22px", borderRadius: 6, fontWeight: 600, fontSize: 13,
+                  cursor: "pointer", transition: "opacity 0.15s",
+                  fontFamily: "var(--font-mono)",
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+                onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+              >
+                Start Campaign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── SAVE MODAL ── */}
       {showSaveModal && (

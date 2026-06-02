@@ -200,13 +200,46 @@ function getOrCreateSession() {
 
 const TEAMS_FILE = path.join(PI_DIR, "swarm-teams.json");
 
+const DEFAULT_SWARM_TEAMS = [
+  {
+    name: "Social Media Manager",
+    default: true,
+    goal: "Research, create, and publish social media content across Twitter, Reddit, Bluesky, Discord, and Telegram",
+    agents: [
+      {
+        id: "researcher",
+        role: "Content researcher — finds trending topics, relevant news, and engaging content ideas using web search",
+        tools: ["web_search", "web_fetch", "write", "get_posted_content"],
+        task: "First, call get_posted_content with the user's topic to see what was already posted. Then research current trends, news, and popular topics — avoid repeating previously covered content. Gather at least 3 fresh content ideas with supporting links and key talking points. Save your research to 'research-findings.md'."
+      },
+      {
+        id: "writer",
+        role: "Social media copywriter — crafts platform-optimized posts with appropriate tone, length, and formatting for each target platform; also generates visual assets to accompany posts",
+        tools: ["write", "edit", "read", "generate_image", "request_asset_selection"],
+        task: "Using the research findings from the previous agent, write 2-3 engaging post variations tailored to each platform: Twitter (280 chars or thread), Reddit (conversational + informative), Bluesky (concise), Discord (casual announcement), Telegram (direct update). For key posts, call generate_image with provider:'free' and count:4 to create relevant visual assets. Then call request_asset_selection with the returned filenames to let the user pick the best image. Save each draft to a separate file named 'draft-{platform}-{n}.md', and note the selected asset filename so the publisher can attach it."
+      },
+      {
+        id: "publisher",
+        role: "Social media publisher — shows platform-formatted post previews to the user for approval, then publishes",
+        tools: ["post_to_twitter", "post_to_reddit", "post_to_bluesky", "post_to_discord", "post_to_telegram", "request_post_approval", "read"],
+        task: "For each post draft from the writer, use request_post_approval to show the user a preview of how it will look on each target platform. The user can Approve, Edit (provides revised text), or Skip. If approved, publish using the appropriate post_to_* tool. If edited, publish the revised version. Report what was posted where."
+      }
+    ],
+    createdAt: new Date("2025-01-01").toISOString()
+  }
+];
+
 function loadSwarmTeams() {
   try {
     if (fs.existsSync(TEAMS_FILE)) {
-      return JSON.parse(fs.readFileSync(TEAMS_FILE, "utf8"));
+      const data = JSON.parse(fs.readFileSync(TEAMS_FILE, "utf8"));
+      if (Array.isArray(data) && data.length > 0) return data;
     }
   } catch {}
-  return [];
+  try {
+    saveSwarmTeams(DEFAULT_SWARM_TEAMS);
+  } catch {}
+  return JSON.parse(JSON.stringify(DEFAULT_SWARM_TEAMS));
 }
 
 function saveSwarmTeams(teams) {
@@ -219,6 +252,60 @@ function saveSwarmTeams(teams) {
 
 const DAG_CONFIG_FILE = path.join(PI_DIR, "dag-config.yaml");
 const SWARM_STATE_FILE = path.join(PI_DIR, "swarm-state.json");
+const ASSETS_DIR = path.join(PI_DIR, "assets");
+try { fs.mkdirSync(ASSETS_DIR, { recursive: true }); } catch {}
+
+const POSTED_CONTENT_FILE = path.join(PI_DIR, "posted-content.json");
+
+function loadPostedContent() {
+  try {
+    if (fs.existsSync(POSTED_CONTENT_FILE)) {
+      return JSON.parse(fs.readFileSync(POSTED_CONTENT_FILE, "utf8"));
+    }
+  } catch {}
+  return [];
+}
+
+function savePostedContent(entries) {
+  try {
+    fs.mkdirSync(path.dirname(POSTED_CONTENT_FILE), { recursive: true });
+    const keep = entries.slice(-500);
+    fs.writeFileSync(POSTED_CONTENT_FILE, JSON.stringify(keep, null, 2));
+  } catch (e) { console.error("[PostedContent] Failed to save:", e.message); }
+}
+
+function addPostedEntry(platform, content, topic, url) {
+  const entries = loadPostedContent();
+  const fingerprint = content.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 200);
+  entries.push({
+    platform,
+    content: fingerprint,
+    fullContent: content.slice(0, 500),
+    topic: topic || "",
+    url: url || "",
+    postedAt: new Date().toISOString(),
+  });
+  savePostedContent(entries);
+}
+
+function findSimilarPosted(platform, content, threshold) {
+  const entries = loadPostedContent();
+  if (entries.length === 0) return [];
+  const words = new Set(content.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  if (words.size === 0) return [];
+  const results = [];
+  for (const entry of entries) {
+    if (platform && entry.platform !== platform) continue;
+    const entryWords = new Set(entry.content.split(/\s+/).filter(w => w.length > 3));
+    const intersection = new Set([...words].filter(w => entryWords.has(w)));
+    const union = new Set([...words, ...entryWords]);
+    const similarity = intersection.size / (union.size || 1);
+    if (similarity >= (threshold || 0.35)) {
+      results.push({ similarity, entry });
+    }
+  }
+  return results.sort((a, b) => b.similarity - a.similarity).slice(0, 5);
+}
 
 function loadSwarmState() {
   try {
@@ -840,12 +927,30 @@ const TOOLS = [
     },
   },
   {
+    name: "request_post_approval",
+    description: "Show a formatted post preview to the user and ask for approval before publishing. Use this to let the user review how the post will look on the target platform.",
+    parameters: {
+      type: "object",
+      properties: {
+        platform: { type: "string", description: "Target platform: twitter, reddit, bluesky, discord, or telegram" },
+        content: { type: "string", description: "The post body content to show for approval" },
+        title: { type: "string", description: "Optional post title (used for Reddit)" },
+        platformSpecific: { type: "string", description: "Additional platform context (subreddit for Reddit, etc.)" },
+        assetUrl: { type: "string", description: "Optional filename of a previously generated asset to display alongside the post (e.g. 'asset_123_0.png')" },
+      },
+      required: ["platform", "content"],
+    },
+  },
+  {
     name: "post_to_twitter",
-    description: "Post a tweet to Twitter/X. Uses Playwright browser automation — requires Twitter account connected via Social Accounts panel first.",
+    description: "Post a tweet to Twitter/X with optional image attachment. Uses Playwright browser automation.",
     parameters: {
       type: "object",
       properties: {
         text: { type: "string", description: "The tweet content to post (max 280 characters)" },
+        mediaPath: { type: "string", description: "Absolute path to an image file to attach to the tweet" },
+        topic: { type: "string", description: "Topic label for dedup tracking (e.g. 'AI news', 'product launch')" },
+        force: { type: "boolean", description: "Skip duplicate check and post anyway" },
       },
       required: ["text"],
     },
@@ -906,24 +1011,30 @@ const TOOLS = [
   },
   {
     name: "post_to_reddit",
-    description: "Post a message to a Reddit subreddit. Uses Playwright browser automation — requires Reddit account connected via Social Accounts panel first.",
+    description: "Post a message to a Reddit subreddit with optional image. Uses Playwright browser automation.",
     parameters: {
       type: "object",
       properties: {
         subreddit: { type: "string", description: "Subreddit name (e.g., 'artificial')" },
         title: { type: "string", description: "Post title" },
         text: { type: "string", description: "Post body text" },
+        mediaPath: { type: "string", description: "Absolute path to an image file to attach" },
+        topic: { type: "string", description: "Topic label for dedup tracking" },
+        force: { type: "boolean", description: "Skip duplicate check" },
       },
       required: ["subreddit", "title", "text"],
     },
   },
   {
     name: "post_to_bluesky",
-    description: "Post a message to Bluesky. Requires BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD in vault.",
+    description: "Post a message to Bluesky with optional image attachment. Uses Bluesky API directly.",
     parameters: {
       type: "object",
       properties: {
         text: { type: "string", description: "Post content (max 300 chars)" },
+        mediaPath: { type: "string", description: "Absolute path to an image file to upload and attach" },
+        topic: { type: "string", description: "Topic label for dedup tracking" },
+        force: { type: "boolean", description: "Skip duplicate check" },
       },
       required: ["text"],
     },
@@ -943,22 +1054,28 @@ const TOOLS = [
   },
   {
     name: "post_to_discord",
-    description: "Post a message to a Discord channel via webhook. Requires DISCORD_WEBHOOK_URL in vault.",
+    description: "Post a message to a Discord channel via webhook, with optional image attachment. Requires DISCORD_WEBHOOK_URL in vault.",
     parameters: {
       type: "object",
       properties: {
         message: { type: "string", description: "Message content" },
+        mediaPath: { type: "string", description: "Absolute path to an image file to attach" },
+        topic: { type: "string", description: "Topic label for dedup tracking" },
+        force: { type: "boolean", description: "Skip duplicate check" },
       },
       required: ["message"],
     },
   },
   {
     name: "post_to_telegram",
-    description: "Post a message to Telegram. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in vault.",
+    description: "Post a message or photo to Telegram. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in vault.",
     parameters: {
       type: "object",
       properties: {
-        message: { type: "string", description: "Message text" },
+        message: { type: "string", description: "Message text or caption" },
+        mediaPath: { type: "string", description: "Absolute path to an image file to send as photo" },
+        topic: { type: "string", description: "Topic label for dedup tracking" },
+        force: { type: "boolean", description: "Skip duplicate check" },
       },
       required: ["message"],
     },
@@ -1042,16 +1159,43 @@ const TOOLS = [
   },
   {
     name: "generate_image",
-    description: "Generate an image from a text prompt. Supports OpenAI (DALL-E 3), Gemini, and Grok. Requires API key in vault: OPENAI_API_KEY, GEMINI_API_KEY, or XAI_API_KEY.",
+    description: "Generate an image from a text prompt. Defaults to free Pollinations.ai (no API key needed). Also supports OpenAI (DALL-E 3), Gemini, Grok, and DesignAPI with API keys.",
     parameters: {
       type: "object",
       properties: {
         prompt: { type: "string", description: "Text description of the image to generate" },
-        provider: { type: "string", enum: ["openai", "gemini", "grok"], description: "Image generation provider (default: auto-pick from available keys)" },
-        size: { type: "string", enum: ["1024x1024", "1792x1024", "1024x1792"], description: "Image size (DALL-E 3 only)" },
-        return_format: { type: "string", enum: ["base64", "url"], description: "Return format (default: base64 for inline display)" },
+        provider: { type: "string", enum: ["free", "designapi", "openai", "gemini", "grok"], description: "Image generation provider. Default: 'free' (Pollinations.ai, no key needed). Set to 'openai', 'gemini', 'grok', or 'designapi' for key-based providers." },
+        size: { type: "string", description: "Image size (e.g. 1024x1024, depends on provider/model)" },
+        count: { type: "number", description: "Number of images to generate (default 4, max 4). More images = more choices for the user." },
+        model: { type: "string", description: "Model for Pollinations (flux, gptimage, seedream, etc.) or DesignAPI (flux-pro, dall-e-3, etc.)" },
+        save: { type: "boolean", description: "Save image to local assets folder and return file path (default: true)" },
       },
       required: ["prompt"],
+    },
+  },
+  {
+    name: "request_asset_selection",
+    description: "Show generated images to the user and ask which one to use for the post. Call this after generate_image returns multiple images. The user will pick one, and the rest will be deleted.",
+    parameters: {
+      type: "object",
+      properties: {
+        filenames: { type: "array", items: { type: "string" }, description: "Array of generated image filenames for the user to choose from" },
+        prompt: { type: "string", description: "Original image generation prompt for context" },
+      },
+      required: ["filenames"],
+    },
+  },
+  {
+    name: "get_posted_content",
+    description: "Search previously posted social media content to avoid reposting the same topic. Use this before writing new posts to check what has already been covered.",
+    parameters: {
+      type: "object",
+      properties: {
+        topic: { type: "string", description: "Topic or keyword to search for in posted history" },
+        platform: { type: "string", description: "Filter by platform (twitter, reddit, bluesky, discord, telegram)" },
+        days: { type: "number", description: "How many days back to look (default: 30)" },
+      },
+      required: [],
     },
   },
   {
@@ -1870,6 +2014,45 @@ async function executeTool(name, args, cwd) {
         bcast({ type: "user_question_resolved", id: questionId });
       }
     }
+    case "request_post_approval": {
+      const questionId = crypto.randomUUID();
+      const q = { question: "", options: ["Approve", "Edit", "Skip"], resolve: null, reject: null };
+      pendingQuestions[questionId] = q;
+      bcast({
+        type: "post_preview",
+        id: questionId,
+        platform: args.platform || "",
+        content: args.content || "",
+        title: args.title || "",
+        platformSpecific: args.platformSpecific || "",
+        assetUrl: args.assetUrl || "",
+      });
+      try {
+        const answer = await new Promise((resolve, reject) => {
+          q.resolve = resolve;
+          q.reject = reject;
+          setTimeout(() => reject(new Error("Timed out waiting for approval (10 min)")), 600000);
+        });
+        if (answer === "Edit") {
+          const editId = crypto.randomUUID();
+          const eq = { question: "", options: null, resolve: null, reject: null };
+          pendingQuestions[editId] = eq;
+          bcast({ type: "post_edit_request", id: editId, content: args.content || "" });
+          const editAnswer = await new Promise((resolve, reject) => {
+            eq.resolve = resolve;
+            eq.reject = reject;
+            setTimeout(() => reject(new Error("Edit timed out (10 min)")), 600000);
+          });
+          delete pendingQuestions[editId];
+          bcast({ type: "user_question_resolved", id: editId });
+          return `User chose Edit. User provided edited content: ${editAnswer}`;
+        }
+        return `User chose: ${answer}`;
+      } finally {
+        delete pendingQuestions[questionId];
+        bcast({ type: "user_question_resolved", id: questionId });
+      }
+    }
     case "delegate_to_subagent": {
       const agents = loadAgents();
       const agent = agents[args.agentId];
@@ -1915,7 +2098,16 @@ async function executeTool(name, args, cwd) {
       } catch (e) { return `Error writing note: ${e.message}`; }
     }
     case "post_to_twitter": {
-      return await postToTwitter(args.text);
+      if (!args.force) {
+        const similar = findSimilarPosted("twitter", args.text);
+        if (similar.length > 0 && similar[0].similarity > 0.4) {
+          const s = similar[0];
+          return `⚠️ Similar content already posted on ${s.entry.postedAt.slice(0, 10)} (${Math.round(s.similarity * 100)}% match): "${s.entry.fullContent?.slice(0, 100)}". Write something fresh and try again, or set force: true to override.`;
+        }
+      }
+      const result = await postToTwitter(args.text, args.mediaPath);
+      addPostedEntry("twitter", args.text, args.topic || "", result);
+      return result;
     }
     case "web_search": {
       return await webSearch(args.query, args.count || 5);
@@ -1930,19 +2122,55 @@ async function executeTool(name, args, cwd) {
       return await githubAction(args);
     }
     case "post_to_reddit": {
-      return await postToReddit(args.subreddit, args.title, args.text);
+      if (!args.force) {
+        const redditSimilar = findSimilarPosted("reddit", (args.title || "") + " " + (args.text || ""));
+        if (redditSimilar.length > 0 && redditSimilar[0].similarity > 0.4) {
+          const s = redditSimilar[0];
+          return `⚠️ Similar Reddit post already on ${s.entry.postedAt.slice(0, 10)} (${Math.round(s.similarity * 100)}% match). Write something fresh or use force: true.`;
+        }
+      }
+      const redditResult = await postToReddit(args.subreddit, args.title, args.text, args.mediaPath);
+      addPostedEntry("reddit", (args.title || "") + " " + (args.text || ""), args.topic || "", redditResult);
+      return redditResult;
     }
     case "post_to_bluesky": {
-      return await postToBluesky(args.text);
+      if (!args.force) {
+        const bskySimilar = findSimilarPosted("bluesky", args.text);
+        if (bskySimilar.length > 0 && bskySimilar[0].similarity > 0.4) {
+          const s = bskySimilar[0];
+          return `⚠️ Similar Bluesky post already on ${s.entry.postedAt.slice(0, 10)} (${Math.round(s.similarity * 100)}% match). Write something fresh or use force: true.`;
+        }
+      }
+      const bskyResult = await postToBluesky(args.text, args.mediaPath);
+      addPostedEntry("bluesky", args.text, args.topic || "", bskyResult);
+      return bskyResult;
     }
     case "send_email": {
       return await sendEmail(args.to, args.subject, args.body);
     }
     case "post_to_discord": {
-      return await postToDiscord(args.message);
+      if (!args.force) {
+        const discordSimilar = findSimilarPosted("discord", args.message);
+        if (discordSimilar.length > 0 && discordSimilar[0].similarity > 0.4) {
+          const s = discordSimilar[0];
+          return `⚠️ Similar Discord message already on ${s.entry.postedAt.slice(0, 10)} (${Math.round(s.similarity * 100)}% match). Write something fresh or use force: true.`;
+        }
+      }
+      const discordResult = await postToDiscord(args.message, args.mediaPath);
+      addPostedEntry("discord", args.message, args.topic || "", discordResult);
+      return discordResult;
     }
     case "post_to_telegram": {
-      return await postToTelegram(args.message);
+      if (!args.force) {
+        const tgSimilar = findSimilarPosted("telegram", args.message);
+        if (tgSimilar.length > 0 && tgSimilar[0].similarity > 0.4) {
+          const s = tgSimilar[0];
+          return `⚠️ Similar Telegram message already on ${s.entry.postedAt.slice(0, 10)} (${Math.round(s.similarity * 100)}% match). Write something fresh or use force: true.`;
+        }
+      }
+      const tgResult = await postToTelegram(args.message, args.mediaPath);
+      addPostedEntry("telegram", args.message, args.topic || "", tgResult);
+      return tgResult;
     }
     case "memory_edit": {
       const result = memoryEdit(args.action, args.id, args.content, args.tags);
@@ -2057,17 +2285,106 @@ Restored: ${result.restored.join(", ")}`;
       }
     }
     case "generate_image": {
-      const provider = args.provider || (vaultGet("OPENAI_API_KEY") ? "openai" : vaultGet("GEMINI_API_KEY") ? "gemini" : vaultGet("XAI_API_KEY") ? "grok" : null);
-      if (!provider) return "No image generation provider configured. Set OPENAI_API_KEY, GEMINI_API_KEY, or XAI_API_KEY in vault.";
-      let result;
-      switch (provider) {
-        case "openai": result = await generateImageOpenAI(args.prompt, args.size, args.return_format); break;
-        case "gemini": result = await generateImageGemini(args.prompt); break;
-        case "grok": result = await generateImageGrok(args.prompt, args.return_format); break;
+      const saveToDisk = args.save !== false;
+      const count = Math.min(Math.max(1, args.count || 4), 4);
+      const provider = args.provider || "free";
+      const results = [];
+      for (let i = 0; i < count; i++) {
+        let result;
+        switch (provider) {
+          case "free": result = await generateImagePollinations(args.prompt, args.model, null, null, null); break;
+          case "designapi": result = await generateImageDesignAPI(args.prompt, args.size, args.model); break;
+          case "openai": result = await generateImageOpenAI(args.prompt, args.size, "url"); break;
+          case "gemini": result = await generateImageGemini(args.prompt); break;
+          case "grok": result = await generateImageGrok(args.prompt, "url"); break;
+        }
+        if (result.error) { results.push({ error: result.error }); continue; }
+        if (saveToDisk) {
+          const assetsDir = path.join(PI_DIR, "assets");
+          fs.mkdirSync(assetsDir, { recursive: true });
+          const ext = result.mimeType === "image/png" ? "png" : result.mimeType === "image/jpeg" || result.mimeType === "image/jpg" ? "jpg" : "png";
+          const filename = `asset_${Date.now()}_${i}.${ext}`;
+          const filePath = path.join(assetsDir, filename);
+          if (result.format === "url" && result.image) {
+            const imgResp = await fetch(result.image);
+            const buf = Buffer.from(await imgResp.arrayBuffer());
+            fs.writeFileSync(filePath, buf);
+            results.push({ path: filePath, filename, provider, model: args.model || "auto" });
+          } else if (result.image) {
+            fs.writeFileSync(filePath, Buffer.from(result.image, "base64"));
+            results.push({ path: filePath, filename, provider, model: args.model || "auto" });
+          }
+        } else {
+          if (result.format === "url") results.push({ url: result.image, provider });
+          else results.push({ image: `data:${result.mimeType || "image/png"};base64,${result.image}`, provider });
+        }
       }
-      if (result.error) return `Error: ${result.error}`;
-      if (result.format === "url") return `Generated image (${result.provider}): ${result.image}`;
-      return `Generated image (${result.provider}):\n![generated image](data:${result.mimeType || "image/png"};base64,${result.image})`;
+      const saved = results.filter(r => r.path);
+      if (saved.length > 0) {
+        const filenames = saved.map(s => s.filename);
+        return `Generated and saved ${saved.length} image(s):\n${saved.map(s => `- ${s.filename}`).join("\n")}\n\nCall request_asset_selection with filenames: [${filenames.map(f => `"${f}"`).join(", ")}] to let the user pick which one to use.`;
+      }
+      const urls = results.filter(r => r.url);
+      if (urls.length > 0) return urls.map(u => `Generated image (${u.provider}): ${u.url}`).join("\n");
+      const errs = results.filter(r => r.error);
+      if (errs.length > 0) return `Errors: ${errs.map(e => e.error).join("; ")}`;
+      return "No images generated.";
+    }
+    case "request_asset_selection": {
+      const filenames = args.filenames || [];
+      if (!Array.isArray(filenames) || filenames.length === 0) return "Error: No filenames provided.";
+      const questionId = crypto.randomUUID();
+      const q = { question: "", options: null, resolve: null, reject: null };
+      pendingQuestions[questionId] = q;
+      const assetsDir = path.join(PI_DIR, "assets");
+      const validFiles = filenames.filter(f => {
+        const safe = path.basename(f);
+        const fp = path.join(assetsDir, safe);
+        return fs.existsSync(fp) && !safe.includes("..");
+      });
+      if (validFiles.length === 0) return "Error: None of the specified image files exist. They may have been deleted.";
+      bcast({
+        type: "asset_selection_request",
+        id: questionId,
+        filenames: validFiles,
+        prompt: args.prompt || "",
+      });
+      try {
+        const answer = await new Promise((resolve, reject) => {
+          q.resolve = resolve;
+          q.reject = reject;
+          setTimeout(() => reject(new Error("Timed out waiting for asset selection (10 min)")), 600000);
+        });
+        if (!validFiles.includes(answer)) return `Error: Invalid selection "${answer}".`;
+        for (const f of validFiles) {
+          if (f !== answer) {
+            try { fs.unlinkSync(path.join(assetsDir, f)); } catch {}
+          }
+        }
+        return `Selected: ${answer}`;
+      } finally {
+        delete pendingQuestions[questionId];
+        bcast({ type: "user_question_resolved", id: questionId });
+      }
+    }
+    case "get_posted_content": {
+      const entries = loadPostedContent();
+      const days = Math.min(Math.max(1, args.days || 30), 365);
+      const cutoff = Date.now() - days * 86400000;
+      const topic = (args.topic || "").toLowerCase();
+      const platform = (args.platform || "").toLowerCase();
+      let filtered = entries.filter(e => new Date(e.postedAt).getTime() > cutoff);
+      if (platform) filtered = filtered.filter(e => e.platform === platform);
+      if (topic) {
+        const topicWords = topic.split(/\s+/).filter(w => w.length > 2);
+        filtered = filtered.filter(e => topicWords.some(w => e.content.includes(w)));
+      }
+      filtered.sort((a, b) => new Date(b.postedAt) - new Date(a.postedAt));
+      const top = filtered.slice(0, 15);
+      if (top.length === 0) return "No previously posted content found matching your criteria.";
+      return `Previously posted content (last ${days} days, showing ${top.length}):\n\n${top.map((e, i) =>
+        `  ${i + 1}. [${e.platform}] ${e.postedAt.slice(0, 10)} — ${e.fullContent || e.content.slice(0, 120)}${e.topic ? ` (topic: ${e.topic})` : ""}`
+      ).join("\n")}\n\nUse this information to avoid repeating the same topics. If you see similar content, write something fresh and different.`;
     }
     case "text_to_speech": {
       try {
@@ -2361,13 +2678,18 @@ Restored: ${result.restored.join(", ")}`;
   }
 }
 
-async function postToTwitter(text) {
+async function postToTwitter(text, mediaPath) {
   const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
   try {
+    const body = { text };
+    if (mediaPath) {
+      const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
+      if (fs.existsSync(resolvedPath)) body.mediaPath = resolvedPath;
+    }
     const res = await fetch(`${bridgeUrl}/twitter/post`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.ok) return `Tweet posted successfully! ${data.message || ""}`;
@@ -2623,13 +2945,18 @@ async function githubAction(args) {
 
 // ── Reddit Posting ──────────────────────────────────────────────────────────
 
-async function postToReddit(subreddit, title, text) {
+async function postToReddit(subreddit, title, text, mediaPath) {
   const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
   try {
+    const body = { subreddit, title, body: text };
+    if (mediaPath) {
+      const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
+      if (fs.existsSync(resolvedPath)) body.mediaPath = resolvedPath;
+    }
     const res = await fetch(`${bridgeUrl}/reddit/post`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subreddit, title, body: text }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.ok) return `Posted to r/${subreddit}! ${data.message || ""}`;
@@ -2641,7 +2968,7 @@ async function postToReddit(subreddit, title, text) {
 
 // ── Bluesky Posting ─────────────────────────────────────────────────────────
 
-async function postToBluesky(text) {
+async function postToBluesky(text, mediaPath) {
   const identifier = vaultGet("BLUESKY_IDENTIFIER");
   const password = vaultGet("BLUESKY_APP_PASSWORD");
   if (!identifier || !password) {
@@ -2658,22 +2985,47 @@ async function postToBluesky(text) {
     const session = await sessionRes.json();
     if (!session.accessJwt) return `Bluesky auth failed: ${JSON.stringify(session)}`;
 
+    let embed;
+    if (mediaPath) {
+      const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
+      if (fs.existsSync(resolvedPath)) {
+        const imageBuffer = fs.readFileSync(resolvedPath);
+        const ext = path.extname(resolvedPath).toLowerCase();
+        const mime = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : "image/jpeg";
+        const uploadRes = await fetch("https://bsky.social/xrpc/com.atproto.repo.uploadBlob", {
+          method: "POST",
+          headers: {
+            "Content-Type": mime,
+            Authorization: `Bearer ${session.accessJwt}`,
+          },
+          body: imageBuffer,
+          signal: AbortSignal.timeout(20000),
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadData.blob) {
+          embed = {
+            $type: "app.bsky.embed.images",
+            images: [{ alt: "", image: uploadData.blob }],
+          };
+        }
+      }
+    }
+
     const now = new Date().toISOString();
+    const record = {
+      $type: "app.bsky.feed.post",
+      text: text.slice(0, 300),
+      createdAt: now,
+    };
+    if (embed) record.embed = embed;
+
     const postRes = await fetch("https://bsky.social/xrpc/com.atproto.repo.createRecord", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.accessJwt}`,
       },
-      body: JSON.stringify({
-        repo: session.did,
-        collection: "app.bsky.feed.post",
-        record: {
-          $type: "app.bsky.feed.post",
-          text: text.slice(0, 300),
-          createdAt: now,
-        },
-      }),
+      body: JSON.stringify({ repo: session.did, collection: "app.bsky.feed.post", record }),
       signal: AbortSignal.timeout(15000),
     });
     const postData = await postRes.json();
@@ -2765,10 +3117,23 @@ async function sendEmail(to, subject, body) {
 
 // ── Discord Posting ─────────────────────────────────────────────────────────
 
-async function postToDiscord(message) {
+async function postToDiscord(message, mediaPath) {
   const url = vaultGet("DISCORD_WEBHOOK_URL");
   if (!url) return "Discord webhook not configured. Store DISCORD_WEBHOOK_URL in vault.";
   try {
+    const resolvedPath = mediaPath && ((resolveAssetPath(path.basename(mediaPath)) || mediaPath));
+    if (resolvedPath && fs.existsSync(resolvedPath)) {
+      const { Blob } = globalThis;
+      const imageData = fs.readFileSync(resolvedPath);
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const mime = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : "image/jpeg";
+      const formData = new FormData();
+      formData.append("content", message.slice(0, 2000));
+      formData.append("file", new Blob([imageData], { type: mime }), path.basename(resolvedPath));
+      const res = await fetch(url, { method: "POST", body: formData, signal: AbortSignal.timeout(20000) });
+      if (res.ok) return "Posted to Discord with image!";
+      return `Discord error: ${res.status} ${await res.text()}`;
+    }
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2784,11 +3149,28 @@ async function postToDiscord(message) {
 
 // ── Telegram Posting ────────────────────────────────────────────────────────
 
-async function postToTelegram(message) {
+async function postToTelegram(message, mediaPath) {
   const token = vaultGet("TELEGRAM_BOT_TOKEN");
   const chatId = vaultGet("TELEGRAM_CHAT_ID");
   if (!token || !chatId) return "Telegram not configured. Store TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in vault.";
   try {
+    const resolvedPath = mediaPath && ((resolveAssetPath(path.basename(mediaPath)) || mediaPath));
+    if (resolvedPath && fs.existsSync(resolvedPath)) {
+      const { Blob } = globalThis;
+      const imageData = fs.readFileSync(resolvedPath);
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const mime = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : "image/jpeg";
+      const formData = new FormData();
+      formData.append("chat_id", chatId);
+      formData.append("photo", new Blob([imageData], { type: mime }), path.basename(resolvedPath));
+      formData.append("caption", message.slice(0, 1024));
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+        method: "POST", body: formData, signal: AbortSignal.timeout(20000),
+      });
+      const data = await res.json();
+      if (data.ok) return "Posted photo to Telegram!";
+      return `Telegram photo error: ${JSON.stringify(data)}`;
+    }
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3086,6 +3468,34 @@ async function generateImageGrok(prompt, returnFormat) {
   if (data.error) return { error: data.error.message };
   const img = data.data[0];
   return { image: returnFormat === "url" ? img.url : img.b64_json, format: returnFormat || "base64", provider: "grok" };
+}
+
+async function generateImageDesignAPI(prompt, size, model) {
+  const apiKey = vaultGet("DESIGN_API_KEY");
+  if (!apiKey) return { error: "DESIGN_API_KEY not found in vault. Get one at https://designapi.ink" };
+  const selectedModel = model || "flux-pro";
+  const resp = await fetch("https://api.designapi.ink/v1/images/generations", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: selectedModel, prompt, n: 1, size: size || "1024x1024", response_format: "url" }),
+  });
+  const data = await resp.json();
+  if (data.error) return { error: typeof data.error === "string" ? data.error : data.error.message || JSON.stringify(data.error) };
+  const img = data.data[0];
+  return { image: img.url, format: "url", provider: `designapi/${selectedModel}`, mimeType: "image/png" };
+}
+
+async function generateImagePollinations(prompt, model, seed, width, height) {
+  const selectedModel = model || "flux";
+  const usedSeed = seed ?? Math.floor(Math.random() * 99999);
+  const w = width || 1024;
+  const h = height || 1024;
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=${encodeURIComponent(selectedModel)}&seed=${usedSeed}&width=${w}&height=${h}&nologo=true`;
+  const resp = await fetch(url);
+  if (!resp.ok) return { error: `Pollinations.ai error: ${resp.status} ${resp.statusText}` };
+  const buf = Buffer.from(await resp.arrayBuffer());
+  const mime = resp.headers.get("content-type") || "image/png";
+  return { image: buf.toString("base64"), format: "base64", mimeType: mime, provider: `pollinations/${selectedModel}`, seed: usedSeed };
 }
 
 // ── Plugin System ─────────────────────────────────────────────────────────────
@@ -4273,6 +4683,10 @@ async function executeSwarmCampaign(socket, goal, agents) {
       bcast({ type: "swarm_resumed", agentId: agent.id });
     }
 
+    const prevResults = Object.entries(agentResults)
+      .map(([id, res]) => `--- OUTPUT FROM PREVIOUS AGENT [${id}] ---\n${res || "(no output)"}\n--- END OF OUTPUT ---`)
+      .join("\n\n");
+
     bcast({ type: "ceo_thought", message: `Activating sub-agent '${agent.id}' for task: ${agent.task}` });
     bcast({ type: "agent_status", agentId: agent.id, status: "running" });
 
@@ -4280,10 +4694,10 @@ async function executeSwarmCampaign(socket, goal, agents) {
 Your role: ${agent.role}
 Your task: ${agent.task}
 
-Perform your task using your tools, think step-by-step, and report back with a clear final summary of your result.`;
+Perform your task using your tools, think step-by-step, and report back with a clear final summary of your result.${prevResults ? `\n\n## Previous Agent Outputs\n${prevResults}` : ""}`;
 
     const messages = [
-      { role: "user", content: [{ type: "text", text: agent.task }], timestamp: Date.now() }
+      { role: "user", content: [{ type: "text", text: `${agent.task}${prevResults ? `\n\nUse the previous agent output above as input for your task.` : ""}` }], timestamp: Date.now() }
     ];
 
     // Build agent's toolbelt
@@ -4487,9 +4901,9 @@ async function handleSwarmGoal(socket, goal) {
   try {
     const planPrompt = `You are the CEO of a multi-agent swarm development team.
 Your task is to break down the user's high-level goal: "${goal}" into a team of 2 to 3 specialized sub-agents.
-Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch, post_to_twitter.
+Allowed tools for sub-agents are: list_dir, view_file, write, edit, bash, glob, grep, memory_search, web_search, web_fetch, post_to_twitter, post_to_reddit, post_to_bluesky, post_to_discord, post_to_telegram, send_email, ask_user.
 
-If the goal involves posting to social media (Twitter/X), assign the post_to_twitter tool to the relevant sub-agent so they can publish content.
+If the goal involves posting to social media, assign the relevant posting tools (post_to_twitter, post_to_reddit, post_to_bluesky, post_to_discord, post_to_telegram) to the publishing agent. Use ask_user when the agent needs user approval before posting.
 
 Return your plan strictly as a JSON object with this shape:
 {
@@ -4924,9 +5338,32 @@ async function main() {
       throw new Error("Name is required.");
     }
     const teams = loadSwarmTeams();
+    const target = teams.find(t => t.name.toLowerCase() === name.toLowerCase());
+    if (target && target.default) {
+      throw new Error(`"${target.name}" is a default team and cannot be deleted.`);
+    }
     const updated = teams.filter(t => t.name.toLowerCase() !== name.toLowerCase());
     saveSwarmTeams(updated);
     return { ok: true };
+  });
+
+  // Generate a social media topic idea using the LLM
+  app.post("/api/generate/topic", async () => {
+    try {
+      const model = resolveModel();
+      const auth = getModelAuth(model);
+      const stream = streamSimple(model, {
+        systemPrompt: "You generate creative social media content topic ideas. Output a single concise topic (under 10 words). No explanation.",
+        messages: [{ role: "user", content: [{ type: "text", text: "Suggest a trending, engaging social media post topic for a tech/programming audience. Be specific and topical." }] }],
+      }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+      let text = "";
+      for await (const event of stream) {
+        if (event.type === "text_delta") text += event.delta;
+      }
+      return { ok: true, topic: text.replace(/^["'\s]+|["'\s]+$/g, "").trim() };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   });
 
   // Memory
@@ -4937,6 +5374,46 @@ async function main() {
     return { id };
   });
   app.get("/api/memory/stats", async () => memoryStats());
+
+  // ── Assets API ───────────────────────────────────────────────────────────
+  const ALLOWED_EXTENSIONS = /^\.(png|jpg|jpeg|gif|webp|bmp)$/i;
+  const MIME_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+
+  function resolveAssetPath(filename) {
+    if (!filename || typeof filename !== "string") return null;
+    const resolved = path.resolve(ASSETS_DIR, path.basename(filename));
+    if (!resolved.startsWith(ASSETS_DIR)) return null;
+    if (!ALLOWED_EXTENSIONS.test(path.extname(resolved))) return null;
+    return resolved;
+  }
+
+  app.get("/api/assets", async () => {
+    try {
+      if (!fs.existsSync(ASSETS_DIR)) return { assets: [] };
+      const files = fs.readdirSync(ASSETS_DIR).filter(f => ALLOWED_EXTENSIONS.test(path.extname(f)));
+      const assets = files.map(f => {
+        const stat = fs.statSync(path.join(ASSETS_DIR, f));
+        return { filename: f, size: stat.size, created: stat.birthtime || stat.mtime };
+      }).sort((a, b) => new Date(b.created) - new Date(a.created));
+      return { assets };
+    } catch { return { assets: [] }; }
+  });
+  app.delete("/api/assets/:filename", async (req) => {
+    const filePath = resolveAssetPath(req.params.filename);
+    if (!filePath) throw new Error("Security Check Failed: Invalid filename");
+    if (!fs.existsSync(filePath)) throw new Error("File not found");
+    fs.unlinkSync(filePath);
+    return { ok: true };
+  });
+  app.get("/api/assets/files/:filename", async (req, reply) => {
+    const filePath = resolveAssetPath(req.params.filename);
+    if (!filePath) { reply.status(400).send("Security Check Failed: Invalid filename"); return; }
+    if (!fs.existsSync(filePath)) { reply.status(404).send("Not found"); return; }
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = MIME_TYPES[ext] || "application/octet-stream";
+    reply.type(mime);
+    reply.send(fs.createReadStream(filePath));
+  });
 
   // ── Knowledge Graph API ──────────────────────────────────────────────────
   const STATE_DB_PATH = path.join(PI_DIR, "session-state.db");

@@ -1,4 +1,4 @@
-import { useState, useEffect, Suspense, lazy, memo } from "react";
+import { useState, useEffect, Suspense, lazy, memo, useCallback } from "react";
 import Sidebar from "./components/Sidebar";
 import ChatView from "./components/ChatView";
 import { ToasterProvider } from "./components/Toast";
@@ -23,6 +23,19 @@ const SocialPanel = lazy(() => import("./components/SocialPanel"));
 
 export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social";
 
+const ALL_VIEWS: View[] = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social"];
+
+function hashToView(): View {
+  const raw = window.location.hash.replace(/^#\/?/, "").toLowerCase();
+  if (ALL_VIEWS.includes(raw as View)) return raw as View;
+  return "chat";
+}
+
+function viewToHash(v: View) {
+  const hash = `#/${v}`;
+  if (window.location.hash !== hash) window.location.hash = hash;
+}
+
 const PANELFallback = <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
 
 export default function App() {
@@ -36,28 +49,40 @@ export default function App() {
 }
 
 function AppContent() {
-  const [activeView, setActiveView] = useState<View>("chat");
+  const [activeView, setActiveView] = useState<View>(hashToView);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { ws, connected } = useChat();
+
+  const navigate = useCallback((view: View) => {
+    setActiveView(view);
+    viewToHash(view);
+    setSidebarOpen(false);
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => setActiveView(hashToView());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   useEffect(() => {
     if (!ws) return;
     const handler = (e: MessageEvent) => {
       try {
         const d = JSON.parse(e.data);
-        if (d.type === "swarm_recovery") setActiveView("agents");
+        if (d.type === "swarm_recovery") navigate("agents");
       } catch {}
     };
     ws.addEventListener("message", handler);
     return () => ws.removeEventListener("message", handler);
-  }, [ws]);
+  }, [ws, navigate]);
 
   return (
     <ErrorBoundary>
       <div className="layout">
         <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
         <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-          <Sidebar activeView={activeView} onNavigate={(view: View) => { setActiveView(view); setSidebarOpen(false); }} wsConnected={connected} />
+          <Sidebar activeView={activeView} onNavigate={navigate} wsConnected={connected} />
         </div>
         <div className="main-area">
           <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
@@ -74,7 +99,7 @@ function AppContent() {
               {activeView === "work-products" && <WorkProductsPanel />}
               {activeView === "agents" && <SubAgentPanel ws={ws} />}
               {activeView === "agent-discovery" && <AgentsPanel />}
-              {activeView === "teams" && <TeamPanel onNavigate={(v) => setActiveView(v as View)} />}
+              {activeView === "teams" && <TeamPanel onNavigate={navigate} />}
               {activeView === "mcp" && <MCPPanel />}
               {activeView === "settings" && <SettingsPanel />}
               {activeView === "social" && <SocialPanel />}
