@@ -1,4 +1,8 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+
+function sanitizeGitRef(input: string): string {
+  return input.replace(/[^a-zA-Z0-9_\-.\/]/g, "");
+}
 
 export interface RepoState {
   owner: string;
@@ -25,16 +29,20 @@ export interface MultiRepoChange {
 }
 
 export function checkRepoState(owner: string, repo: string, branch: string, ghToken?: string): RepoState {
+  const safeOwner = sanitizeGitRef(owner);
+  const safeRepo = sanitizeGitRef(repo);
+  const safeBranch = sanitizeGitRef(branch);
   const token = ghToken || process.env.GITHUB_TOKEN || "";
-  const authHeader = token ? `-H "Authorization: token ${token}"` : "";
   try {
-    const sha = execSync(`git ls-remote https://github.com/${owner}/${repo}.git ${branch}`, {
+    const sha = execFileSync("git", ["ls-remote", `https://github.com/${safeOwner}/${safeRepo}.git`, safeBranch], {
       encoding: "utf8", timeout: 15000,
     }).split(/\s+/)[0] || "";
 
-    const prsRaw = execSync(`curl -s ${authHeader} "https://api.github.com/repos/${owner}/${repo}/pulls?state=open&head=${branch}"`, {
-      encoding: "utf8", timeout: 15000,
-    });
+    const curlArgs = ["-s"];
+    if (token) curlArgs.push("-H", `Authorization: token ${token}`);
+    curlArgs.push(`https://api.github.com/repos/${safeOwner}/${safeRepo}/pulls?state=open&head=${safeBranch}`);
+
+    const prsRaw = execFileSync("curl", curlArgs, { encoding: "utf8", timeout: 15000 });
     const prs = JSON.parse(prsRaw);
     const hasOpenPr = Array.isArray(prs) && prs.length > 0;
 

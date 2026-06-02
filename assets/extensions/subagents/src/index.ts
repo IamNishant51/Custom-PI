@@ -7,7 +7,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import fs from "node:fs";
 import path from "node:path";
-import { execSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
@@ -1318,17 +1318,19 @@ class SubAgentRuntime {
     this.tracker.toolCallCount++;
 
     // Context monitor: track every tool call for loop detection
-    contextMonitor.recordToolCall(name, args);
-    contextMonitor.recordDecisionTrace(
-      this.ctx.sessionId || "unknown",
-      this.config.name,
-      `${this.config.name} → ${name}`,
-      `Sub-agent '${this.config.name}' invoking tool '${name}'`,
-      name,
-      JSON.stringify(args).slice(0, 200),
-      0,
-    );
+    try { contextMonitor.recordToolCall(name, args); } catch {}
+    try {
+      contextMonitor.recordDecisionTrace(
+        this.ctx.sessionId || "unknown",
+        this.config.name,
+        `Sub-agent '${this.config.name}' invoking tool '${name}'`,
+        name,
+        JSON.stringify(args).slice(0, 200),
+        0,
+      );
+    } catch {}
 
+    const toolStart = Date.now();
     try {
       const MAX_OUT = SubAgentRuntime.MAX_TOOL_OUTPUT;
 
@@ -1339,7 +1341,7 @@ class SubAgentRuntime {
           const pathCheck = policyValidator.validate({ type: "read_file", path: filePath, workdir: this.ctx.cwd });
           if (!pathCheck.allowed) return `Error: ${pathCheck.reason}`;
           const result = await this.storage.readFile(filePath);
-          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch {}
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch { this.ctx.metrics?.increment?.("work_product_errors", 1); }
           return result;
         }
         case "write": {
@@ -1368,7 +1370,7 @@ class SubAgentRuntime {
           }
 
           await this.storage.writeFile(filePath, content);
-          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "create", content.slice(0, 200)); } catch {}
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "create", content.slice(0, 200)); } catch { this.ctx.metrics?.increment?.("work_product_errors", 1); }
           let resp = `Successfully wrote file: ${filePath}`;
           if (verify.warnings.length > 0) {
             resp += `\nWarnings:\n${verify.warnings.join("\n")}`;
@@ -1411,7 +1413,7 @@ class SubAgentRuntime {
           }
 
           await this.storage.writeFile(filePath, newContent);
-          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "modify", replaceText.slice(0, 200)); } catch {}
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "modify", replaceText.slice(0, 200)); } catch { this.ctx.metrics?.increment?.("work_product_errors", 1); }
           let resp = `Successfully edited file: ${filePath}`;
           if (verify.warnings.length > 0) {
             resp += `\nWarnings:\n${verify.warnings.join("\n")}`;
@@ -1495,7 +1497,7 @@ class SubAgentRuntime {
             return data.organic.map((r: any) => `**Title**: ${r.title}\n**URL**: ${r.link}\n**Snippet**: ${r.snippet}\n`).join("\n---\n");
           });
 
-          const raw = await Promise.race([tavilyFetch, serperFetch]).catch(() => "Web search failed.");
+          const raw = await Promise.race([tavilyFetch, serperFetch]).catch(() => "Error: Web search failed.");
           return raw.length > 4000 ? raw.slice(0, 4000) + "\n\n...[TRUNCATED — use more specific query for details]" : raw;
         }
         case "web_fetch": {
@@ -1608,8 +1610,10 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
           return `Error: Tool ${name} not implemented in sub-agent runtime.`;
       }
     } catch (e: any) {
-      return `Error executing ${name}: ${e.message}`;
+      const msg = e?.message ?? String(e);
+      return `Error executing ${name}: ${msg}`;
     } finally {
+      this.ctx.metrics?.timing?.("tool_duration", Date.now() - toolStart);
       this.tracker.status = "running";
       this.tracker.currentTool = undefined;
       this.tracker.currentToolArgs = undefined;
@@ -1726,7 +1730,7 @@ Respond with JSON only: {"approved": true/false, "reason": "brief explanation"}`
             toolCallId: call.id,
             toolName: call.name,
             content: [{ type: "text" as const, text: result }],
-            isError: result.startsWith("Error:"),
+            isError: result.startsWith("Error:") || result.startsWith("error:"),
           };
         }));
 
@@ -3244,7 +3248,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
         if (branch) cloneArgs.push("--branch", branch);
         cloneArgs.push(cloneUrl, cloneDir);
 
-        execSync(`git ${cloneArgs.join(" ")}`, {
+        execFileSync("git", cloneArgs, {
           stdio: "pipe",
           timeout: 120_000,
         });
@@ -4425,7 +4429,7 @@ ${state.state_notes || "None"}
 `;
           }
         } catch (e) {
-          console.error("Failed to inject task state:", e);
+          ctx.ui.notify(`Failed to inject task state: ${e.message}`, "warning");
         }
       }
     }

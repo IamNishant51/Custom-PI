@@ -157,7 +157,34 @@ if (fs.existsSync(path.join(extDir, 'package.json')) && !fs.existsSync(path.join
   }
 }
 
-console.log('\x1b[32m✅ Configuration sync complete.\x1b[0m\n');
+console.log('\x1b[32m✅ Configuration sync complete.\x1b[0m');
+
+// Auto-detect LM Studio models
+try {
+  const data = JSON.parse(require('child_process').execSync(
+    'curl -s --max-time 2 http://127.0.0.1:1234/v1/models 2>/dev/null || echo "{}"',
+    { encoding: 'utf8' }
+  ));
+  if (data.data && data.data.length > 0) {
+    const live = data.data.map(m => ({
+      id: m.id, name: m.name || m.id,
+      api: 'openai-completions',
+      contextWindow: 4096, maxTokens: 2048,
+      input: ['text'], reasoning: false,
+    }));
+    const modelsPath = path.join(PI_DIR, 'models.json');
+    let cfg = { providers: {} };
+    try { cfg = JSON.parse(fs.readFileSync(modelsPath, 'utf8')); } catch {}
+    cfg.providers = cfg.providers || {};
+    cfg.providers.lmstudio = {
+      api: 'openai-completions', apiKey: 'not-needed',
+      baseUrl: 'http://127.0.0.1:1234/v1', models: live,
+    };
+    fs.writeFileSync(modelsJsonPath, JSON.stringify(cfg, null, 2));
+  }
+} catch {}
+
+console.log('\x1b[32m✅ Models synced.\x1b[0m\n');
 
 // Render a gorgeous high-fidelity startup dashboard
 console.clear();

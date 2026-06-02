@@ -31,6 +31,14 @@ let _swarmPauseResolve = null;
 let _toolCallCount = 0;
 let _approvalEnabled = false;
 
+// ── Security Helpers ─────────────────────────────────────────────────────────
+
+function isReDosPattern(pattern) {
+  if (!pattern || pattern.length > 200) return true;
+  const dangerous = /\(\s*[^)]*\+(?:\s*\)\s*(?:\?|\*|\+))|\(\s*[^)]*\)\s*\{[^}]*,\}|\(\s*[^)]*\]\s*\+(?:\s*\)\s*(?:\?|\*|\+))|\(.+\)\s*\{/;
+  return dangerous.test(pattern);
+}
+
 // ── Session State / Checkpoints ─────────────────────────────────────────────
 
 const SESSION_FILE = path.join(PI_DIR, "session-state.json");
@@ -2163,12 +2171,15 @@ Restored: ${result.restored.join(", ")}`;
                 if ([".js",".ts",".jsx",".tsx",".py",".rs",".go",".java",".c",".cpp",".h",".hpp",".rb",".php",".swift",".kt"].includes(ext)) {
                   const content = fs.readFileSync(full, "utf8");
                   const lines = content.split("\n");
-                  const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
-                  for (let i = 0; i < lines.length; i++) {
-                    if (regex.test(lines[i])) {
-                      results.push(`${full}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+                  if (isReDosPattern(args.pattern)) continue;
+                  try {
+                    const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
+                    for (let i = 0; i < lines.length; i++) {
+                      if (regex.test(lines[i])) {
+                        results.push(`${full}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+                      }
                     }
-                  }
+                  } catch {} // skip invalid patterns
                 }
               } catch {}
             }
@@ -2178,10 +2189,13 @@ Restored: ${result.restored.join(", ")}`;
         else if (fs.statSync(searchPath).isFile()) {
           const content = fs.readFileSync(searchPath, "utf8");
           const lines = content.split("\n");
-          const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
-          for (let i = 0; i < lines.length; i++) {
-            if (regex.test(lines[i])) results.push(`${searchPath}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
-          }
+          if (isReDosPattern(args.pattern)) return "Pattern rejected: too complex";
+          try {
+            const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
+            for (let i = 0; i < lines.length; i++) {
+              if (regex.test(lines[i])) results.push(`${searchPath}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+            }
+          } catch { return "Invalid regex pattern"; }
         }
         return results.slice(0, 100).join("\n") || "No matches found.";
       }
@@ -2681,7 +2695,7 @@ async function postToReddit(subreddit, title, text) {
       signal: AbortSignal.timeout(15000),
     });
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return `Reddit auth failed: ${JSON.stringify(tokenData)}`;
+    if (!tokenData.access_token) return "Reddit auth failed: invalid credentials";
 
     const postRes = await fetch(`https://oauth.reddit.com/r/${subreddit}/submit`, {
       method: "POST",
@@ -2695,7 +2709,7 @@ async function postToReddit(subreddit, title, text) {
     });
     const postData = await postRes.json();
     if (postRes.ok) return `Posted to r/${subreddit}!`;
-    return `Reddit error: ${JSON.stringify(postData)}`;
+    return `Reddit error: ${postData?.error || postData?.reason || "unknown"}`;
   } catch (e) {
     return `Reddit error: ${e.message}`;
   }
@@ -4707,12 +4721,39 @@ async function main() {
   app.get("/api/settings", async () => loadSettings());
   app.post("/api/settings", async (req) => {
     const current = loadSettings();
-    const updated = { ...current, ...req.body };
+    const safeBody = JSON.parse(JSON.stringify(req.body || {}));
+    const updated = { ...current, ...safeBody };
     fs.writeFileSync(path.join(PI_DIR, "settings.json"), JSON.stringify(updated, null, 2));
     try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
     return { ok: true };
   });
-  app.get("/api/models", async () => loadModels());
+  app.get("/api/models", async () => {
+    const modelsPath = path.join(PI_DIR, "models.json");
+    try {
+      const res = await fetch("http://127.0.0.1:1234/v1/models", { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const body = await res.json();
+        const live = (body.data || []).map(m => ({
+          id: m.id, name: m.name || m.id,
+          api: "openai-completions",
+          contextWindow: 4096, maxTokens: 2048,
+          input: ["text"], reasoning: false,
+        }));
+        if (live.length) {
+          hasLive = true;
+          let cfg = { providers: {} };
+          try { cfg = JSON.parse(fs.readFileSync(modelsPath, "utf8")); } catch {}
+          cfg.providers = cfg.providers || {};
+          cfg.providers.lmstudio = {
+            api: "openai-completions", apiKey: "not-needed",
+            baseUrl: "http://127.0.0.1:1234/v1", models: live,
+          };
+          fs.writeFileSync(modelsPath, JSON.stringify(cfg, null, 2));
+        }
+      }
+    } catch {}
+    return loadModels();
+  });
   app.post("/api/models/check", async () => {
     const online = [];
     // Check common local providers
@@ -5261,7 +5302,7 @@ async function main() {
 
       if (data.type === "swarm_resume") {
         _swarmPaused = false;
-        if (_swarmPauseResolve) { _swarmPauseResolve(); _swarmPauseResolve = null; }
+        if (_swarmPauseResolve) { try { _swarmPauseResolve(); } catch {} _swarmPauseResolve = null; }
         try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
       }
 
@@ -5346,9 +5387,36 @@ async function main() {
     });
   });
 
+  // ── Auto-detect LM Studio models ─────────────────────────────────────────
+
+  async function syncLmStudioModels() {
+    try {
+      const res = await fetch("http://127.0.0.1:1234/v1/models", { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return;
+      const body = await res.json();
+      const live = (body.data || []).map(m => ({
+        id: m.id, name: m.name || m.id,
+        api: "openai-completions",
+        contextWindow: 4096, maxTokens: 2048,
+        input: ["text"], reasoning: false,
+      }));
+      if (!live.length) return;
+      const modelsPath = path.join(PI_DIR, "models.json");
+      let cfg = { providers: {} };
+      try { cfg = JSON.parse(fs.readFileSync(modelsPath, "utf8")); } catch {}
+      cfg.providers = cfg.providers || {};
+      cfg.providers.lmstudio = {
+        api: "openai-completions", apiKey: "not-needed",
+        baseUrl: "http://127.0.0.1:1234/v1", models: live,
+      };
+      fs.writeFileSync(modelsPath, JSON.stringify(cfg, null, 2));
+    } catch {}
+  }
+
   // ── Start ──────────────────────────────────────────────────────────────
 
   try {
+    await syncLmStudioModels();
     await app.listen({ port: PORT, host: HOST });
     const model = resolveModel();
     console.log(`\n  ✦ Custom-PI Web UI running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);

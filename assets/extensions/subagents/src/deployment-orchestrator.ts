@@ -1,6 +1,10 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
+
+function sanitizeGitSha(input: string): string {
+  return input.replace(/[^a-fA-F0-9]/g, "");
+}
 
 export type PipelineStageName =
   | "pr_created" | "build_started" | "unit_tests" | "staging_deploy"
@@ -68,21 +72,23 @@ export function listDeployments(): DeploymentState[] {
 export function executeRollback(deploymentId: string, workDir: string): { ok: boolean; output: string } {
   const state = deployments.get(deploymentId);
   if (!state || !state.rollbackSha) return { ok: false, output: "No rollback SHA available" };
+  const safeSha = sanitizeGitSha(state.rollbackSha);
+  if (safeSha.length !== 40) return { ok: false, output: "Invalid rollback SHA" };
   try {
-    const output = execSync(`git stash && git checkout ${state.rollbackSha}`, {
-      cwd: workDir, encoding: "utf8", timeout: 30000,
-    });
+    const stashOut = execFileSync("git", ["stash"], { cwd: workDir, encoding: "utf8", timeout: 15000 });
+    const checkoutOut = execFileSync("git", ["checkout", safeSha], { cwd: workDir, encoding: "utf8", timeout: 15000 });
     state.stages.forEach(s => { if (s.status === "running") s.status = "pending"; });
-    return { ok: true, output: output.trim() };
+    return { ok: true, output: `${stashOut.trim()}\n${checkoutOut.trim()}` };
   } catch (e: any) {
     return { ok: false, output: e.message || String(e) };
   }
 }
 
 export function runVerificationScript(scriptPath: string): { passed: boolean; output: string } {
-  if (!fs.existsSync(scriptPath)) return { passed: false, output: `Script not found: ${scriptPath}` };
+  const resolvedPath = path.resolve(scriptPath);
+  if (!fs.existsSync(resolvedPath)) return { passed: false, output: `Script not found: ${resolvedPath}` };
   try {
-    const output = execSync(`bash ${scriptPath}`, { encoding: "utf8", timeout: 60000 });
+    const output = execFileSync("bash", [resolvedPath], { encoding: "utf8", timeout: 60000 });
     return { passed: true, output: output.trim() };
   } catch (e: any) {
     return { passed: false, output: e.message || String(e) };

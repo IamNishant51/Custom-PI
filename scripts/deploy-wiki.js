@@ -213,8 +213,9 @@ module.exports = {
     required: ["expression"]
   },
   async execute({ expression }) {
-    // Perform task
-    const result = eval(expression); // Caution: run securely!
+    // Use Function constructor instead of eval for safer evaluation
+    const fn = new Function("return " + expression);
+    const result = fn();
     return { status: "success", result };
   }
 };
