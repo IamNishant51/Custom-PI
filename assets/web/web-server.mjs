@@ -4647,32 +4647,19 @@ async function main() {
 
   const app = Fastify({ logger: { level: "warn" } });
 
-  // Auth middleware — auto-generates API key on first run if not set
-  const apiKeyFile = path.join(PI_DIR, "web-api-key.txt");
-  let apiKey = process.env.PI_API_KEY || process.env.API_KEY || "";
-  if (!apiKey) {
-    try {
-      if (fs.existsSync(apiKeyFile)) {
-        apiKey = fs.readFileSync(apiKeyFile, "utf8").trim();
-      } else {
-        apiKey = crypto.randomBytes(32).toString("hex");
-        fs.mkdirSync(PI_DIR, { recursive: true });
-        fs.writeFileSync(apiKeyFile, apiKey, { mode: 0o600 });
-        console.log(`  ✦ Generated API key: ${apiKey.slice(0, 8)}... (saved to ${apiKeyFile})`);
-      }
-    } catch { apiKey = ""; }
-  }
+  // Auth middleware — optional bearer token via PI_API_KEY env var
+  const apiKey = process.env.PI_API_KEY || process.env.API_KEY || "";
   app.addHook("onRequest", (req, reply, done) => {
     reply.header("Access-Control-Allow-Origin", "*");
     reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     // Skip auth for preflight, health check, and websocket
     if (req.method === "OPTIONS" || req.url === "/api/health" || req.url.startsWith("/ws")) return done();
-    // Require bearer token
+    // If API_KEY is set, require bearer token
     if (apiKey) {
       const auth = req.headers.authorization;
       if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== apiKey) {
-        return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header" });
+        return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header or set PI_API_KEY" });
       }
     }
     done();
