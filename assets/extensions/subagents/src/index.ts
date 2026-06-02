@@ -4005,23 +4005,24 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   pi.registerTool({
     name: "social_status",
     label: "Social Media Status",
-    description: "Check connection status of all social media accounts and email.",
+    description: "Check connection status of all social media accounts and email. Call this first to see what platforms the user is connected to before posting.",
     parameters: Type.Object({}),
     async execute(id, params) {
       const lines: string[] = [];
       try {
         const social = await callSocialBridge("/status", "GET");
-        lines.push(`**Twitter/X**: ${social.platforms?.twitter?.configured ? "✅ Configured" : "❌ Not connected"}`);
-        lines.push(`**Reddit**: ${social.platforms?.reddit?.configured ? "✅ Configured" : "❌ Not connected"}`);
-        lines.push(`Twitter posts today: ${social.rateLimits?.twitter?.count || 0}/10`);
-        lines.push(`Reddit posts today: ${social.rateLimits?.reddit?.count || 0}/10`);
+        lines.push(`**Twitter/X**: ${social.platforms?.twitter?.configured ? "✅ Connected" : "❌ Not connected"}`);
+        lines.push(`**Reddit**: ${social.platforms?.reddit?.configured ? "✅ Connected" : "❌ Not connected"}`);
+        lines.push(`**LinkedIn**: ${social.platforms?.linkedin?.configured ? "✅ Connected" : "❌ Not connected"}`);
+        lines.push(`**Bluesky**: ${social.platforms?.bluesky?.configured ? "✅ Connected" : "❌ Not connected"}`);
+        lines.push(`**Discord**: ${social.platforms?.discord?.configured ? "✅ Connected" : "❌ Not connected"}`);
+        lines.push(`**Telegram**: ${social.platforms?.telegram?.configured ? "✅ Connected" : "❌ Not connected"}`);
       } catch {
         lines.push("**Social Bridge**: ❌ Not running");
       }
       try {
         const email = await callEmailBridge("/status", "GET");
         lines.push(`**Email**: ${email.configured ? `✅ ${email.email}` : "❌ Not configured"}`);
-        lines.push(`Emails today: ${email.rateLimit?.sent || 0}/${email.rateLimit?.limit || 500}`);
       } catch {
         lines.push("**Email Bridge**: ❌ Not running");
       }

@@ -1,14 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
 interface SocialStatus {
   ok: boolean;
   platforms?: {
     twitter: { configured: boolean; sessionActive: boolean };
     reddit: { configured: boolean; sessionActive: boolean };
-  };
-  rateLimits?: {
-    twitter: { count: number };
-    reddit: { count: number };
+    linkedin?: { configured: boolean; sessionActive: boolean };
+    bluesky?: { configured: boolean };
+    discord?: { configured: boolean };
+    telegram?: { configured: boolean };
   };
   error?: string;
 }
@@ -18,40 +18,20 @@ interface EmailStatus {
   configured: boolean;
   email: string | null;
   displayName: string | null;
-  rateLimit?: { sent: number; limit: number };
   error?: string;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant" | "system";
-  text: string;
-  timestamp: number;
-  action?: string;
 }
 
 export default function SocialPanel() {
   const [social, setSocial] = useState<SocialStatus | null>(null);
   const [email, setEmail] = useState<EmailStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeConnect, setActiveConnect] = useState<"twitter" | "reddit" | "email" | null>(null);
+  const [activeConnect, setActiveConnect] = useState<"twitter" | "reddit" | "email" | "linkedin" | "bluesky" | "discord" | "telegram" | null>(null);
 
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  // Connect form state
   const [formUser, setFormUser] = useState("");
   const [formPass, setFormPass] = useState("");
   const [formName, setFormName] = useState("");
   const [formLoading, setFormLoading] = useState(false);
   const [formMsg, setFormMsg] = useState("");
-
-  let msgId = 0;
-  function nextId() { return `sm_${++msgId}_${Date.now()}`; }
 
   async function fetchStatus() {
     try {
@@ -65,264 +45,126 @@ export default function SocialPanel() {
     setLoading(false);
   }
 
-  useEffect(() => {
-    fetchStatus();
-    // Welcome message
-    setMessages([{
-      id: nextId(),
-      role: "assistant",
-      text: "Hey! I can post to Twitter, Reddit, or send emails for you. What would you like to do?",
-      timestamp: Date.now(),
-    }]);
-  }, []);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  async function sendChat() {
-    const text = input.trim();
-    if (!text || chatLoading) return;
-    setInput("");
-
-    const userMsg: ChatMessage = { id: nextId(), role: "user", text, timestamp: Date.now() };
-    setMessages(prev => [...prev, userMsg]);
-    setChatLoading(true);
-
-    try {
-      const r = await fetch("/api/social/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      }).then(r => r.json());
-
-      setMessages(prev => [...prev, {
-        id: nextId(),
-        role: "assistant",
-        text: r.message || "Done.",
-        timestamp: Date.now(),
-        action: r.action,
-      }]);
-
-      // Refresh status after any action
-      if (r.ok && r.action !== "help") fetchStatus();
-    } catch {
-      setMessages(prev => [...prev, {
-        id: nextId(),
-        role: "assistant",
-        text: "Something went wrong. Is the social bridge running?",
-        timestamp: Date.now(),
-      }]);
-    }
-    setChatLoading(false);
-    inputRef.current?.focus();
-  }
+  useEffect(() => { fetchStatus(); }, []);
 
   async function connectPlatform() {
-    if (!activeConnect) return;
     setFormLoading(true);
     setFormMsg("");
     try {
-      let r;
+      let r: any;
       if (activeConnect === "twitter") {
-        r = await fetch("/api/social/twitter/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: formUser, password: formPass }),
-        }).then(r => r.json());
+        r = await fetch("/api/social/twitter/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: formUser, password: formPass }) }).then(r => r.json());
       } else if (activeConnect === "reddit") {
-        r = await fetch("/api/social/reddit/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: formUser, password: formPass }),
-        }).then(r => r.json());
+        r = await fetch("/api/social/reddit/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: formUser, password: formPass }) }).then(r => r.json());
+      } else if (activeConnect === "linkedin") {
+        r = await fetch("/api/social/linkedin/setup", { method: "POST" }).then(r => r.json());
+      } else if (activeConnect === "bluesky") {
+        r = await fetch("/api/social/bluesky/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier: formUser, appPassword: formPass }) }).then(r => r.json());
+      } else if (activeConnect === "discord") {
+        r = await fetch("/api/social/discord/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ webhookUrl: formUser }) }).then(r => r.json());
+      } else if (activeConnect === "telegram") {
+        r = await fetch("/api/social/telegram/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: formUser, chatId: formPass }) }).then(r => r.json());
       } else {
-        r = await fetch("/api/social/email/configure", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: formUser, appPassword: formPass, displayName: formName }),
-        }).then(r => r.json());
+        r = await fetch("/api/social/email/configure", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: formUser, appPassword: formPass, displayName: formName }) }).then(r => r.json());
       }
-      setFormMsg(r.ok ? "✅ Connected!" : `❌ ${r.error}`);
+      setFormMsg(r.ok ? "Connected" : `Error: ${r.error || r.message}`);
       if (r.ok) {
         setTimeout(() => { setActiveConnect(null); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(""); }, 1500);
         fetchStatus();
       }
-    } catch { setFormMsg("❌ Bridge not running"); }
+    } catch { setFormMsg("Connection failed"); }
     setFormLoading(false);
   }
 
   async function disconnectPlatform(platform: string) {
-    try {
-      await fetch(`/api/social/${platform}/disconnect`, { method: "POST" });
-      fetchStatus();
-    } catch {}
+    try { await fetch(`/api/social/${platform}/disconnect`, { method: "POST" }); fetchStatus(); } catch {}
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
 
   const twitterOk = social?.platforms?.twitter?.configured;
   const redditOk = social?.platforms?.reddit?.configured;
+  const linkedinOk = social?.platforms?.linkedin?.configured;
   const emailOk = email?.configured;
+  const bskyOk = social?.platforms?.bluesky?.configured;
+  const discordOk = social?.platforms?.discord?.configured;
+  const telegramOk = social?.platforms?.telegram?.configured;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {/* ── Account Cards ──────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
-        <AccountCard
-          name="Twitter / X"
-          connected={!!twitterOk}
-          detail={twitterOk ? `${social?.rateLimits?.twitter?.count || 0}/10 posts today` : null}
-          color="#1DA1F2"
+      <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--hairline)", fontSize: 12, color: "var(--muted)" }}>
+        Connect your accounts below. Then use the main chat to post — just tell the AI what to write and where.
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
+        <AccountCard name="Twitter / X" connected={!!twitterOk} detail={twitterOk ? "Connected" : null} color="#1DA1F2"
           onConnect={() => { setActiveConnect("twitter"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
-          onDisconnect={() => disconnectPlatform("twitter")}
-        />
-        <AccountCard
-          name="Reddit"
-          connected={!!redditOk}
-          detail={redditOk ? `${social?.rateLimits?.reddit?.count || 0}/10 posts today` : null}
-          color="#FF4500"
+          onDisconnect={() => disconnectPlatform("twitter")} />
+        <AccountCard name="LinkedIn" connected={!!linkedinOk} detail={linkedinOk ? "Connected" : null} color="#0A66C2"
+          onConnect={() => { setActiveConnect("linkedin"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("linkedin")} />
+        <AccountCard name="Reddit" connected={!!redditOk} detail={redditOk ? "Connected" : null} color="#FF4500"
           onConnect={() => { setActiveConnect("reddit"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
-          onDisconnect={() => disconnectPlatform("reddit")}
-        />
-        <AccountCard
-          name="Email (Gmail)"
-          connected={!!emailOk}
-          detail={emailOk ? `${email?.rateLimit?.sent || 0}/${email?.rateLimit?.limit || 500} sent today` : null}
-          color="#EA4335"
+          onDisconnect={() => disconnectPlatform("reddit")} />
+        <AccountCard name="Bluesky" connected={!!bskyOk} detail={bskyOk ? "Connected" : null} color="#0285FF"
+          onConnect={() => { setActiveConnect("bluesky"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("bluesky")} />
+        <AccountCard name="Discord" connected={!!discordOk} detail={discordOk ? "Connected" : null} color="#5865F2"
+          onConnect={() => { setActiveConnect("discord"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("discord")} />
+        <AccountCard name="Telegram" connected={!!telegramOk} detail={telegramOk ? "Connected" : null} color="#24A1DE"
+          onConnect={() => { setActiveConnect("telegram"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("telegram")} />
+        <AccountCard name="Email" connected={!!emailOk} detail={emailOk ? `${email?.email || "Configured"}` : null} color="#EA4335"
           onConnect={() => { setActiveConnect("email"); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(""); }}
-          onDisconnect={() => disconnectPlatform("email")}
-        />
+          onDisconnect={() => disconnectPlatform("email")} />
       </div>
 
-      {/* ── Connect Modal ─────────────────────────────────────────────── */}
       {activeConnect && (
         <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--hairline)", background: "var(--surface)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-            <strong style={{ fontSize: 13 }}>Connect {activeConnect === "email" ? "Email" : activeConnect === "twitter" ? "Twitter" : "Reddit"}</strong>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setActiveConnect(null)}>✕</button>
+            <strong style={{ fontSize: 13 }}>
+              {activeConnect === "email" ? "Email (Gmail App Password)" : activeConnect.charAt(0).toUpperCase() + activeConnect.slice(1)}
+            </strong>
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setActiveConnect(null)}>X</button>
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              className="input"
-              placeholder={activeConnect === "email" ? "Gmail address" : activeConnect === "twitter" ? "Username or email" : "Reddit username"}
-              value={formUser}
-              onChange={e => setFormUser(e.target.value)}
-              style={{ flex: 1, height: 32, fontSize: 13 }}
-            />
-            <input
-              className="input"
-              type="password"
-              placeholder={activeConnect === "email" ? "App Password (16 chars)" : "Password"}
-              value={formPass}
-              onChange={e => setFormPass(e.target.value)}
-              style={{ flex: 1, height: 32, fontSize: 13 }}
-            />
-            {activeConnect === "email" && (
-              <input
-                className="input"
-                placeholder="Display name (optional)"
-                value={formName}
-                onChange={e => setFormName(e.target.value)}
-                style={{ flex: 1, height: 32, fontSize: 13 }}
-              />
-            )}
-            <button
-              className="btn btn-primary"
-              onClick={connectPlatform}
-              disabled={formLoading || !formUser || !formPass}
-              style={{ height: 32, fontSize: 13, padding: "0 16px" }}
-            >
-              {formLoading ? "..." : "Connect"}
-            </button>
-          </div>
-          {formMsg && <div style={{ fontSize: 12, marginTop: 6, color: formMsg.startsWith("✅") ? "var(--success)" : "var(--danger)" }}>{formMsg}</div>}
-          {activeConnect === "email" && (
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-              Enable 2-Step Verification on Gmail → Google Account → Security → App Passwords → Generate
+          {activeConnect === "linkedin" ? (
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <span style={{ fontSize: 13 }}>Opens browser for manual login.</span>
+              <button className="btn btn-primary" onClick={connectPlatform} disabled={formLoading}
+                style={{ height: 32, fontSize: 13, padding: "0 16px" }}>
+                {formLoading ? "Starting..." : "Open LinkedIn Login"}
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input className="input" placeholder={
+                activeConnect === "email" ? "Gmail address" :
+                activeConnect === "discord" ? "Webhook URL" :
+                activeConnect === "telegram" ? "Bot Token" :
+                activeConnect === "twitter" ? "Username or email" :
+                activeConnect === "reddit" ? "Reddit username" :
+                activeConnect === "bluesky" ? "Bluesky handle" : "Username"
+              } value={formUser} onChange={e => setFormUser(e.target.value)} style={{ flex: 2, height: 32, fontSize: 13 }} />
+              {activeConnect !== "discord" && (
+                <input className="input" type={activeConnect === "telegram" ? "text" : "password"} placeholder={
+                  activeConnect === "email" ? "App Password" :
+                  activeConnect === "telegram" ? "Chat ID" :
+                  activeConnect === "bluesky" ? "App Password" : "Password"
+                } value={formPass} onChange={e => setFormPass(e.target.value)} style={{ flex: 2, height: 32, fontSize: 13 }} />
+              )}
+              {activeConnect === "email" && (
+                <input className="input" placeholder="Display name (optional)" value={formName}
+                  onChange={e => setFormName(e.target.value)} style={{ flex: 1, height: 32, fontSize: 13 }} />
+              )}
+              <button className="btn btn-primary" onClick={connectPlatform} disabled={formLoading || !formUser || (activeConnect !== "discord" && !formPass)}
+                style={{ height: 32, fontSize: 13, padding: "0 16px" }}>
+                {formLoading ? "..." : "Connect"}
+              </button>
             </div>
           )}
+          {formMsg && <div style={{ fontSize: 12, marginTop: 6 }}>{formMsg}</div>}
         </div>
       )}
-
-      {/* ── Chat Agent ────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Messages */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
-          {messages.map(msg => (
-            <div key={msg.id} style={{ marginBottom: 12, display: "flex", flexDirection: "column" }}>
-              <div style={{
-                display: "inline-flex",
-                alignItems: "flex-start",
-                gap: 8,
-                maxWidth: "80%",
-                alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
-              }}>
-                {msg.role !== "user" && (
-                  <div style={{
-                    width: 28, height: 28, borderRadius: "50%",
-                    background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 14, flexShrink: 0, marginTop: 2,
-                  }}>
-                    {msg.action === "status" ? "📊" : msg.action?.includes("twitter") ? "🐦" : msg.action?.includes("reddit") ? "🔴" : msg.action?.includes("email") ? "✉️" : "🤖"}
-                  </div>
-                )}
-                <div style={{
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  background: msg.role === "user" ? "var(--accent)" : "var(--surface)",
-                  color: msg.role === "user" ? "#fff" : "var(--body)",
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}>
-                  {msg.text}
-                </div>
-              </div>
-            </div>
-          ))}
-          {chatLoading && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <div style={{
-                width: 28, height: 28, borderRadius: "50%",
-                background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 14, flexShrink: 0,
-              }}>🤖</div>
-              <div style={{ padding: "10px 14px", borderRadius: 12, background: "var(--surface)", fontSize: 13, display: "flex", gap: 4 }}>
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input */}
-        <div style={{ padding: "12px 20px", borderTop: "1px solid var(--hairline)", flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <textarea
-              ref={inputRef}
-              className="input"
-              placeholder="Tell me what to do... (e.g. post about my project on twitter)"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-              rows={1}
-              style={{ flex: 1, resize: "none", fontSize: 13, minHeight: 38, maxHeight: 100 }}
-            />
-            <button
-              className="btn btn-primary"
-              onClick={sendChat}
-              disabled={chatLoading || !input.trim()}
-              style={{ height: 38, padding: "0 16px", flexShrink: 0 }}
-            >
-              Send
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -333,27 +175,23 @@ function AccountCard({ name, connected, detail, color, onConnect, onDisconnect }
 }) {
   return (
     <div style={{
-      flex: 1, padding: "12px 16px", borderRadius: 8,
-      border: `1px solid ${connected ? color + "40" : "var(--hairline)"}`,
-      background: connected ? color + "08" : "var(--surface)",
-      display: "flex", flexDirection: "column", gap: 6,
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "8px 14px", borderRadius: 8,
+      border: "1px solid var(--hairline)", background: "var(--surface)",
+      fontSize: 13, minWidth: 150,
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? color : "var(--muted)" }} />
-          <strong style={{ fontSize: 13 }}>{name}</strong>
-        </div>
-        {connected ? (
-          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px", color: "var(--danger)" }} onClick={onDisconnect}>
-            disconnect
-          </button>
-        ) : (
-          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px" }} onClick={onConnect}>
-            connect
-          </button>
-        )}
+      <div style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? "#22c55e" : "#666", flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600, fontSize: 13 }}>{name}</div>
+        {detail && <div style={{ fontSize: 11, color: "var(--muted)" }}>{detail}</div>}
       </div>
-      {detail && <div style={{ fontSize: 11, color: "var(--muted)" }}>{detail}</div>}
+      <button
+        className={connected ? "btn btn-ghost" : "btn btn-primary"}
+        onClick={connected ? onDisconnect : onConnect}
+        style={{ height: 28, fontSize: 11, padding: "0 10px", whiteSpace: "nowrap" }}
+      >
+        {connected ? "Disconnect" : "Connect"}
+      </button>
     </div>
   );
 }
