@@ -1960,10 +1960,14 @@ function patchToolExecution(proto: any) {
         : (s: string) => `\x1b[90m${s}\x1b[0m`;
 
       contentLines = [];
+      const isWriteTool = this.toolName === "write";
       let diffBlockOpen = false;
       for (const line of contentRaw) {
         const trimmed = line.trim();
-        if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
+        if (isWriteTool) {
+          // For write tool, ALL content is new — show every line as addition
+          contentLines.push(indent + diffAdded(line));
+        } else if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
           contentLines.push(indent + dimFn2(line));
         } else if (trimmed.startsWith("+") && !trimmed.startsWith("+++")) {
           if (!diffBlockOpen) {
