@@ -1,18 +1,14 @@
 *HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.*  
 *Knowledge graph memory · Deployment orchestration · Service health monitoring · Adaptive throttling · Web UI*
 
-<p align="center">
-  <img src="assets/Custom-pi-logo.png" alt="Custom-PI logo" width="80%" />
-</p>
+![Custom-PI logo](assets/Custom-pi-logo.png)
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/custom-pi"><img src="https://img.shields.io/npm/v/custom-pi.svg?style=for-the-badge&color=00d7ff&logo=npm" alt="NPM Version" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-005fff.svg?style=for-the-badge" alt="License: MIT" /></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-00d787.svg?style=for-the-badge&logo=node.js" alt="Node Version" /></a>
-  <img src="https://img.shields.io/badge/Knowledge%20Graph-Triplet%20Memory-00ff88.svg?style=for-the-badge" alt="Knowledge Graph" />
-  <img src="https://img.shields.io/badge/DAG-Swarm-af00ff.svg?style=for-the-badge" alt="DAG Swarm" />
-  <img src="https://img.shields.io/badge/Operational-Autonomy-00f0ff.svg?style=for-the-badge" alt="Operational Autonomy" />
-</p>
+[![NPM Version](https://img.shields.io/npm/v/custom-pi.svg?style=for-the-badge&color=00d7ff&logo=npm)](https://www.npmjs.com/package/custom-pi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-005fff.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-00d787.svg?style=for-the-badge&logo=node.js)](https://nodejs.org)
+![Knowledge Graph](https://img.shields.io/badge/Knowledge%20Graph-Triplet%20Memory-00ff88.svg?style=for-the-badge)
+![DAG Swarm](https://img.shields.io/badge/DAG-Swarm-af00ff.svg?style=for-the-badge)
+![Operational Autonomy](https://img.shields.io/badge/Operational-Autonomy-00f0ff.svg?style=for-the-badge)
 
 ---
 
@@ -370,7 +366,5 @@ MIT - Licensed under the MIT License. Free to use, modify, and distribute.
 
 ---
 
-<p align="center">
-  <b>Hermes speed + Paperclip obsession = custom-pi</b><br/>
-  <i>One agent to configure them all. And in the terminal bind them.</i>
-</p>
+**Hermes speed + Paperclip obsession = custom-pi**  
+*One agent to configure them all. And in the terminal bind them.*
