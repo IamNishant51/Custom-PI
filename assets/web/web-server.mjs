@@ -6199,9 +6199,38 @@ async function main() {
     return issues;
   }
 
+  async function getConnectedPlatforms() {
+    const connected = [];
+    try {
+      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => ({ platforms: {} }));
+      if (social.platforms?.twitter?.sessionActive) connected.push("twitter");
+      if (social.platforms?.reddit?.sessionActive) connected.push("reddit");
+    } catch {}
+    if (vaultGet("BLUESKY_IDENTIFIER") && vaultGet("BLUESKY_APP_PASSWORD")) connected.push("bluesky");
+    if (vaultGet("DISCORD_WEBHOOK_URL")) connected.push("discord");
+    if (vaultGet("TELEGRAM_BOT_TOKEN") && vaultGet("TELEGRAM_CHAT_ID")) connected.push("telegram");
+    return connected;
+  }
+
+  const PLATFORM_WRITE_GUIDES = {
+    twitter: "Twitter (max 260 chars, conversational, hashtags ok)",
+    reddit: "Reddit (conversational + informative, 200-800 chars, suitable for a subreddit post)",
+    bluesky: "Bluesky (concise, max 300 chars, hashtags ok)",
+    discord: "Discord (casual announcement, 100-500 chars, informal)",
+    telegram: "Telegram (direct update, 100-500 chars, direct tone)",
+  };
+
   async function autonomousContentTick() {
     console.log("[autonomous] Starting content generation tick...");
     const drafts = [];
+
+    // 0. Check which platforms are connected
+    const connectedPlatforms = await getConnectedPlatforms();
+    if (connectedPlatforms.length === 0) {
+      console.log("[autonomous] No connected platforms, skipping content generation.");
+      return;
+    }
+    const platformGuides = connectedPlatforms.map(p => PLATFORM_WRITE_GUIDES[p] || p).join(", ");
 
     // 1. Scan codebase changes
     let codeChanges = "";
@@ -6229,12 +6258,14 @@ Write engaging, expert-level posts that teach something valuable.
 
 RULES:
 - Each post must be self-contained and ready to publish
-- Write for different platforms: Twitter (max 260 chars), LinkedIn (longer, educational, 600-1200 chars)
+- Only write for these connected platforms: ${platformGuides}
+- Do NOT write for any other platforms
 - Use the cheat sheet format for maximum engagement
 - Lead with a hook, teach a framework, end with insight
 - No buzzwords, no fluff, no weasel words
 - Never include API keys, paths, passwords, or secrets`;
 
+    const platformNames = connectedPlatforms.join(", ");
     const userPrompt = `Generate 2 social media posts based on this context:
 
 RECENT CODE CHANGES:
@@ -6243,9 +6274,12 @@ ${codeChanges || "No significant changes in the last 24 hours."}
 TRENDING TOPICS:
 ${trends || "General AI and software development trends."}
 
+CONNECTED PLATFORMS (ONLY write for platforms from this list — do NOT use any others):
+${platformNames}
+
 Return a JSON array. Each item:
 {
-  "platforms": ["twitter"] or ["linkedin"] or ["twitter", "linkedin"],
+  "platforms": ["twitter"] or ["twitter", "reddit"] (only from the connected platforms list above),
   "text": "The post content",
   "title": "Title (only for reddit posts)",
   "subreddit": "Subreddit name (only for reddit posts)"
@@ -6474,11 +6508,49 @@ Return a JSON array. Each item:
       if (data.type === "swarm_saved_team") {
         const { goal, agents } = data;
         try {
-          const normalized = (agents || []).map(a =>
-            typeof a === "string"
-              ? { id: a, role: "sub-agent", task: `Contribute to: ${goal}`, tools: ["bash", "glob", "grep", "view_file", "write", "edit", "list_dir", "web_search", "web_fetch"] }
-              : a
-          );
+          // Extract selected platforms from goal: "[Platforms: Twitter / X, Reddit]"
+          const platformMatch = goal.match(/\[Platforms:\s*(.+?)\]/);
+          const selectedPlatformNames = platformMatch ? platformMatch[1].split(/,\s*/).filter(Boolean) : [];
+          const selectedPlatformKeys = selectedPlatformNames.map(n => {
+            const lower = n.toLowerCase();
+            if (lower.includes("twitter") || lower.includes("x")) return "twitter";
+            if (lower.includes("reddit")) return "reddit";
+            if (lower.includes("bluesky")) return "bluesky";
+            if (lower.includes("discord")) return "discord";
+            if (lower.includes("telegram")) return "telegram";
+            if (lower.includes("linkedin")) return "linkedin";
+            return null;
+          }).filter(Boolean);
+
+          const platformTaskSuffix = selectedPlatformNames.length > 0
+            ? `Target platforms: ${selectedPlatformNames.join(", ")}. Only write drafts for these platforms — do NOT write for any others.`
+            : "";
+
+          const platformToolMap = {
+            twitter: "post_to_twitter", reddit: "post_to_reddit",
+            bluesky: "post_to_bluesky", discord: "post_to_discord",
+            telegram: "post_to_telegram",
+          };
+          const allPostTools = new Set(Object.values(platformToolMap));
+          const allowedPostTools = new Set(selectedPlatformKeys.map(k => platformToolMap[k]).filter(Boolean));
+
+          const normalized = (agents || []).map(a => {
+            if (typeof a === "string") {
+              return { id: a, role: "sub-agent", task: `${platformTaskSuffix} Contribute to: ${goal}`, tools: ["bash", "glob", "grep", "view_file", "write", "edit", "list_dir", "web_search", "web_fetch"] };
+            }
+            const modified = { ...a };
+            if (platformTaskSuffix) {
+              if (modified.id === "writer" || modified.id === "publisher") {
+                modified.task = `${platformTaskSuffix} ${modified.task}`;
+              }
+              if (modified.id === "publisher" && modified.tools) {
+                modified.tools = modified.tools.filter(t => !allPostTools.has(t) || allowedPostTools.has(t));
+                modified.tools.push("request_post_approval", "read");
+              }
+            }
+            return modified;
+          });
+
           // Initialize persistent state for saved team runs
           currentSwarmState = {
             goal,
