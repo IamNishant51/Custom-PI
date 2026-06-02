@@ -45,6 +45,7 @@ import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMc
 import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext, type Team, type TeamAgent } from "./team-manager";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
+let appMode: "agent" | "plan" = "agent";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  UNICODE BOX DRAWING — Beautiful Rounded Borders
@@ -2438,6 +2439,8 @@ function setupWidget(ctx: ExtensionContext) {
 
 function teardownWidget(ctx: ExtensionContext) {
   ctx.ui.setWidget("subagent-dashboard", undefined);
+  ctx.ui.setWidget("app-mode-indicator", undefined);
+  ctx.ui.setStatus("app-mode", undefined);
   activeInvalidators.delete("subagent-dashboard-widget");
   if (widgetInstance) {
     widgetInstance.dispose();
@@ -4168,6 +4171,18 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
   // (no /tui fullscreen command — all enhancements apply directly to the default TUI)
 
+  // ── Tab key to toggle between Agent mode and Plan mode ─────────────────
+  pi.registerShortcut("tab", {
+    description: "Toggle between Plan mode and Agent mode",
+    handler: (ctx) => {
+      appMode = appMode === "agent" ? "plan" : "agent";
+      ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
+      ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
+      // Force a re-render so the widget updates immediately
+      try { (ctx as any).requestRender?.(); } catch {}
+    },
+  });
+
   // Event Hook: Setup HUD on session start, run consolidation for crash recovery
   pi.on("session_start", async (_event, ctx) => {
     logger.info("session_start", { cwd: ctx.cwd });
@@ -4261,6 +4276,23 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
 
     setupWidget(ctx);
+
+    // Mode indicator widget — shows current mode (agent/plan) above the input
+    try {
+      ctx.ui.setWidget("app-mode-indicator", (_tui: any, _theme: any) => ({
+        render(width: number): string[] {
+          const mode = appMode === "agent" ? "AGENT" : "PLAN";
+          const modeColor = appMode === "agent" ? "\x1b[32m" : "\x1b[33m";
+          const reset = "\x1b[0m";
+          const label = `${modeColor}◆ ${mode} MODE${reset}`;
+          const hint = "\x1b[2mTab\x1b[0m to toggle";
+          const line = ` ${label}  │  ${hint}`;
+          return [line];
+        },
+        dispose() {},
+      }), { placement: "aboveEditor" });
+      ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
+    } catch {}
 
     // Install bundled skills (verification-loop, etc.)
     const skillsSrc = path.join(__dirname, "..", "skills");
@@ -4753,6 +4785,16 @@ If nothing to report, return: {}`;
     try {
       if (event.messages && event.messages.length > 1) {
         event.messages = coalesceMessages(event.messages);
+      }
+      // Inject current mode (agent/plan) instructions into the system prompt
+      if (event.messages && event.messages.length > 0) {
+        const modeNote = appMode === "plan"
+          ? "\n\n[SYSTEM: Current Mode = PLAN MODE]\nYou are in PLAN MODE. Do NOT execute any tools, run commands, or make changes. Your task is to analyze the user's request and create a detailed, step-by-step plan. Present the plan to the user and wait for explicit approval before executing."
+          : "\n\n[SYSTEM: Current Mode = AGENT MODE]\nYou are in AGENT MODE. Execute tasks normally using all available tools.";
+        const first = event.messages[0];
+        if (first && first.role === "system") {
+          first.content += modeNote;
+        }
       }
     } catch {
       // must never crash
