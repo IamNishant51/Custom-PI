@@ -3812,9 +3812,9 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   pi.registerTool({
     name: "post_to_twitter",
     label: "Post to Twitter",
-    description: "Post a tweet to Twitter/X. The text will be auto-truncated to 280 characters.",
+    description: "Post a tweet to Twitter/X. IMPORTANT: Generate a proper tweet FIRST (engaging, informative, with hashtags), then pass the generated text. Do NOT pass raw topic/prompt — craft the tweet yourself. Max 280 chars.",
     parameters: Type.Object({
-      text: Type.String({ description: "The tweet text to post (max 280 chars)" }),
+      text: Type.String({ description: "The FINAL tweet text to post (must be a ready-to-post tweet, not a topic/prompt). Max 280 chars. Include hashtags." }),
     }),
     async execute(id, params) {
       try {
@@ -3868,11 +3868,11 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
   pi.registerTool({
     name: "post_to_reddit",
     label: "Post to Reddit",
-    description: "Submit a post to a subreddit. Provide title and either body (text post) or url (link post).",
+    description: "Submit a post to a subreddit. IMPORTANT: Generate proper title and body FIRST (informative, well-structured). Do NOT pass raw topics — craft the content yourself.",
     parameters: Type.Object({
       subreddit: Type.String({ description: "Subreddit name (without r/)" }),
-      title: Type.String({ description: "Post title" }),
-      body: Type.Optional(Type.String({ description: "Post body text (for text posts)" })),
+      title: Type.String({ description: "Post title (ready to post, not a topic/prompt)" }),
+      body: Type.Optional(Type.String({ description: "Post body text (for text posts). Generate a well-structured body." })),
       url: Type.Optional(Type.String({ description: "URL to share (for link posts)" })),
     }),
     async execute(id, params) {

@@ -5244,6 +5244,56 @@ async function main() {
     return resp.json();
   }
 
+  // ── Tweet content generation helpers ──────────────────────────────────
+  const HASHTAG_MAP = {
+    ai: ["#AI", "#ArtificialIntelligence", "#MachineLearning"],
+    "machine learning": ["#MachineLearning", "#AI", "#DeepLearning"],
+    agents: ["#AIAgents", "#Agents", "#AIAutomation"],
+    automation: ["#Automation", "#AIAgents", "#TechAutomation"],
+    coding: ["#Coding", "#Programming", "#DevTools"],
+    developer: ["#Developer", "#Coding", "#DevCommunity"],
+    tech: ["#Tech", "#Technology", "#Innovation"],
+    python: ["#Python", "#Coding", "#Programming"],
+    javascript: ["#JavaScript", "#WebDev", "#Coding"],
+    web: ["#WebDev", "#WebDevelopment", "#Frontend"],
+    data: ["#DataScience", "#BigData", "#Analytics"],
+    security: ["#CyberSecurity", "#InfoSec", "#Security"],
+    openai: ["#OpenAI", "#ChatGPT", "#AI"],
+    gpt: ["#GPT", "#ChatGPT", "#OpenAI"],
+    startup: ["#Startup", "#Entrepreneurship", "#Innovation"],
+    product: ["#ProductManagement", "#Tech", "#Innovation"],
+    design: ["#Design", "#UX", "#UIDesign"],
+    api: ["#API", "#DevTools", "#Backend"],
+    cloud: ["#Cloud", "#AWS", "#CloudComputing"],
+    blockchain: ["#Blockchain", "#Web3", "#Crypto"],
+    crypto: ["#Crypto", "#Blockchain", "#Web3"],
+    nlp: ["#NLP", "#AI", "#LanguageModels"],
+    llm: ["#LLM", "#AI", "#LanguageModels"],
+    future: ["#Future", "#Innovation", "#TechTrends"],
+  };
+
+  function generateHashtags(topic) {
+    const lower = topic.toLowerCase();
+    const tags = new Set(["#Tech", "#AI"]);
+
+    for (const [keyword, hashtags] of Object.entries(HASHTAG_MAP)) {
+      if (lower.includes(keyword)) {
+        hashtags.forEach((t) => tags.add(t));
+      }
+    }
+
+    // Extract significant words (3+ chars) and create hashtag
+    const words = lower.match(/[a-z]{3,}/g) || [];
+    const stopWords = new Set(["the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was", "one", "our", "out", "has", "his", "how", "its", "may", "new", "now", "old", "see", "way", "who", "did", "get", "let", "say", "she", "too", "use", "this", "that", "with", "from", "they", "been", "have", "will", "more", "when", "some", "than", "them", "into", "each", "make", "like", "just", "over", "such", "also", "well", "only", "very"]);
+    const significant = words.filter((w) => !stopWords.has(w) && !/^(post|tweet|share|publish|about|something|related|twitter|xcom)$/i.test(w));
+    for (const w of significant.slice(0, 2)) {
+      const tag = "#" + w.charAt(0).toUpperCase() + w.slice(1);
+      if (!tags.has(tag)) tags.add(tag);
+    }
+
+    return [...tags].slice(0, 5).join(" ");
+  }
+
   // Social Bridge Status
   app.get("/api/social/status", async () => {
     try { return await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET"); }
@@ -5303,26 +5353,96 @@ async function main() {
 
     // ── Twitter post ────────────────────────────────────────────────────
     if (/\b(post|tweet|share|publish|x\.com|twitter)\b/.test(msg) && !/\breddit\b/.test(msg) && !/\bemail\b/.test(msg) && !/\breply\b/.test(msg) && !/\bcomment\b/.test(msg)) {
-      // Extract the actual content — remove common prefixes and filler
-      let content = message
+      // Extract the topic — remove common prefixes and filler
+      let topic = message
         .replace(/^(please\s+)?/i, "")
         .replace(/\b(post|tweet|share|publish)\b\s*(something\s+)?(related\s+to|about|on|to)?\s*(on\s+)?(twitter|x\.com|x)?\s*[:\-]?\s*/i, "")
         .replace(/^(about|about\s+my|about\s+this|something\s+related\s+to)\s+/i, "")
         .trim();
-      if (!content || content.length < 3) {
-        // Fallback: strip the first word if it's an action verb
-        content = message.replace(/^(post|tweet|share|publish)\s+/i, "").trim();
+      if (!topic || topic.length < 3) {
+        topic = message.replace(/^(post|tweet|share|publish)\s+/i, "").trim();
       }
-      if (!content) content = message;
+      if (!topic) topic = message;
 
-      // Truncate to 280 chars
-      if (content.length > 280) content = content.slice(0, 277) + "...";
+      // If topic is already a well-formed tweet (short + has hashtags), post as-is
+      const looksLikeTweet = topic.length <= 280 && /#\w+/.test(topic) && topic.split("\n").length <= 3;
+
+      let content;
+      if (looksLikeTweet) {
+        content = topic;
+      } else {
+        // Generate a proper tweet from the topic
+        const hashtags = generateHashtags(topic);
+        const lower = topic.toLowerCase();
+
+        // Build an informative tweet based on topic keywords
+        const tweetTemplates = [
+          // AI / Agents
+          () => {
+            if (/ai\s*agent|agent/.test(lower)) {
+              return `AI Agents are transforming work.\n\nThey reason, plan, use tools, and act autonomously.\n\n- Multi-step reasoning\n- Tool use & APIs\n- Memory & context\n- Self-correction loops\n\nThe future is agents, not chatbots. ${hashtags}`;
+            }
+            return null;
+          },
+          () => {
+            if (/machine\s*learn|ml\b/.test(lower)) {
+              return `Machine Learning in 2026:\n\n- Foundation models everywhere\n- On-device inference going mainstream\n- Multi-modal models (text+image+code)\n- Autonomous agents on ML pipelines\n\nResearch to products: the gap is closing. ${hashtags}`;
+            }
+            return null;
+          },
+          () => {
+            if (/cod|program|develop|dev\s*tool/.test(lower)) {
+              return `AI is reshaping development:\n\n- Code completion to generation\n- Code review to instant feedback\n- Debugging to root cause analysis\n- Deployment to one-click automation\n\nDevs aren't replaced. They're amplified. ${hashtags}`;
+            }
+            return null;
+          },
+          () => {
+            if (/automat/.test(lower)) {
+              return `Automation isn't just about saving time.\n\nIt's about eliminating cognitive load.\n\nWhen routine tasks run themselves, your brain is free for work that matters.\n\nBuild once. Automate forever. ${hashtags}`;
+            }
+            return null;
+          },
+          () => {
+            if (/future|trend|202[5-9]|next\s*gen/.test(lower)) {
+              return `The next wave of tech:\n\n- AI agents as coworkers\n- Personalized medicine via ML\n- Ambient computing everywhere\n- Open-source foundation models\n\nWe're just getting started. ${hashtags}`;
+            }
+            return null;
+          },
+          () => {
+            if (/data|analytics|insight/.test(lower)) {
+              return `Data in 2026:\n\n- Real-time pipelines are default\n- AI turns data into insights\n- Privacy-preserving ML is mainstream\n- Every company is a data company\n\nData without action is just noise. ${hashtags}`;
+            }
+            return null;
+          },
+          () => {
+            const clean = topic.replace(/^(post|tweet|share|publish|something\s+related\s+to|about)\s+/gi, "").trim();
+            const words = clean.split(/\s+/);
+            const title = words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+            return `${title}\n\nWorth watching. The intersection of tech and real impact is where the exciting stuff happens.\n\nStay curious. Keep building. ${hashtags}`;
+          },
+        ];
+
+        let tweet = "";
+        for (const template of tweetTemplates) {
+          const result = template();
+          if (result) { tweet = result; break; }
+        }
+
+        // Truncate to 280 chars
+        if (tweet.length > 280) {
+          const tagMatch = tweet.match(/\n\n#\S+(\s#\S+)*$/);
+          const tagStr = tagMatch ? tagMatch[0] : "";
+          const maxBody = 280 - tagStr.length - 4;
+          tweet = tweet.slice(0, maxBody).trimEnd() + "…" + tagStr;
+        }
+        content = tweet;
+      }
 
       const result = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", { text: content });
       return {
         ok: result.ok,
         action: "twitter_post",
-        message: result.ok ? `Posted to Twitter: "${content}"` : `Twitter post failed: ${result.error}`,
+        message: result.ok ? `Posted to Twitter:\n${content}` : `Twitter post failed: ${result.error}`,
       };
     }
 
@@ -5345,21 +5465,34 @@ async function main() {
       const subMatch = message.match(/(?:to\s+)?r\/(\w+)/i);
       if (!subMatch) return { ok: false, action: "reddit_post", message: "Please specify a subreddit (e.g. r/programming)." };
       const subreddit = subMatch[1];
-      // Extract title and body
-      let content = message
+      // Extract topic
+      let topic = message
         .replace(/^(post|submit|share|publish)\s+(to\s+)?r\/\w+\s*[:\-]?\s*/i, "")
         .replace(/\breddit\b/gi, "")
         .trim();
-      // Try to split title|body
-      const parts = content.split(/\|/).map(s => s.trim());
-      const title = parts[0] || content;
-      const body = parts[1] || "";
+      // Try to split title|body (user-provided)
+      const parts = topic.split(/\|/).map(s => s.trim());
+      let title = parts[0] || topic;
+      let body = parts[1] || "";
+
+      // If title looks like a raw topic (no capitalization, no punctuation), generate proper title
+      if (title && !/[.!?]$/.test(title) && title === title.toLowerCase() && title.split(/\s+/).length > 2) {
+        // Capitalize first letter of each word for title case
+        title = title.replace(/\b\w/g, (c) => c.toUpperCase());
+        // Generate body from topic
+        if (!body) {
+          const sentences = topic.split(/[.!?]+/).map(s => s.trim()).filter(Boolean);
+          body = sentences.length > 1
+            ? sentences.slice(0, 4).join(". ") + "."
+            : `Here are my thoughts on ${topic}:\n\nThis is a topic worth exploring in detail. Key aspects include the practical applications, current trends, and future implications.`;
+        }
+      }
 
       const result = await proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", { subreddit, title, body });
       return {
         ok: result.ok,
         action: "reddit_post",
-        message: result.ok ? `Posted to r/${subreddit}: "${title}"` : `Reddit post failed: ${result.error}`,
+        message: result.ok ? `Posted to r/${subreddit}:\nTitle: ${title}\n${body ? `Body: ${body.slice(0, 200)}` : ""}` : `Reddit post failed: ${result.error}`,
       };
     }
 
