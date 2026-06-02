@@ -136,25 +136,25 @@ export function AsciiBanner() {
   );
 }
 
-export function AsciiChat() { return <MessageSquare size={14} />; }
-export function AsciiDashboard() { return <LayoutDashboard size={14} />; }
-export function AsciiVault() { return <KeyRound size={14} />; }
-export function AsciiBudget() { return <BarChart3 size={14} />; }
-export function AsciiMemory() { return <Brain size={14} />; }
-export function AsciiWorkProducts() { return <FileText size={14} />; }
-export function AsciiAgents() { return <Users size={14} />; }
-export function AsciiMCP() { return <Puzzle size={14} />; }
-export function AsciiSettings() { return <Settings size={14} />; }
-export function AsciiTeams() { return <Users size={14} />; }
-export function AsciiUsers() { return <Users size={14} />; }
-export function AsciiGraph() { return <Share2 size={14} />; }
-export function AsciiEye() { return <Eye size={14} />; }
-export function AsciiTrash() { return <Trash2 size={14} />; }
-export function AsciiRefresh() { return <RefreshCw size={14} />; }
-export function AsciiMenu() { return <Menu size={14} />; }
-export function AsciiPlus() { return <Plus size={14} />; }
-export function AsciiCheck() { return <Check size={14} />; }
-export function AsciiX() { return <X size={14} />; }
-export function AsciiPlay() { return <Play size={14} />; }
-export function AsciiGitBranch() { return <GitBranch size={14} />; }
-export function AsciiActivity() { return <Activity size={14} />; }
+export function AsciiChat(props?: IconProps) { return <MessageSquare size={14} {...props} />; }
+export function AsciiDashboard(props?: IconProps) { return <LayoutDashboard size={14} {...props} />; }
+export function AsciiVault(props?: IconProps) { return <KeyRound size={14} {...props} />; }
+export function AsciiBudget(props?: IconProps) { return <BarChart3 size={14} {...props} />; }
+export function AsciiMemory(props?: IconProps) { return <Brain size={14} {...props} />; }
+export function AsciiWorkProducts(props?: IconProps) { return <FileText size={14} {...props} />; }
+export function AsciiAgents(props?: IconProps) { return <Users size={14} {...props} />; }
+export function AsciiMCP(props?: IconProps) { return <Puzzle size={14} {...props} />; }
+export function AsciiSettings(props?: IconProps) { return <Settings size={14} {...props} />; }
+export function AsciiTeams(props?: IconProps) { return <Users size={14} {...props} />; }
+export function AsciiUsers(props?: IconProps) { return <Users size={14} {...props} />; }
+export function AsciiGraph(props?: IconProps) { return <Share2 size={14} {...props} />; }
+export function AsciiEye(props?: IconProps) { return <Eye size={14} {...props} />; }
+export function AsciiTrash(props?: IconProps) { return <Trash2 size={14} {...props} />; }
+export function AsciiRefresh(props?: IconProps) { return <RefreshCw size={14} {...props} />; }
+export function AsciiMenu(props?: IconProps) { return <Menu size={14} {...props} />; }
+export function AsciiPlus(props?: IconProps) { return <Plus size={14} {...props} />; }
+export function AsciiCheck(props?: IconProps) { return <Check size={14} {...props} />; }
+export function AsciiX(props?: IconProps) { return <X size={14} {...props} />; }
+export function AsciiPlay(props?: IconProps) { return <Play size={14} {...props} />; }
+export function AsciiGitBranch(props?: IconProps) { return <GitBranch size={14} {...props} />; }
+export function AsciiActivity(props?: IconProps) { return <Activity size={14} {...props} />; }

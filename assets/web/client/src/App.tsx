@@ -1,25 +1,28 @@
-import { useState, useEffect, Suspense, memo } from "react";
+import { useState, useEffect, Suspense, lazy, memo } from "react";
 import Sidebar from "./components/Sidebar";
 import ChatView from "./components/ChatView";
-import Dashboard from "./components/Dashboard";
-import VaultPanel from "./components/VaultPanel";
-import BudgetPanel from "./components/BudgetPanel";
-import MemoryPanel from "./components/MemoryPanel";
-import KnowledgeGraphPanel from "./components/KnowledgeGraphPanel";
-import PipelinePanel from "./components/PipelinePanel";
-import HealthPanel from "./components/HealthPanel";
-import WorkProductsPanel from "./components/WorkProductsPanel";
-import SubAgentPanel from "./components/SubAgentPanel";
-import MCPPanel from "./components/MCPPanel";
-import AgentsPanel from "./components/AgentsPanel";
-import TeamPanel from "./components/TeamPanel";
-import SettingsPanel from "./components/SettingsPanel";
 import { ToasterProvider } from "./components/Toast";
 import { AsciiMenu } from "./components/Icons";
 import { ChatProvider, useChat } from "./context/ChatContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const VaultPanel = lazy(() => import("./components/VaultPanel"));
+const BudgetPanel = lazy(() => import("./components/BudgetPanel"));
+const MemoryPanel = lazy(() => import("./components/MemoryPanel"));
+const KnowledgeGraphPanel = lazy(() => import("./components/KnowledgeGraphPanel"));
+const PipelinePanel = lazy(() => import("./components/PipelinePanel"));
+const HealthPanel = lazy(() => import("./components/HealthPanel"));
+const WorkProductsPanel = lazy(() => import("./components/WorkProductsPanel"));
+const SubAgentPanel = lazy(() => import("./components/SubAgentPanel"));
+const MCPPanel = lazy(() => import("./components/MCPPanel"));
+const AgentsPanel = lazy(() => import("./components/AgentsPanel"));
+const TeamPanel = lazy(() => import("./components/TeamPanel"));
+const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
+
 export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings";
+
+const PANELFallback = <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
 
 export default function App() {
   return (
@@ -36,7 +39,6 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { ws, connected } = useChat();
 
-  // Auto-navigate to SubAgent view on swarm recovery (survives page refresh)
   useEffect(() => {
     if (!ws) return;
     const handler = (e: MessageEvent) => {
@@ -59,50 +61,22 @@ function AppContent() {
         <div className="main-area">
           <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
           <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""}`}>
-            <Suspense fallback={<div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>}>
-            <div style={{ display: activeView === "chat" ? "flex" : "none", flex: 1, flexDirection: "column", height: "100%", width: "100%" }}>
-              <ChatView />
-            </div>
-            <div style={{ display: activeView === "dashboard" ? "block" : "none", height: "100%", width: "100%" }}>
-              <Dashboard />
-            </div>
-            <div style={{ display: activeView === "vault" ? "block" : "none", height: "100%", width: "100%" }}>
-              <VaultPanel />
-            </div>
-            <div style={{ display: activeView === "budget" ? "block" : "none", height: "100%", width: "100%" }}>
-              <BudgetPanel />
-            </div>
-            <div style={{ display: activeView === "memory" ? "block" : "none", height: "100%", width: "100%" }}>
-              <MemoryPanel />
-            </div>
-            <div style={{ display: activeView === "knowledge-graph" ? "block" : "none", height: "100%", width: "100%" }}>
-              <KnowledgeGraphPanel />
-            </div>
-            <div style={{ display: activeView === "pipeline" ? "block" : "none", height: "100%", width: "100%" }}>
-              <PipelinePanel />
-            </div>
-            <div style={{ display: activeView === "health" ? "block" : "none", height: "100%", width: "100%" }}>
-              <HealthPanel />
-            </div>
-            <div style={{ display: activeView === "work-products" ? "block" : "none", height: "100%", width: "100%" }}>
-              <WorkProductsPanel />
-            </div>
-            <div style={{ display: activeView === "agents" ? "block" : "none", height: "100%", width: "100%" }}>
-              <SubAgentPanel ws={ws} />
-            </div>
-            <div style={{ display: activeView === "agent-discovery" ? "block" : "none", height: "100%", width: "100%" }}>
-              <AgentsPanel />
-            </div>
-            <div style={{ display: activeView === "teams" ? "block" : "none", height: "100%", width: "100%" }}>
-              <TeamPanel onNavigate={(v) => setActiveView(v as View)} />
-            </div>
-            <div style={{ display: activeView === "mcp" ? "block" : "none", height: "100%", width: "100%" }}>
-              <MCPPanel />
-            </div>
-            <div style={{ display: activeView === "settings" ? "block" : "none", height: "100%", width: "100%" }}>
-              <SettingsPanel />
-            </div>
-          </Suspense>
+            <Suspense fallback={PANELFallback}>
+              {activeView === "chat" && <ChatView />}
+              {activeView === "dashboard" && <Dashboard />}
+              {activeView === "vault" && <VaultPanel />}
+              {activeView === "budget" && <BudgetPanel />}
+              {activeView === "memory" && <MemoryPanel />}
+              {activeView === "knowledge-graph" && <KnowledgeGraphPanel />}
+              {activeView === "pipeline" && <PipelinePanel />}
+              {activeView === "health" && <HealthPanel />}
+              {activeView === "work-products" && <WorkProductsPanel />}
+              {activeView === "agents" && <SubAgentPanel ws={ws} />}
+              {activeView === "agent-discovery" && <AgentsPanel />}
+              {activeView === "teams" && <TeamPanel onNavigate={(v) => setActiveView(v as View)} />}
+              {activeView === "mcp" && <MCPPanel />}
+              {activeView === "settings" && <SettingsPanel />}
+            </Suspense>
           </div>
         </div>
       </div>

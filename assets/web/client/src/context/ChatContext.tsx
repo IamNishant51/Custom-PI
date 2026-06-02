@@ -42,6 +42,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let closed = false;
+    let retryCount = 0;
+    const MAX_DELAY = 30_000;
+    const BASE_DELAY = 1_000;
 
     function connect() {
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -50,13 +53,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (!closed) {
           setWs(socket);
           setConnected(true);
+          retryCount = 0;
         }
       };
       socket.onclose = () => {
         if (!closed) {
           setWs(null);
           setConnected(false);
-          reconnectTimer = setTimeout(connect, 2000);
+          const delay = Math.min(BASE_DELAY * Math.pow(2, retryCount), MAX_DELAY);
+          retryCount++;
+          reconnectTimer = setTimeout(connect, delay);
         }
       };
       socket.onerror = () => socket.close();
