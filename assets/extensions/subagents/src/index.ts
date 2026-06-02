@@ -4805,6 +4805,20 @@ If nothing to report, return: {}`;
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Tool execution enforcement — block edit/write tools in PLAN MODE
+  // ─────────────────────────────────────────────────────────────────────────
+  pi.on("tool_call", (event, _ctx) => {
+    try {
+      if (appMode === "plan" && (event.toolName === "write" || event.toolName === "edit")) {
+        return {
+          block: true,
+          reason: "Tool '" + event.toolName + "' is blocked in PLAN MODE. Press Tab to switch to AGENT MODE to make changes.",
+        };
+      }
+    } catch {}
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Context Monitor — track context % on each turn end, emit warnings
   // ─────────────────────────────────────────────────────────────────────────
   pi.on("turn_end", async (_event, ctx) => {
