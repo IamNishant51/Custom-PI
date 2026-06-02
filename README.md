@@ -1,15 +1,10 @@
-<p align="center">
-  <img src="assets/Custom-pi-logo.png" alt="  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗
- ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║
- ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║
- ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║
- ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
-  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝" width="80%" />
-</p>
+# Custom-PI
+
+*HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.*  
+*Knowledge graph memory · Deployment orchestration · Service health monitoring · Adaptive throttling · Web UI*
 
 <p align="center">
-  <b>HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.</b><br/>
-  <i>Knowledge graph memory | Deployment orchestration | Service health monitoring | Adaptive throttling | Web UI</i>
+  <img src="assets/Custom-pi-logo.png" alt="Custom-PI logo" width="80%" />
 </p>
 
 <p align="center">
