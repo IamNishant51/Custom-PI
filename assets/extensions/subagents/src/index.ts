@@ -2007,7 +2007,13 @@ function patchToolExecution(proto: any) {
       });
       return truncateLines([headerLine, topB, ...boxed, botB], width);
     }
-    return truncateLines([headerLine, ...contentLines], width);
+    // Don't pad lines with spaces (would extend background colors), just truncate
+    const allLines = [headerLine, ...contentLines];
+    return allLines.map(l => {
+      const vw = visibleWidth(l);
+      if (vw > width) return truncateToWidth(l, width);
+      return l;
+    });
   };
 }
 
