@@ -366,5 +366,29 @@ MIT - Licensed under the MIT License. Free to use, modify, and distribute.
 
 ---
 
+## Contributing
+
+Contributions are welcome! To keep the project secure and maintainable, please follow these rules:
+
+### Branch Protection
+
+- **No direct pushes to `main`** — all changes must go through a pull request.
+- Each PR requires **at least 1 review approval** before merging.
+- All **status checks** (typecheck, test, validate, audit) must pass.
+- **Stale reviews are dismissed** when new commits are pushed.
+
+### How to Contribute
+
+1. Fork the repo and create a feature branch from `main`.
+2. Make your changes and ensure all tests pass (`npm test && npx tsc --noEmit`).
+3. Open a pull request with a clear title and description.
+4. Wait for review and address any feedback.
+
+### Reporting Issues
+
+Open an issue at [github.com/IamNishant51/Custom-PI/issues](https://github.com/IamNishant51/Custom-PI/issues) with a clear description, reproduction steps, and environment details.
+
+---
+
 **Hermes speed + Paperclip obsession = custom-pi**  
 *One agent to configure them all. And in the terminal bind them.*
