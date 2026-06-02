@@ -5274,6 +5274,166 @@ async function main() {
   });
   app.post("/api/social/email/disconnect", async () => proxyToBridge(EMAIL_BRIDGE, "/disconnect", "POST"));
 
+  // Disconnect platforms
+  app.post("/api/social/twitter/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/twitter/disconnect", "POST"));
+  app.post("/api/social/reddit/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/reddit/disconnect", "POST"));
+
+  // ── Social Chat Agent ────────────────────────────────────────────────────
+  // Parses natural language and routes to the appropriate social action
+
+  app.post("/api/social/chat", async (req) => {
+    const { message } = req.body;
+    if (!message) return { ok: false, error: "message required" };
+
+    const msg = message.toLowerCase().trim();
+
+    // ── Status check ────────────────────────────────────────────────────
+    if (/\b(status|connected|what.*(connect|account|platform))\b/.test(msg)) {
+      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => null);
+      const email = await proxyToBridge(EMAIL_BRIDGE, "/status", "GET").catch(() => null);
+      const lines = [];
+      if (social?.platforms?.twitter?.configured) lines.push("Twitter: connected");
+      else lines.push("Twitter: not connected");
+      if (social?.platforms?.reddit?.configured) lines.push("Reddit: connected");
+      else lines.push("Reddit: not connected");
+      if (email?.configured) lines.push(`Email: connected (${email.email})`);
+      else lines.push("Email: not configured");
+      return { ok: true, action: "status", message: lines.join("\n") };
+    }
+
+    // ── Twitter post ────────────────────────────────────────────────────
+    if (/\b(post|tweet|share|publish|x\.com|twitter)\b/.test(msg) && !/\breddit\b/.test(msg) && !/\bemail\b/.test(msg) && !/\breply\b/.test(msg) && !/\bcomment\b/.test(msg)) {
+      // Extract the actual content — remove common prefixes
+      let content = message
+        .replace(/^(post|tweet|share|publish)\s+(on\s+)?(twitter|x\.com|x)\s*[:\-]?\s*/i, "")
+        .replace(/^(post|tweet|share|publish)\s+/i, "")
+        .replace(/^(about|about\s+my|about\s+this)\s+/i, "")
+        .trim();
+      if (!content) content = message;
+
+      // Truncate to 280 chars
+      if (content.length > 280) content = content.slice(0, 277) + "...";
+
+      const result = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", { text: content });
+      return {
+        ok: result.ok,
+        action: "twitter_post",
+        message: result.ok ? `Posted to Twitter: "${content}"` : `Twitter post failed: ${result.error}`,
+      };
+    }
+
+    // ── Twitter reply ───────────────────────────────────────────────────
+    if (/\b(reply|respond)\b/.test(msg) && (/\b twitter\b/.test(msg) || /\bx\.com\b/.test(msg))) {
+      const urlMatch = message.match(/https?:\/\/(x\.com|twitter\.com)\/\S+/);
+      if (!urlMatch) return { ok: false, action: "twitter_reply", message: "Please provide the tweet URL to reply to." };
+      const text = message.replace(urlMatch[0], "").replace(/reply|respond|to\s*(tweet|this)?/gi, "").trim();
+      if (!text) return { ok: false, action: "twitter_reply", message: "Please provide the reply text." };
+      const result = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", { url: urlMatch[0], text });
+      return {
+        ok: result.ok,
+        action: "twitter_reply",
+        message: result.ok ? `Replied to tweet` : `Twitter reply failed: ${result.error}`,
+      };
+    }
+
+    // ── Reddit post ─────────────────────────────────────────────────────
+    if (/\b(post|submit|share|publish)\b/.test(msg) && /\breddit\b/.test(msg)) {
+      const subMatch = message.match(/(?:to\s+)?r\/(\w+)/i);
+      if (!subMatch) return { ok: false, action: "reddit_post", message: "Please specify a subreddit (e.g. r/programming)." };
+      const subreddit = subMatch[1];
+      // Extract title and body
+      let content = message
+        .replace(/^(post|submit|share|publish)\s+(to\s+)?r\/\w+\s*[:\-]?\s*/i, "")
+        .replace(/\breddit\b/gi, "")
+        .trim();
+      // Try to split title|body
+      const parts = content.split(/\|/).map(s => s.trim());
+      const title = parts[0] || content;
+      const body = parts[1] || "";
+
+      const result = await proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", { subreddit, title, body });
+      return {
+        ok: result.ok,
+        action: "reddit_post",
+        message: result.ok ? `Posted to r/${subreddit}: "${title}"` : `Reddit post failed: ${result.error}`,
+      };
+    }
+
+    // ── Reddit comment ──────────────────────────────────────────────────
+    if (/\b(comment|reply)\b/.test(msg) && /\breddit\b/.test(msg)) {
+      const urlMatch = message.match(/https?:\/\/(www\.)?reddit\.com\/\S+/);
+      if (!urlMatch) return { ok: false, action: "reddit_comment", message: "Please provide the Reddit post URL to comment on." };
+      const text = message.replace(urlMatch[0], "").replace(/comment|reply|on\s*(this|post)?/gi, "").trim();
+      if (!text) return { ok: false, action: "reddit_comment", message: "Please provide the comment text." };
+      const result = await proxyToBridge(SOCIAL_BRIDGE, "/reddit/comment", "POST", { url: urlMatch[0], text });
+      return {
+        ok: result.ok,
+        action: "reddit_comment",
+        message: result.ok ? `Commented on Reddit post` : `Reddit comment failed: ${result.error}`,
+      };
+    }
+
+    // ── Email send ──────────────────────────────────────────────────────
+    if (/\b(email|mail|send\s+email|send\s+mail)\b/.test(msg)) {
+      const toMatch = message.match(/(?:to|@)\s*[\w.+-]+@[\w-]+\.[\w.]+/i) || message.match(/[\w.+-]+@[\w-]+\.[\w.]+/i);
+      if (!toMatch) return { ok: false, action: "email_send", message: "Please provide a recipient email address." };
+      const to = toMatch[0].replace(/^(to|@)\s*/i, "").trim();
+
+      // Extract subject and body
+      let subject = "";
+      let body = "";
+      const subMatch = message.match(/subject[:\s]+(.+?)(?:\s+body|\s+saying|\s+content|\s+message|$)/i);
+      const bodyMatch = message.match(/(?:body|saying|content|message)[:\s]+(.+)/i);
+
+      if (subMatch) subject = subMatch[1].trim();
+      if (bodyMatch) body = bodyMatch[1].trim();
+
+      // If no structured subject/body, use simple parsing
+      if (!subject && !body) {
+        const afterTo = message.slice(message.indexOf(to) + to.length).trim();
+        const parts = afterTo.split(/(?:\s+saying\s+|\s+subject\s+|\s+about\s+)/i);
+        if (parts.length >= 2) {
+          subject = parts[0].replace(/^[:\-\s]+/, "").trim();
+          body = parts.slice(1).join(" ").trim();
+        } else {
+          subject = "Message from PI Agent";
+          body = afterTo.replace(/^[:\-\s]+/, "").trim();
+        }
+      }
+      if (!body) body = subject;
+
+      const result = await proxyToBridge(EMAIL_BRIDGE, "/send", "POST", { to, subject, body });
+      return {
+        ok: result.ok,
+        action: "email_send",
+        message: result.ok ? `Email sent to ${to}: "${subject}"` : `Email failed: ${result.error}`,
+      };
+    }
+
+    // ── Email read ──────────────────────────────────────────────────────
+    if (/\b(read|check|inbox|emails?)\b/.test(msg) && /\b(email|mail|inbox)\b/.test(msg)) {
+      const result = await proxyToBridge(EMAIL_BRIDGE, "/read?folder=INBOX&limit=10", "GET");
+      if (!result.ok) return { ok: false, action: "email_read", message: `Failed to read emails: ${result.error}` };
+      const emails = result.emails || [];
+      if (emails.length === 0) return { ok: true, action: "email_read", message: "No emails in inbox." };
+      const lines = emails.map(e => `• From: ${e.from}\n  Subject: ${e.subject}\n  Date: ${e.date}`);
+      return { ok: true, action: "email_read", message: `Recent emails:\n${lines.join("\n\n")}` };
+    }
+
+    // ── Help ────────────────────────────────────────────────────────────
+    return {
+      ok: true,
+      action: "help",
+      message: `I can help you with social media. Try:
+• "post about my project on twitter"
+• "tweet: Hello world!"
+• "post to r/programming: My new tool"
+• "email john@example.com saying meeting at 3pm"
+• "check my email inbox"
+• "check status"`,
+    };
+  });
+
   // Start Social Bridge automatically if not running
   async function ensureSocialBridge() {
     try {

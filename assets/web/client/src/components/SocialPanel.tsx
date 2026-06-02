@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface SocialStatus {
   ok: boolean;
@@ -22,44 +22,36 @@ interface EmailStatus {
   error?: string;
 }
 
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+  timestamp: number;
+  action?: string;
+}
+
 export default function SocialPanel() {
   const [social, setSocial] = useState<SocialStatus | null>(null);
   const [email, setEmail] = useState<EmailStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeConnect, setActiveConnect] = useState<"twitter" | "reddit" | "email" | null>(null);
 
-  // Twitter form
-  const [twUser, setTwUser] = useState("");
-  const [twPass, setTwPass] = useState("");
-  const [twLoading, setTwLoading] = useState(false);
-  const [twMsg, setTwMsg] = useState("");
+  // Chat state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Reddit form
-  const [rdUser, setRdUser] = useState("");
-  const [rdPass, setRdPass] = useState("");
-  const [rdLoading, setRdLoading] = useState(false);
-  const [rdMsg, setRdMsg] = useState("");
+  // Connect form state
+  const [formUser, setFormUser] = useState("");
+  const [formPass, setFormPass] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formLoading, setFormLoading] = useState(false);
+  const [formMsg, setFormMsg] = useState("");
 
-  // Email form
-  const [emEmail, setEmEmail] = useState("");
-  const [emPass, setEmPass] = useState("");
-  const [emName, setEmName] = useState("");
-  const [emLoading, setEmLoading] = useState(false);
-  const [emMsg, setEmMsg] = useState("");
-
-  // Post form
-  const [postPlatform, setPostPlatform] = useState<"twitter" | "reddit">("twitter");
-  const [postText, setPostText] = useState("");
-  const [postSub, setPostSub] = useState("");
-  const [postTitle, setPostTitle] = useState("");
-  const [postLoading, setPostLoading] = useState(false);
-  const [postMsg, setPostMsg] = useState("");
-
-  // Email send form
-  const [emTo, setEmTo] = useState("");
-  const [emSubject, setEmSubject] = useState("");
-  const [emBody, setEmBody] = useState("");
-  const [emSendLoading, setEmSendLoading] = useState(false);
-  const [emSendMsg, setEmSendMsg] = useState("");
+  let msgId = 0;
+  function nextId() { return `sm_${++msgId}_${Date.now()}`; }
 
   async function fetchStatus() {
     try {
@@ -73,85 +65,98 @@ export default function SocialPanel() {
     setLoading(false);
   }
 
-  useEffect(() => { fetchStatus(); const t = setInterval(fetchStatus, 10000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    fetchStatus();
+    // Welcome message
+    setMessages([{
+      id: nextId(),
+      role: "assistant",
+      text: "Hey! I can post to Twitter, Reddit, or send emails for you. What would you like to do?",
+      timestamp: Date.now(),
+    }]);
+  }, []);
 
-  async function loginTwitter() {
-    setTwLoading(true); setTwMsg("");
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  async function sendChat() {
+    const text = input.trim();
+    if (!text || chatLoading) return;
+    setInput("");
+
+    const userMsg: ChatMessage = { id: nextId(), role: "user", text, timestamp: Date.now() };
+    setMessages(prev => [...prev, userMsg]);
+    setChatLoading(true);
+
     try {
-      const r = await fetch("/api/social/twitter/login", {
+      const r = await fetch("/api/social/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: twUser, password: twPass }),
+        body: JSON.stringify({ message: text }),
       }).then(r => r.json());
-      setTwMsg(r.ok ? "✅ " + r.message : "❌ " + r.error);
-      if (r.ok) { setTwUser(""); setTwPass(""); fetchStatus(); }
-    } catch { setTwMsg("❌ Connection failed"); }
-    setTwLoading(false);
+
+      setMessages(prev => [...prev, {
+        id: nextId(),
+        role: "assistant",
+        text: r.message || "Done.",
+        timestamp: Date.now(),
+        action: r.action,
+      }]);
+
+      // Refresh status after any action
+      if (r.ok && r.action !== "help") fetchStatus();
+    } catch {
+      setMessages(prev => [...prev, {
+        id: nextId(),
+        role: "assistant",
+        text: "Something went wrong. Is the social bridge running?",
+        timestamp: Date.now(),
+      }]);
+    }
+    setChatLoading(false);
+    inputRef.current?.focus();
   }
 
-  async function loginReddit() {
-    setRdLoading(true); setRdMsg("");
-    try {
-      const r = await fetch("/api/social/reddit/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: rdUser, password: rdPass }),
-      }).then(r => r.json());
-      setRdMsg(r.ok ? "✅ " + r.message : "❌ " + r.error);
-      if (r.ok) { setRdUser(""); setRdPass(""); fetchStatus(); }
-    } catch { setRdMsg("❌ Connection failed"); }
-    setRdLoading(false);
-  }
-
-  async function configureEmail() {
-    setEmLoading(true); setEmMsg("");
-    try {
-      const r = await fetch("/api/social/email/configure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emEmail, appPassword: emPass, displayName: emName }),
-      }).then(r => r.json());
-      setEmMsg(r.ok ? "✅ " + r.message : "❌ " + r.error);
-      if (r.ok) { setEmEmail(""); setEmPass(""); setEmName(""); fetchStatus(); }
-    } catch { setEmMsg("❌ Connection failed"); }
-    setEmLoading(false);
-  }
-
-  async function submitPost() {
-    setPostLoading(true); setPostMsg("");
+  async function connectPlatform() {
+    if (!activeConnect) return;
+    setFormLoading(true);
+    setFormMsg("");
     try {
       let r;
-      if (postPlatform === "twitter") {
-        r = await fetch("/api/social/twitter/post", {
+      if (activeConnect === "twitter") {
+        r = await fetch("/api/social/twitter/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: postText }),
+          body: JSON.stringify({ username: formUser, password: formPass }),
+        }).then(r => r.json());
+      } else if (activeConnect === "reddit") {
+        r = await fetch("/api/social/reddit/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: formUser, password: formPass }),
         }).then(r => r.json());
       } else {
-        r = await fetch("/api/social/reddit/post", {
+        r = await fetch("/api/social/email/configure", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subreddit: postSub, title: postTitle, body: postText }),
+          body: JSON.stringify({ email: formUser, appPassword: formPass, displayName: formName }),
         }).then(r => r.json());
       }
-      setPostMsg(r.ok ? "✅ " + r.message : "❌ " + r.error);
-      if (r.ok) { setPostText(""); setPostTitle(""); fetchStatus(); }
-    } catch { setPostMsg("❌ Connection failed"); }
-    setPostLoading(false);
+      setFormMsg(r.ok ? "✅ Connected!" : `❌ ${r.error}`);
+      if (r.ok) {
+        setTimeout(() => { setActiveConnect(null); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(""); }, 1500);
+        fetchStatus();
+      }
+    } catch { setFormMsg("❌ Bridge not running"); }
+    setFormLoading(false);
   }
 
-  async function sendEmail() {
-    setEmSendLoading(true); setEmSendMsg("");
+  async function disconnectPlatform(platform: string) {
     try {
-      const r = await fetch("/api/social/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: emTo, subject: emSubject, body: emBody }),
-      }).then(r => r.json());
-      setEmSendMsg(r.ok ? "✅ " + r.message : "❌ " + r.error);
-      if (r.ok) { setEmTo(""); setEmSubject(""); setEmBody(""); fetchStatus(); }
-    } catch { setEmSendMsg("❌ Connection failed"); }
-    setEmSendLoading(false);
+      await fetch(`/api/social/${platform}/disconnect`, { method: "POST" });
+      fetchStatus();
+    } catch {}
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
@@ -161,182 +166,194 @@ export default function SocialPanel() {
   const emailOk = email?.configured;
 
   return (
-    <div style={{ padding: 20, maxWidth: 900, margin: "0 auto" }}>
-      <h2 style={{ marginBottom: 20 }}>Social Accounts</h2>
-
-      {/* ── Status Cards ──────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 30 }}>
-        <StatusCard
-          title="Twitter / X"
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {/* ── Account Cards ──────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
+        <AccountCard
+          name="Twitter / X"
           connected={!!twitterOk}
-          detail={twitterOk ? `Posts today: ${social?.rateLimits?.twitter?.count || 0}/10` : "Not connected"}
+          detail={twitterOk ? `${social?.rateLimits?.twitter?.count || 0}/10 posts today` : null}
           color="#1DA1F2"
+          onConnect={() => { setActiveConnect("twitter"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("twitter")}
         />
-        <StatusCard
-          title="Reddit"
+        <AccountCard
+          name="Reddit"
           connected={!!redditOk}
-          detail={redditOk ? `Posts today: ${social?.rateLimits?.reddit?.count || 0}/10` : "Not connected"}
+          detail={redditOk ? `${social?.rateLimits?.reddit?.count || 0}/10 posts today` : null}
           color="#FF4500"
+          onConnect={() => { setActiveConnect("reddit"); setFormUser(""); setFormPass(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("reddit")}
         />
-        <StatusCard
-          title="Email (Gmail)"
+        <AccountCard
+          name="Email (Gmail)"
           connected={!!emailOk}
-          detail={emailOk ? `${email?.email} — ${email?.rateLimit?.sent || 0}/${email?.rateLimit?.limit || 500}` : "Not configured"}
+          detail={emailOk ? `${email?.rateLimit?.sent || 0}/${email?.rateLimit?.limit || 500} sent today` : null}
           color="#EA4335"
+          onConnect={() => { setActiveConnect("email"); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(""); }}
+          onDisconnect={() => disconnectPlatform("email")}
         />
       </div>
 
-      {/* ── Connect Forms ─────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 30 }}>
-        {!twitterOk && (
-          <ConnectForm
-            title="Connect Twitter"
-            userLabel="Username or email"
-            username={twUser} setUsername={setTwUser}
-            password={twPass} setPassword={setTwPass}
-            loading={twLoading} message={twMsg}
-            onSubmit={loginTwitter}
-          />
-        )}
-        {!redditOk && (
-          <ConnectForm
-            title="Connect Reddit"
-            userLabel="Reddit username"
-            username={rdUser} setUsername={setRdUser}
-            password={rdPass} setPassword={setRdPass}
-            loading={rdLoading} message={rdMsg}
-            onSubmit={loginReddit}
-          />
-        )}
-        {!emailOk && (
-          <ConnectForm
-            title="Connect Email"
-            userLabel="Gmail address"
-            username={emEmail} setUsername={setEmEmail}
-            password={emPass} setPassword={setEmPass}
-            loading={emLoading} message={emMsg}
-            onSubmit={configureEmail}
-            extraField={{ label: "Display name", value: emName, onChange: setEmName }}
-          />
-        )}
-      </div>
-
-      {/* ── Post Form ─────────────────────────────────────────────────── */}
-      <div className="card" style={{ padding: 20, marginBottom: 20 }}>
-        <h3 style={{ marginBottom: 12 }}>Quick Post</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <button
-            className={`btn ${postPlatform === "twitter" ? "btn-primary" : "btn-ghost"}`}
-            onClick={() => setPostPlatform("twitter")}
-            disabled={!twitterOk}
-          >Twitter</button>
-          <button
-            className={`btn ${postPlatform === "reddit" ? "btn-primary" : "btn-ghost"}`}
-            onClick={() => setPostPlatform("reddit")}
-            disabled={!redditOk}
-          >Reddit</button>
-        </div>
-
-        {postPlatform === "reddit" && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+      {/* ── Connect Modal ─────────────────────────────────────────────── */}
+      {activeConnect && (
+        <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--hairline)", background: "var(--surface)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <strong style={{ fontSize: 13 }}>Connect {activeConnect === "email" ? "Email" : activeConnect === "twitter" ? "Twitter" : "Reddit"}</strong>
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => setActiveConnect(null)}>✕</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               className="input"
-              placeholder="Subreddit (e.g. programming)"
-              value={postSub}
-              onChange={e => setPostSub(e.target.value)}
-              style={{ flex: 1 }}
+              placeholder={activeConnect === "email" ? "Gmail address" : activeConnect === "twitter" ? "Username or email" : "Reddit username"}
+              value={formUser}
+              onChange={e => setFormUser(e.target.value)}
+              style={{ flex: 1, height: 32, fontSize: 13 }}
             />
             <input
               className="input"
-              placeholder="Post title"
-              value={postTitle}
-              onChange={e => setPostTitle(e.target.value)}
-              style={{ flex: 2 }}
+              type="password"
+              placeholder={activeConnect === "email" ? "App Password (16 chars)" : "Password"}
+              value={formPass}
+              onChange={e => setFormPass(e.target.value)}
+              style={{ flex: 1, height: 32, fontSize: 13 }}
             />
-          </div>
-        )}
-
-        <textarea
-          className="input"
-          placeholder={postPlatform === "twitter" ? "What's happening? (max 280 chars)" : "Post body (optional for link posts)"}
-          value={postText}
-          onChange={e => setPostText(e.target.value)}
-          rows={3}
-          style={{ resize: "vertical", marginBottom: 8 }}
-        />
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            className="btn btn-primary"
-            onClick={submitPost}
-            disabled={postLoading || (!twitterOk && !redditOk) || !postText}
-          >
-            {postLoading ? "Posting..." : `Post to ${postPlatform === "twitter" ? "Twitter" : "Reddit"}`}
-          </button>
-          {postMsg && <span style={{ fontSize: 13 }}>{postMsg}</span>}
-        </div>
-      </div>
-
-      {/* ── Email Send Form ───────────────────────────────────────────── */}
-      {emailOk && (
-        <div className="card" style={{ padding: 20, marginBottom: 20 }}>
-          <h3 style={{ marginBottom: 12 }}>Send Email</h3>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input className="input" placeholder="To (email)" value={emTo} onChange={e => setEmTo(e.target.value)} style={{ flex: 1 }} />
-            <input className="input" placeholder="Subject" value={emSubject} onChange={e => setEmSubject(e.target.value)} style={{ flex: 2 }} />
-          </div>
-          <textarea
-            className="input"
-            placeholder="Email body"
-            value={emBody}
-            onChange={e => setEmBody(e.target.value)}
-            rows={4}
-            style={{ resize: "vertical", marginBottom: 8 }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button className="btn btn-primary" onClick={sendEmail} disabled={emSendLoading || !emTo || !emSubject || !emBody}>
-              {emSendLoading ? "Sending..." : "Send Email"}
+            {activeConnect === "email" && (
+              <input
+                className="input"
+                placeholder="Display name (optional)"
+                value={formName}
+                onChange={e => setFormName(e.target.value)}
+                style={{ flex: 1, height: 32, fontSize: 13 }}
+              />
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={connectPlatform}
+              disabled={formLoading || !formUser || !formPass}
+              style={{ height: 32, fontSize: 13, padding: "0 16px" }}
+            >
+              {formLoading ? "..." : "Connect"}
             </button>
-            {emSendMsg && <span style={{ fontSize: 13 }}>{emSendMsg}</span>}
           </div>
+          {formMsg && <div style={{ fontSize: 12, marginTop: 6, color: formMsg.startsWith("✅") ? "var(--success)" : "var(--danger)" }}>{formMsg}</div>}
+          {activeConnect === "email" && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+              Enable 2-Step Verification on Gmail → Google Account → Security → App Passwords → Generate
+            </div>
+          )}
         </div>
       )}
-    </div>
-  );
-}
 
-function StatusCard({ title, connected, detail, color }: { title: string; connected: boolean; detail: string; color: string }) {
-  return (
-    <div className="card" style={{ padding: 16, borderLeft: `4px solid ${connected ? color : "#666"}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <div style={{ width: 10, height: 10, borderRadius: "50%", background: connected ? color : "#666" }} />
-        <strong>{title}</strong>
+      {/* ── Chat Agent ────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Messages */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+          {messages.map(msg => (
+            <div key={msg.id} style={{ marginBottom: 12, display: "flex", flexDirection: "column" }}>
+              <div style={{
+                display: "inline-flex",
+                alignItems: "flex-start",
+                gap: 8,
+                maxWidth: "80%",
+                alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+              }}>
+                {msg.role !== "user" && (
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%",
+                    background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14, flexShrink: 0, marginTop: 2,
+                  }}>
+                    {msg.action === "status" ? "📊" : msg.action?.includes("twitter") ? "🐦" : msg.action?.includes("reddit") ? "🔴" : msg.action?.includes("email") ? "✉️" : "🤖"}
+                  </div>
+                )}
+                <div style={{
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  background: msg.role === "user" ? "var(--accent)" : "var(--surface)",
+                  color: msg.role === "user" ? "#fff" : "var(--body)",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}>
+                  {msg.text}
+                </div>
+              </div>
+            </div>
+          ))}
+          {chatLoading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: "50%",
+                background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, flexShrink: 0,
+              }}>🤖</div>
+              <div style={{ padding: "10px 14px", borderRadius: 12, background: "var(--surface)", fontSize: 13, display: "flex", gap: 4 }}>
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div style={{ padding: "12px 20px", borderTop: "1px solid var(--hairline)", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <textarea
+              ref={inputRef}
+              className="input"
+              placeholder="Tell me what to do... (e.g. post about my project on twitter)"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+              rows={1}
+              style={{ flex: 1, resize: "none", fontSize: 13, minHeight: 38, maxHeight: 100 }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={sendChat}
+              disabled={chatLoading || !input.trim()}
+              style={{ height: 38, padding: "0 16px", flexShrink: 0 }}
+            >
+              Send
+            </button>
+          </div>
+        </div>
       </div>
-      <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{detail}</div>
     </div>
   );
 }
 
-function ConnectForm({
-  title, userLabel, username, setUsername, password, setPassword,
-  loading, message, onSubmit, extraField,
-}: {
-  title: string; userLabel: string; username: string; setUsername: (v: string) => void;
-  password: string; setPassword: (v: string) => void; loading: boolean; message: string;
-  onSubmit: () => void; extraField?: { label: string; value: string; onChange: (v: string) => void };
+function AccountCard({ name, connected, detail, color, onConnect, onDisconnect }: {
+  name: string; connected: boolean; detail: string | null; color: string;
+  onConnect: () => void; onDisconnect: () => void;
 }) {
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <h4 style={{ marginBottom: 8 }}>{title}</h4>
-      <input className="input" placeholder={userLabel} value={username} onChange={e => setUsername(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
-      <input className="input" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
-      {extraField && (
-        <input className="input" placeholder={extraField.label} value={extraField.value} onChange={e => extraField.onChange(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
-      )}
-      <button className="btn btn-primary" onClick={onSubmit} disabled={loading || !username || !password} style={{ width: "100%" }}>
-        {loading ? "Connecting..." : "Connect"}
-      </button>
-      {message && <div style={{ fontSize: 12, marginTop: 6 }}>{message}</div>}
+    <div style={{
+      flex: 1, padding: "12px 16px", borderRadius: 8,
+      border: `1px solid ${connected ? color + "40" : "var(--hairline)"}`,
+      background: connected ? color + "08" : "var(--surface)",
+      display: "flex", flexDirection: "column", gap: 6,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? color : "var(--muted)" }} />
+          <strong style={{ fontSize: 13 }}>{name}</strong>
+        </div>
+        {connected ? (
+          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px", color: "var(--danger)" }} onClick={onDisconnect}>
+            disconnect
+          </button>
+        ) : (
+          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 8px" }} onClick={onConnect}>
+            connect
+          </button>
+        )}
+      </div>
+      {detail && <div style={{ fontSize: 11, color: "var(--muted)" }}>{detail}</div>}
     </div>
   );
 }

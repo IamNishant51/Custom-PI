@@ -546,6 +546,20 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, result.ok ? 200 : 400, result);
     }
 
+    // ── Disconnect Platform ────────────────────────────────────────────
+    if (url.pathname === "/twitter/disconnect" && req.method === "POST") {
+      await closeBrowser("twitter");
+      const profileDir = path.join(PROFILES_DIR, "twitter");
+      if (fs.existsSync(profileDir)) fs.rmSync(profileDir, { recursive: true, force: true });
+      return jsonResponse(res, 200, { ok: true, message: "Twitter disconnected" });
+    }
+    if (url.pathname === "/reddit/disconnect" && req.method === "POST") {
+      await closeBrowser("reddit");
+      const profileDir = path.join(PROFILES_DIR, "reddit");
+      if (fs.existsSync(profileDir)) fs.rmSync(profileDir, { recursive: true, force: true });
+      return jsonResponse(res, 200, { ok: true, message: "Reddit disconnected" });
+    }
+
     // ── Close Browser ───────────────────────────────────────────────────
     if (url.pathname === "/close" && req.method === "POST") {
       const { platform } = await parseBody(req);
