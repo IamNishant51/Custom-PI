@@ -5539,7 +5539,150 @@ async function main() {
   }
 
   setInterval(processQueue, 30_000);
-  setTimeout(processQueue, 5_000); // also check shortly after startup
+  setTimeout(processQueue, 5_000);
+
+  // ── Autonomous Content Strategy ───────────────────────────────────────
+
+  const AUTONOMOUS_INTERVAL = 6 * 60 * 60 * 1000; // every 6 hours
+
+  const SECRET_PATTERNS = [
+    /sk-[a-zA-Z0-9]{20,}/,                          // OpenAI keys
+    /ghp_[a-zA-Z0-9]{36,}/,                          // GitHub PAT
+    /gho_[a-zA-Z0-9]{36,}/,                          // GitHub OAuth
+    /AKIA[0-9A-Z]{16}/,                              // AWS access key
+    /-----BEGIN (RSA|EC|OPENSSH|DSA|PGP) PRIVATE KEY-----/,
+    /(password|passwd|pwd|secret|api[_-]?key)\s*[:=]\s*['"][^'"]+['"]/i,
+    /https?:\/\/[^\/\s]+@[^\/\s]+/,                  // URL-embedded credentials
+    /\/home\/[a-z_][a-z0-9_-]*\//,                   // local paths
+    /~\/\.(pi|ssh|aws|config)\//,                    // dotfile paths
+  ];
+
+  function securityScan(text) {
+    const issues = [];
+    for (const pattern of SECRET_PATTERNS) {
+      if (pattern.test(text)) {
+        issues.push(`Matched: ${pattern}`);
+      }
+    }
+    return issues;
+  }
+
+  async function autonomousContentTick() {
+    console.log("[autonomous] Starting content generation tick...");
+    const drafts = [];
+
+    // 1. Scan codebase changes
+    let codeChanges = "";
+    try {
+      const { execSync } = await import("node:child_process");
+      const since = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+      const log = execSync(`git log --since="${since}" --oneline --no-decorate -20`, {
+        cwd: path.join(__dirname, "..", ".."),
+        encoding: "utf8",
+        timeout: 10000,
+      }).trim();
+      if (log) codeChanges = log;
+    } catch {}
+
+    // 2. Search trending topics
+    let trends = "";
+    try {
+      const results = await webSearch("latest in AI agentic frameworks LLM tools 2026", 5);
+      trends = typeof results === "string" ? results : results;
+    } catch {}
+
+    // 3. Generate post drafts via LLM
+    const systemPrompt = `You are a senior developer writing social media content about AI and software engineering. 
+Write engaging, expert-level posts that teach something valuable.
+
+RULES:
+- Each post must be self-contained and ready to publish
+- Write for different platforms: Twitter (max 260 chars), LinkedIn (longer, educational, 600-1200 chars)
+- Use the cheat sheet format for maximum engagement
+- Lead with a hook, teach a framework, end with insight
+- No buzzwords, no fluff, no weasel words
+- Never include API keys, paths, passwords, or secrets`;
+
+    const userPrompt = `Generate 2 social media posts based on this context:
+
+RECENT CODE CHANGES:
+${codeChanges || "No significant changes in the last 24 hours."}
+
+TRENDING TOPICS:
+${trends || "General AI and software development trends."}
+
+Return a JSON array. Each item:
+{
+  "platforms": ["twitter"] or ["linkedin"] or ["twitter", "linkedin"],
+  "text": "The post content",
+  "title": "Title (only for reddit posts)",
+  "subreddit": "Subreddit name (only for reddit posts)"
+}`;
+
+    let generated = [];
+    try {
+      const raw = await getLLMCompletion(systemPrompt, userPrompt);
+      const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*$/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) generated = parsed;
+    } catch (e) {
+      console.error("[autonomous] LLM generation error:", e.message);
+    }
+
+    // 4. Security scan + queue as drafts
+    for (const post of generated) {
+      if (!post.text || !post.platforms) continue;
+      const issues = securityScan(post.text);
+      if (issues.length > 0) {
+        console.log(`[autonomous] Draft blocked by security: ${issues.join(", ")}`);
+        continue;
+      }
+      const id = crypto.randomUUID();
+      try {
+        const stmt = queueDb.prepare(`
+          INSERT INTO social_queue (id, text, media_path, platforms, title, subreddit, scheduled_at, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')
+        `);
+        stmt.run(id, post.text, null, JSON.stringify(post.platforms), post.title || null, post.subreddit || null, Math.floor(Date.now() / 1000));
+        drafts.push(id);
+      } catch {}
+    }
+
+    console.log(`[autonomous] Generated ${drafts.length} draft(s)`);
+  }
+
+  // Drafts API
+  app.get("/api/social/drafts", async () => {
+    if (!queueDb) return { ok: false, items: [] };
+    const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'draft' ORDER BY created_at DESC").all();
+    return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };
+  });
+
+  app.post("/api/social/drafts/:id/approve", async (req) => {
+    if (!queueDb) return { ok: false, error: "Queue not available" };
+    const { id } = req.params;
+    const stmt = queueDb.prepare("UPDATE social_queue SET status = 'pending' WHERE id = ? AND status = 'draft'");
+    const info = stmt.run(id);
+    if (info.changes === 0) return { ok: false, error: "Draft not found or already approved" };
+    return { ok: true, message: "Draft approved and queued for publishing" };
+  });
+
+  app.post("/api/social/drafts/:id/reject", async (req) => {
+    if (!queueDb) return { ok: false, error: "Queue not available" };
+    const { id } = req.params;
+    queueDb.prepare("DELETE FROM social_queue WHERE id = ? AND status = 'draft'").run(id);
+    return { ok: true, message: "Draft rejected" };
+  });
+
+  // Manual trigger for autonomous tick
+  app.post("/api/social/autonomous/tick", async () => {
+    autonomousContentTick();
+    return { ok: true, message: "Autonomous content generation started. Check /api/social/drafts in a minute." };
+  });
+
+  // Schedule autonomous tick
+  setInterval(autonomousContentTick, AUTONOMOUS_INTERVAL);
+  setTimeout(autonomousContentTick, 60_000); // first tick after 1 minute
 
   // ── WebSocket ──────────────────────────────────────────────────────────
 

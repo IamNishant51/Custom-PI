@@ -60,6 +60,9 @@ export default function SocialPanel() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
 
+  const [drafts, setDrafts] = useState<QueueItem[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+
   async function fetchStatus() {
     try {
       const [s, e] = await Promise.all([
@@ -82,13 +85,23 @@ export default function SocialPanel() {
     setQueueLoading(false);
   }, []);
 
-  useEffect(() => { fetchStatus(); fetchQueue(); }, [fetchQueue]);
+  const fetchDrafts = useCallback(async () => {
+    setDraftsLoading(true);
+    try {
+      const res = await fetch("/api/social/drafts");
+      const d = await res.json();
+      if (d.ok) setDrafts(d.items || []);
+    } catch {}
+    setDraftsLoading(false);
+  }, []);
+
+  useEffect(() => { fetchStatus(); fetchQueue(); fetchDrafts(); }, [fetchQueue, fetchDrafts]);
 
   useEffect(() => {
     if (!scheduleOpen) return;
-    const interval = setInterval(fetchQueue, 15_000);
+    const interval = setInterval(() => { fetchQueue(); fetchDrafts(); }, 15_000);
     return () => clearInterval(interval);
-  }, [scheduleOpen, fetchQueue]);
+  }, [scheduleOpen, fetchQueue, fetchDrafts]);
 
   async function connectPlatform() {
     setFormLoading(true);
@@ -168,6 +181,21 @@ export default function SocialPanel() {
     try {
       await fetch(`/api/social/queue/${id}`, { method: "DELETE" });
       fetchQueue();
+    } catch {}
+  }
+
+  async function approveDraft(id: string) {
+    try {
+      await fetch(`/api/social/drafts/${id}/approve`, { method: "POST" });
+      fetchDrafts();
+      fetchQueue();
+    } catch {}
+  }
+
+  async function rejectDraft(id: string) {
+    try {
+      await fetch(`/api/social/drafts/${id}/reject`, { method: "POST" });
+      fetchDrafts();
     } catch {}
   }
 
@@ -275,6 +303,37 @@ export default function SocialPanel() {
 
         {scheduleOpen && (
           <div className="social-queue-body">
+            {drafts.length > 0 && (
+              <div className="social-queue-list" style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 14 }}>
+                <div className="social-queue-list-header">
+                  <span className="social-form-title" style={{ color: "var(--accent)" }}>AI Drafts</span>
+                  <button className="btn btn-ghost social-card-btn" onClick={fetchDrafts} disabled={draftsLoading}>
+                    {draftsLoading ? "..." : "Refresh"}
+                  </button>
+                </div>
+                {drafts.map(item => (
+                  <div key={item.id} className="social-queue-item" style={{ borderColor: "var(--accent-sunset-soft)" }}>
+                    <div className="social-queue-item-top">
+                      <span className="social-queue-item-status status-draft">AI Draft</span>
+                      <span className="social-queue-item-time">{new Date(item.created_at * 1000).toLocaleString()}</span>
+                    </div>
+                    <div className="social-queue-item-text">{item.text}</div>
+                    <div className="social-queue-item-bottom">
+                      <div className="social-queue-item-platforms">
+                        {item.platforms.map(p => (
+                          <span key={p} className="social-queue-item-platform">{PLATFORM_LABELS[p] || p}</span>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn-primary social-card-btn" onClick={() => approveDraft(item.id)}>Approve</button>
+                        <button className="btn btn-ghost social-card-btn" style={{ color: "var(--danger)" }} onClick={() => rejectDraft(item.id)}>Reject</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="social-schedule-form">
               <div className="social-schedule-field">
                 <textarea className="social-schedule-textarea" placeholder="Post content..."

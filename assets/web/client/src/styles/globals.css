@@ -4785,6 +4785,11 @@ select {
   background: rgba(255, 59, 48, 0.1);
 }
 
+.status-draft {
+  color: var(--accent);
+  background: rgba(255, 122, 23, 0.1);
+}
+
 .social-queue-item-time {
   font-size: 10px;
   color: var(--mute);
