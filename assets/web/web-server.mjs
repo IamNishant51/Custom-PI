@@ -5231,6 +5231,19 @@ async function main() {
     } catch { return { limits: [] }; }
   });
 
+  // ── Social Media Proxy Routes ────────────────────────────────────────────
+
+  const SOCIAL_BRIDGE = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
+  const EMAIL_BRIDGE = process.env.EMAIL_BRIDGE_URL || "http://localhost:9878";
+
+  async function proxyToBridge(bridgeUrl, endpoint, method, body) {
+    const url = `${bridgeUrl}${endpoint}`;
+    const opts = { method, headers: { "Content-Type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    return resp.json();
+  }
+
   // ── Helper Functions for Social AI Agent ─────────────────────────────────
 
   async function getLLMCompletion(systemPrompt, userPrompt) {
