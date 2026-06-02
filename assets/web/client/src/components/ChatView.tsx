@@ -38,6 +38,11 @@ export default function ChatView() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [attachments, setAttachments] = useState<any[]>([]);
   const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<Set<string>>(new Set());
+  const [socialStatus, setSocialStatus] = useState<any>(null);
+
+  useEffect(() => {
+    fetch("/api/social/status").then(r => r.json()).then(setSocialStatus).catch(() => {});
+  }, []);
 
   const toggleThinkingCollapse = (thinkingId: string) => {
     setCollapsedThinkingIds(prev => {
@@ -165,6 +170,24 @@ export default function ChatView() {
                 &gt; Review products
               </button>
             </div>
+            {socialStatus && socialStatus.platforms && (
+              <div style={{ marginTop: 24, textAlign: "center" }}>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>Connected Accounts</div>
+                <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+                  {Object.entries(socialStatus.platforms).map(([key, val]: any) => {
+                    if (!val.configured) return null;
+                    const labels: Record<string, string> = { twitter: "Twitter", reddit: "Reddit", linkedin: "LinkedIn", bluesky: "Bluesky", discord: "Discord", telegram: "Telegram" };
+                    const colors: Record<string, string> = { twitter: "#1DA1F2", reddit: "#FF4500", linkedin: "#0A66C2", bluesky: "#0285FF", discord: "#5865F2", telegram: "#24A1DE" };
+                    return (
+                      <button key={key} className="action-chip social-chip" onClick={() => handleActionChipClick(`post on ${labels[key] || key} about `)}
+                        style={{ borderLeft: `3px solid ${colors[key] || "#666"}`, padding: "6px 14px", fontSize: 12 }}>
+                        {labels[key] || key}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
