@@ -15,14 +15,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      - id: cache-key
+        run: echo "value=${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/save@v4
         id: cache-node
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          key: ${{ steps.cache-key.outputs.value }}
     outputs:
-      cache-key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+      cache-key: ${{ steps.cache-key.outputs.value }}
 
   typecheck:
     runs-on: ubuntu-latest
@@ -59,7 +60,7 @@ jobs:
           key: ${{ needs.install-and-cache.outputs.cache-key }}
       - if: steps.cache-node-restore-lint.outputs.cache-hit != 'true'
         run: npm ci
-      - run: npx tsc --noEmit --noEmit
+      - run: npx tsc --noEmit
       - run: echo "Lint check passed"
 
   test:
