@@ -24,6 +24,51 @@ const HOST = process.env.WEB_HOST || "127.0.0.1";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max upload
 const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 
+// ── AsyncLocalStorage for per-request context ──────────────────────────────
+import { AsyncLocalError } from "node:async_hooks";
+let asyncLocalStorage;
+try {
+  const { AsyncLocalStorage } = await import("node:async_hooks");
+  asyncLocalStorage = new AsyncLocalStorage();
+} catch {
+  // Fallback: no-op
+  asyncLocalStorage = { getStore: () => null, run: (s, fn) => fn() };
+}
+
+function getRequestContext() {
+  return asyncLocalStorage.getStore() || {};
+}
+
+function withRequestContext(store, fn) {
+  return asyncLocalStorage.run(store, fn);
+}
+
+// ── Persistent SQLite Connection ───────────────────────────────────────────
+const dbConnections = new Map();
+
+function getOrCreateDb(dbPath) {
+  if (dbConnections.has(dbPath)) {
+    const conn = dbConnections.get(dbPath);
+    try { conn.prepare("SELECT 1").get(); return conn; } catch {
+      dbConnections.delete(dbPath);
+    }
+  }
+  try {
+    const Database = _require("better-sqlite3");
+    const db = new Database(dbPath);
+    db.pragma("journal_mode = WAL");
+    dbConnections.set(dbPath, db);
+    return db;
+  } catch { return null; }
+}
+
+function closeAllDbConnections() {
+  for (const [path, db] of dbConnections) {
+    try { db.close(); } catch {}
+  }
+  dbConnections.clear();
+}
+
 // Dangerous commands that should never be executed via the bash tool
 const DANGEROUS_COMMANDS = [
   "rm", "mkfs", "dd", "sudo", "su", "chmod", "chown",
@@ -41,11 +86,41 @@ function isDangerousCommand(command) {
 }
 
 // Global swarm state for persistence across refresh
+// NOTE: These are intentionally shared across connections (single-user tool).
+// Race conditions are prevented via the simple lock below.
 let currentSwarmState = null;
 let _swarmPaused = false;
 let _swarmPauseResolve = null;
 let _toolCallCount = 0;
 let _approvalEnabled = false;
+
+// Simple mutex for swarm state mutations
+let swarmLock = Promise.resolve();
+async function withSwarmLock(fn) {
+  let release;
+  const prev = swarmLock;
+  swarmLock = new Promise(resolve => { release = resolve; });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+// Lock-aware accessors for shared global state
+async function setSwarmState(state) {
+  await withSwarmLock(() => { currentSwarmState = state; });
+}
+async function setSwarmPaused(v) {
+  await withSwarmLock(() => { _swarmPaused = v; });
+}
+async function setSwarmPauseResolve(v) {
+  await withSwarmLock(() => { _swarmPauseResolve = v; });
+}
+async function getSwarmState() {
+  return await withSwarmLock(() => currentSwarmState);
+}
 
 // ── Token Bucket Rate Limiter ────────────────────────────────────────────────
 
@@ -675,9 +750,8 @@ const MEMORY_DB_PATH = path.join(PI_DIR, "memory.db");
 
 function getMemoryDb() {
   try {
-    const Database = _require("better-sqlite3");
-    const db = new Database(MEMORY_DB_PATH);
-    db.pragma("journal_mode = WAL");
+    const db = getOrCreateDb(MEMORY_DB_PATH);
+    if (!db) return null;
     db.exec(`
       CREATE TABLE IF NOT EXISTS memory_entries (
         id TEXT PRIMARY KEY,
@@ -705,7 +779,6 @@ function readMemory() {
     const db = getMemoryDb();
     if (!db) return [];
     const rows = db.prepare("SELECT id, content, type, importance, project, tags, created_at AS createdAt, updated_at AS updatedAt, access_count AS accessCount FROM memory_entries ORDER BY updated_at DESC").all();
-    db.close();
     return rows.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]"), importance: r.importance || 5 }));
   } catch { return []; }
 }
@@ -721,7 +794,6 @@ function writeMemory(entries) {
       }
     });
     tx(entries);
-    db.close();
   } catch {}
 }
 
@@ -760,7 +832,6 @@ function getVectors() {
     const db = getMemoryDb();
     if (!db) return {};
     const rows = db.prepare("SELECT entry_id, vector FROM memory_vectors").all();
-    db.close();
     const result = {};
     for (const r of rows) {
       try { result[r.entry_id] = JSON.parse(r.vector); } catch {}
@@ -774,7 +845,6 @@ function saveVector(id, vec) {
     const db = getMemoryDb();
     if (!db) return;
     db.prepare("INSERT OR REPLACE INTO memory_vectors (entry_id, vector) VALUES (?, ?)").run(id, JSON.stringify(vec));
-    db.close();
   } catch {}
 }
 
@@ -787,7 +857,6 @@ function memoryStore(content, type, importance, project, tags) {
     db.prepare("INSERT INTO memory_entries (id, content, type, importance, project, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, content, type || "note", importance || 5, project || "", JSON.stringify(tags || []), now, now);
     const vec = computeVector(content + " " + (tags || []).join(" "));
     db.prepare("INSERT OR REPLACE INTO memory_vectors (entry_id, vector) VALUES (?, ?)").run(id, JSON.stringify(vec));
-    db.close();
   } catch {}
   return id;
 }
@@ -798,7 +867,6 @@ function memorySearch(query, k = 5) {
     const db = getMemoryDb();
     if (!db) return [];
     entries = db.prepare("SELECT id, content, type, importance, project, tags, created_at AS createdAt, updated_at AS updatedAt, access_count AS accessCount FROM memory_entries ORDER BY updated_at DESC").all();
-    db.close();
     entries = entries.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]"), importance: r.importance || 5 }));
   } catch { return []; }
   if (!entries.length) return [];
@@ -5140,6 +5208,7 @@ async function main() {
     console.log("\nStopping active servers...");
     await stopMcpServers();
     await stopLspServers();
+    closeAllDbConnections();
     process.exit(0);
   };
   process.on("SIGINT", handleExit);
@@ -5198,6 +5267,18 @@ async function main() {
       reply.header("Access-Control-Allow-Credentials", "true");
     }
     if (req.method === "OPTIONS") return reply.status(204).send();
+  });
+
+  // Per-request context for API handlers
+  app.addHook("onRequest", async (req, reply) => {
+    const contextStore = {
+      requestId: crypto.randomUUID().slice(0, 8),
+      ip: req.ip,
+      startTime: Date.now(),
+    };
+    req.contextStore = contextStore;
+    // Wrap the handler in AsyncLocalStorage context for downstream use
+    return withRequestContext(contextStore, () => {});
   });
 
   // Serve static client
@@ -5599,8 +5680,8 @@ async function main() {
 
   app.get("/api/knowledge/triplets", async (req) => {
     try {
-      const Database = _require("better-sqlite3");
-      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const db = getOrCreateDb(STATE_DB_PATH);
+      if (!db) return { error: "Database not available", triplets: [], count: 0 };
       const minConf = req.query?.minConfidence ?? 0.5;
       const limit = Math.min(parseInt(req.query?.limit ?? "50"), 200);
       const rows = db.prepare(`
@@ -5612,7 +5693,6 @@ async function main() {
         ORDER BY confidence_score DESC, last_updated DESC
         LIMIT ?
       `).all(minConf, limit);
-      db.close();
       return { triplets: rows, count: rows.length };
     } catch (e) {
       return { error: e.message, triplets: [], count: 0 };
@@ -5623,9 +5703,8 @@ async function main() {
     try {
       const id = req.query?.id;
       if (!id) return { error: "id parameter required" };
-      const Database = _require("better-sqlite3");
-      const db = new Database(STATE_DB_PATH, { readonly: true });
-      // Get entity info from any triplet containing this id
+      const db = getOrCreateDb(STATE_DB_PATH);
+      if (!db) return { error: "Database not available" };
       const entityRow = db.prepare(`
         SELECT subject_id AS id, subject_label AS label, subject_type AS type
         FROM triplets WHERE subject_id = ? LIMIT 1
@@ -5635,11 +5714,10 @@ async function main() {
           SELECT object_id AS id, object_label AS label, object_type AS type
           FROM triplets WHERE object_id = ? LIMIT 1
         `).get(id);
-        if (!objRow) { db.close(); return { error: "Entity not found" }; }
+        if (!objRow) return { error: "Entity not found" };
         const outgoing = db.prepare(`
           SELECT * FROM triplets WHERE subject_id = ? ORDER BY confidence_score DESC
         `).all(id);
-        db.close();
         return { entity: objRow, outgoing, incoming: [] };
       }
       const outgoing = db.prepare(`
@@ -5648,7 +5726,6 @@ async function main() {
       const incoming = db.prepare(`
         SELECT * FROM triplets WHERE object_id = ? ORDER BY confidence_score DESC
       `).all(id);
-      db.close();
       return { entity: entityRow, outgoing, incoming };
     } catch (e) {
       return { error: e.message };
@@ -5688,10 +5765,9 @@ async function main() {
   // ── Service Health API ─────────────────────────────────────────────────
   app.get("/api/health/services", async () => {
     try {
-      const Database = _require("better-sqlite3");
-      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const db = getOrCreateDb(STATE_DB_PATH);
+      if (!db) return { services: [] };
       const rows = db.prepare("SELECT service_name, endpoint, status, latency_ms, jitter_ms, consecutive_failures, updated_at FROM service_health ORDER BY status").all();
-      db.close();
       return { services: rows };
     } catch { return { services: [] }; }
   });
@@ -5803,10 +5879,9 @@ async function main() {
 
   app.get("/api/system/rate-limits", async () => {
     try {
-      const Database = _require("better-sqlite3");
-      const db = new Database(STATE_DB_PATH, { readonly: true });
+      const db = getOrCreateDb(STATE_DB_PATH);
+      if (!db) return { limits: [] };
       const rows = db.prepare("SELECT * FROM rate_limits ORDER BY breached DESC, last_checked DESC").all();
-      db.close();
       return { limits: rows };
     } catch { return { limits: [] }; }
   });
@@ -6485,14 +6560,20 @@ Return a JSON array. Each item:
       }
 
       if (data.type === "swarm_pause") {
-        _swarmPaused = true;
-        try { socket.send(JSON.stringify({ type: "swarm_paused" })); } catch {}
+        await withSwarmLock(async () => {
+          _swarmPaused = true;
+          try { socket.send(JSON.stringify({ type: "swarm_paused" })); } catch {}
+        });
+        return;
       }
 
       if (data.type === "swarm_resume") {
-        _swarmPaused = false;
-        if (_swarmPauseResolve) { try { _swarmPauseResolve(); } catch {} _swarmPauseResolve = null; }
-        try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
+        await withSwarmLock(async () => {
+          _swarmPaused = false;
+          if (_swarmPauseResolve) { try { _swarmPauseResolve(); } catch {} _swarmPauseResolve = null; }
+          try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
+        });
+        return;
       }
 
       if (data.type === "user_answer") {
