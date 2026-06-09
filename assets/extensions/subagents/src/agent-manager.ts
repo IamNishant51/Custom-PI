@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import readline from "node:readline";
+import { logger } from "./logger";
 import type {
   AgentMetadata,
   AgentType,
@@ -17,9 +18,53 @@ import type {
 
 const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
 const AGENTS_CONFIG_PATH = path.join(CONFIG_DIR, "agents.json");
+const CUSTOM_AGENTS_CONFIG_PATH = path.join(CONFIG_DIR, "custom-agents.json");
 const DISCOVERY_CACHE_TTL = 60_000;
 
 let discoveryCache: { agents: AgentMetadata[]; timestamp: number } | null = null;
+
+let customAgentDefinitions: Array<{
+  id: string;
+  name: string;
+  backend: string;
+  command: string;
+  args: string[];
+  icon: string;
+  supportsTeam: boolean;
+  agentType: string;
+  modes: string[];
+}> | null = null;
+
+function loadCustomAgentDefinitions(): Array<{
+  id: string; name: string; backend: string; command: string; args: string[];
+  icon: string; supportsTeam: boolean; agentType: string; modes: string[];
+}> {
+  if (customAgentDefinitions) return customAgentDefinitions;
+  try {
+    if (fs.existsSync(CUSTOM_AGENTS_CONFIG_PATH)) {
+      const raw = fs.readFileSync(CUSTOM_AGENTS_CONFIG_PATH, "utf8");
+      customAgentDefinitions = JSON.parse(raw);
+      return customAgentDefinitions!;
+    }
+  } catch { logger.warn("Failed to load custom agent definitions"); }
+  customAgentDefinitions = [];
+  return customAgentDefinitions;
+}
+
+export function registerCustomAgentDefinition(def: {
+  id: string; name: string; backend: string; command: string; args?: string[];
+  icon?: string; supportsTeam?: boolean; agentType?: string; modes?: string[];
+}): void {
+  const defs = loadCustomAgentDefinitions();
+  const idx = defs.findIndex(d => d.id === def.id);
+  const entry = { ...def, args: def.args || [], icon: def.icon || "🔌", supportsTeam: def.supportsTeam ?? false, agentType: def.agentType || "acp", modes: def.modes || ["default"] };
+  if (idx >= 0) defs[idx] = entry;
+  else defs.push(entry);
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(CUSTOM_AGENTS_CONFIG_PATH, JSON.stringify(defs, null, 2), "utf8");
+  customAgentDefinitions = defs;
+  discoveryCache = null;
+}
 
 const KNOWN_AGENTS: Array<{
   id: string;
@@ -75,7 +120,7 @@ export function discoverAgents(force = false): AgentMetadata[] {
       name: def.name,
       icon: def.icon,
       backend: def.backend,
-      agentType: def.agentType,
+      agentType: def.agentType as AgentType,
       agentSource: "builtin",
       enabled: true,
       available,
@@ -85,7 +130,25 @@ export function discoverAgents(force = false): AgentMetadata[] {
       modes: def.modes,
     });
   }
-  // Load user-defined agents from config
+  // Load user-defined agent definitions from custom-agents.json (plugin/config mechanism)
+  for (const def of loadCustomAgentDefinitions()) {
+    const available = checkCommandAvailable(def.command);
+    agents.push({
+      id: def.id,
+      name: def.name,
+      icon: def.icon || "🔌",
+      backend: def.backend,
+      agentType: def.agentType as AgentType,
+      agentSource: "custom",
+      enabled: true,
+      available,
+      supportsTeam: def.supportsTeam,
+      command: def.command,
+      args: def.args,
+      modes: def.modes as any,
+    });
+  }
+  // Load user-defined agents from legacy config
   try {
     if (fs.existsSync(AGENTS_CONFIG_PATH)) {
       const raw = fs.readFileSync(AGENTS_CONFIG_PATH, "utf8");
@@ -96,7 +159,7 @@ export function discoverAgents(force = false): AgentMetadata[] {
         agents.push(c);
       }
     }
-  } catch {}
+  } catch { logger.warn("Failed to load legacy agents config"); }
   discoveryCache = { agents, timestamp: now };
   return agents;
 }
@@ -108,7 +171,7 @@ export function saveCustomAgent(agent: AgentMetadata): void {
     if (fs.existsSync(AGENTS_CONFIG_PATH)) {
       existing.push(...JSON.parse(fs.readFileSync(AGENTS_CONFIG_PATH, "utf8")));
     }
-  } catch {}
+  } catch { logger.warn("Failed to read existing agents config"); }
   const idx = existing.findIndex(a => a.id === agent.id);
   if (idx >= 0) existing[idx] = agent;
   else existing.push(agent);

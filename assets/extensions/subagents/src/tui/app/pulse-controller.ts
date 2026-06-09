@@ -18,19 +18,7 @@ const DEFAULT_PULSE_CONFIG: PulseConfig = {
   easing: true,
 };
 
-export function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ];
-}
-
-export function rgbToHex(r: number, g: number, b: number): string {
-  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
-  return `#${clamp(r).toString(16).padStart(2, "0")}${clamp(g).toString(16).padStart(2, "0")}${clamp(b).toString(16).padStart(2, "0")}`;
-}
+import { hexToRgb, rgbToHex } from "../utils/color";
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;

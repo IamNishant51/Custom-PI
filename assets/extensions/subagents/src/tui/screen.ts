@@ -117,6 +117,20 @@ export class TerminalScreen {
     this.damageRight = this.cols - 1;
   }
 
+  /**
+   * Returns the current damage region (the rectangle of cells that have been
+   * modified since the last swap/flush), or null if nothing is damaged.
+   */
+  getDamageRegions(): { top: number; bottom: number; left: number; right: number } | null {
+    if (this.damageTop === Infinity) return null;
+    return {
+      top: this.damageTop,
+      bottom: this.damageBottom,
+      left: this.damageLeft,
+      right: this.damageRight,
+    };
+  }
+
   swapBuffers(): void {
     const tmp = this.front;
     this.front = this.back;

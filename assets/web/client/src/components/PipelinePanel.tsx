@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
+import { showToast } from "./Toast";
 
 export default function PipelinePanel() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/pipeline/status").then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
+    fetch("/api/pipeline/status").then(r => r.json()).then(setData).catch(() => showToast("Failed to load pipeline status", "error")).finally(() => setLoading(false));
   }, []);
 
   return (

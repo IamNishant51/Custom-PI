@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import Markdown from "./Markdown";
 import { useChat, type ChatItem } from "../context/ChatContext";
+import { showToast } from "./Toast";
+import UserMessage from "./UserMessage";
+import AssistantMessage from "./AssistantMessage";
+import ThinkingBlock from "./ThinkingBlock";
+import ToolCallItem from "./ToolCallItem";
+import ErrorMessage from "./ErrorMessage";
 
 const TUI_BANNER = `  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗
  ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║
@@ -9,28 +14,7 @@ const TUI_BANNER = `  ██████╗ ██╗   ██╗ ████�
  ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
   ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝`;
 
-const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
-
-function getToolDesc(name: string, argsStr: string): string {
-  try {
-    const parsed = JSON.parse(argsStr);
-    if (name === "view_file" || name === "write_to_file" || name === "replace_file_content" || name === "multi_replace_file_content") {
-      const pathStr = parsed.AbsolutePath || parsed.TargetFile || "";
-      return pathStr.split("/").pop() || pathStr;
-    }
-    if (name === "list_dir") {
-      const pathStr = parsed.DirectoryPath || "";
-      return pathStr.split("/").pop() || pathStr;
-    }
-    if (name === "grep_search") {
-      return `"${parsed.Query}"`;
-    }
-    if (name === "run_command") {
-      return parsed.CommandLine || "";
-    }
-  } catch {}
-  return "";
-}
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 
 export default function ChatView() {
   const { items, loading, input, setInput, sendMessage, sendInterrupt, connected } = useChat();
@@ -41,7 +25,7 @@ export default function ChatView() {
   const [socialStatus, setSocialStatus] = useState<any>(null);
 
   useEffect(() => {
-    fetch("/api/social/status").then(r => r.json()).then(setSocialStatus).catch(() => {});
+    fetch("/api/social/status").then(r => r.json()).then(setSocialStatus).catch(err => showToast(err.message, 'error'));
   }, []);
 
   const toggleThinkingCollapse = (thinkingId: string) => {
@@ -272,8 +256,6 @@ export default function ChatView() {
   );
 }
 
-// ── Item Renderer ──────────────────────────────────────
-
 function ChatItemRenderer({
   item,
   index,
@@ -325,158 +307,4 @@ function ChatItemRenderer({
     default:
       return null;
   }
-}
-
-// ── User Message ───────────────────────────────────────
-
-function UserMessage({
-  content,
-  attachments,
-  onBubbleClick
-}: {
-  content: string;
-  attachments?: any[];
-  onBubbleClick?: () => void;
-}) {
-  return (
-    <div
-      className={`msg msg-user stagger-item ${onBubbleClick ? "clickable-bubble" : ""}`}
-      onClick={onBubbleClick}
-      style={{ cursor: onBubbleClick ? "pointer" : "default" }}
-    >
-      <div className="msg-label">You</div>
-      {attachments && attachments.length > 0 && (
-        <div className="msg-user-attachments">
-          {attachments.map((att, i) => (
-            <div key={i} className="msg-user-attachment-chip">
-              {att.previewUrl ? (
-                <img src={att.previewUrl} className="msg-user-attachment-img" />
-              ) : (
-                <span className="msg-user-attachment-file">📄 {att.name}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="msg-content">{content}</div>
-    </div>
-  );
-}
-
-// ── Thinking Block ─────────────────────────────────────
-
-function ThinkingBlock({
-  content,
-  isStreaming,
-  isCollapsed,
-  onToggleCollapse
-}: {
-  content: string;
-  isStreaming?: boolean;
-  isCollapsed: boolean;
-  onToggleCollapse: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [maxH, setMaxH] = useState("0px");
-
-  useEffect(() => {
-    if (ref.current) {
-      setMaxH(!isCollapsed ? `${ref.current.scrollHeight}px` : "0px");
-    }
-  }, [isCollapsed, content]);
-
-  return (
-    <div className="msg msg-thinking stagger-item">
-      <button className="thinking-header" onClick={onToggleCollapse}>
-        <span className={`thinking-chevron ${!isCollapsed ? "rotated" : ""}`}>▸</span>
-        <span className="thinking-label">Reasoning</span>
-      </button>
-      <div
-        className="thinking-body"
-        style={{
-          maxHeight: maxH,
-          transition: "max-height 0.25s ease",
-        }}
-      >
-        <div ref={ref} className="thinking-content">
-          {content ? (
-            <Markdown content={content} />
-          ) : (
-            <span className="thinking-placeholder">Thinking...</span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Tool Call Item ─────────────────────────────────────
-
-function ToolCallItem({ name, args, status, result }: {
-  name: string;
-  args: string;
-  status: "running" | "completed" | "error";
-  result: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  const statusText = status === "running" ? "[ ]" : status === "completed" ? "[x]" : "[!]";
-  const statusClass = status === "running" ? "running" : status === "completed" ? "completed" : "error";
-  const desc = getToolDesc(name, args);
-
-  return (
-    <div className={`msg msg-tool stagger-item ${statusClass}`}>
-      <button className="tool-header" onClick={() => setExpanded(v => !v)}>
-        <span className="tool-status-icon">{statusText}</span>
-        <span className="tool-name-label">
-          {name} {desc && <span className="tool-desc-sub">{desc}</span>}
-        </span>
-        <span className={`tool-chevron ${expanded ? "rotated" : ""}`}>▸</span>
-      </button>
-      <div
-        className="tool-body"
-        style={{
-          display: "grid",
-          gridTemplateRows: expanded ? "1fr" : "0fr",
-        }}
-      >
-        <div className="tool-inner">
-          {args && (
-            <div className="tool-section">
-              <div className="tool-section-label">Arguments</div>
-              <pre className="tool-code">{args}</pre>
-            </div>
-          )}
-          {result && (
-            <div className="tool-section">
-              <div className="tool-section-label">Output</div>
-              <pre className="tool-code tool-result-text">{result}</pre>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Assistant Message ──────────────────────────────────
-
-function AssistantMessage({ content }: { content: string }) {
-  return (
-    <div className="msg msg-assistant stagger-item">
-      <div className="msg-label">Assistant</div>
-      <Markdown content={content} />
-    </div>
-  );
-}
-
-// ── Error Message ──────────────────────────────────────
-
-function ErrorMessage({ content }: { content: string }) {
-  return (
-    <div className="msg msg-error stagger-item">
-      <div className="msg-label">Error</div>
-      <div className="msg-content">{content}</div>
-    </div>
-  );
 }

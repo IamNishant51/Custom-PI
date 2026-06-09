@@ -1,12 +1,31 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+
+const tmpDir = vi.hoisted(() => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const os = require("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-test-"));
+  return dir;
+});
+
+vi.mock("node:os", () => {
+  const actual = require("node:os");
+  const ns = { ...actual, homedir: () => tmpDir };
+  return { default: ns, ...ns };
+});
+
 import { loadSoul, getSoulPath, ensureSoulFile } from "../soul-loader";
 
-const SOUL_PATH = path.join(os.homedir(), ".pi", "agent", "SOUL.md");
+const SOUL_PATH = path.join(tmpDir, ".pi", "agent", "SOUL.md");
 
 describe("soul-loader", () => {
+  afterAll(() => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  });
+
   beforeEach(() => {
     try {
       if (fs.existsSync(SOUL_PATH)) fs.unlinkSync(SOUL_PATH);

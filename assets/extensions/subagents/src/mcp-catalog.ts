@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
+import { logger } from "./logger";
 import type { McpServerConfig, McpToolDefinition } from "./acp-types";
 
 const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -88,10 +89,11 @@ export async function probeProvider(provider: string, apiKey?: string): Promise<
 
     switch (provider) {
       case "anthropic": {
+        const healthModel = process.env.ANTHROPIC_HEALTH_CHECK_MODEL || "claude-haiku-3-5-20241022";
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "claude-haiku-3-5-20241022", max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+          body: JSON.stringify({ model: healthModel, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
           signal: AbortSignal.timeout(10_000),
         });
         healthy = r.ok || r.status === 400; // 400 = auth OK but bad request
@@ -226,7 +228,7 @@ export function loadMcpServers(): McpServerConfig[] {
     }
   }
     }
-  } catch {}
+  } catch { logger.warn("Failed to load MCP server config"); }
   const servers = Array.from(serverMap.values());
   cachedServers = servers;
   return servers;
@@ -287,9 +289,9 @@ export function discoverMcpTools(serverId: string): McpToolDefinition[] {
               inputSchema: t.inputSchema || {},
             }));
           }
-        } catch {}
+        } catch { logger.warn("Failed to parse MCP tool discovery output"); }
       }
-    } catch {}
+    } catch { logger.warn("Failed to discover MCP tools", { serverId }); }
   }
   return [];
 }

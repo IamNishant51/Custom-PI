@@ -153,14 +153,14 @@ export function vaultHealth(): { ok: boolean; message: string } {
     if (key.length !== KEY_LENGTH) {
       return { ok: false, message: `Master key has invalid length (${key.length}, expected ${KEY_LENGTH}).` };
     }
-    const vault = readVault();
-    const testKey = "___health_check___";
-    vaultSet(testKey, "ok");
-    const result = vaultGet(testKey);
-    vaultDelete(testKey);
-    if (result !== "ok") {
+    // In-memory round-trip test instead of writing a ghost key
+    const testPlaintext = "health-check-" + Date.now();
+    const encrypted = encrypt(testPlaintext, key);
+    const decrypted = decrypt(encrypted, key);
+    if (decrypted !== testPlaintext) {
       return { ok: false, message: "Encrypt/decrypt round-trip failed." };
     }
+    const vault = readVault();
     return { ok: true, message: `Vault healthy. ${Object.keys(vault.entries).length} entries stored.` };
   } catch (e: any) {
     return { ok: false, message: `Vault error: ${e.message}` };
@@ -187,5 +187,34 @@ export async function vaultExportToEnv(keys: string[]): Promise<void> {
       const envKey = key.replace(/-/g, "_").toUpperCase();
       process.env[envKey] = val;
     }
+  }
+}
+
+export function vaultRotateKey(): { ok: boolean; message: string } {
+  try {
+    const oldKey = getMasterKey();
+    const vault = readVault();
+    const entries = vault.entries;
+    const newKey = crypto.randomBytes(KEY_LENGTH);
+    const reEncrypted: Record<string, EncryptedMaterial> = {};
+    for (const [name, material] of Object.entries(entries)) {
+      try {
+        const plaintext = decrypt(material, oldKey);
+        reEncrypted[name] = encrypt(plaintext, newKey);
+      } catch {
+        return { ok: false, message: `Failed to decrypt entry '${name}' with current key. Rotation aborted.` };
+      }
+    }
+    const backupPath = KEY_FILE + ".bak." + Date.now();
+    if (fs.existsSync(KEY_FILE)) {
+      fs.copyFileSync(KEY_FILE, backupPath);
+    }
+    fs.writeFileSync(KEY_FILE, newKey.toString("hex"), "utf8");
+    fs.chmodSync(KEY_FILE, 0o600);
+    vault.entries = reEncrypted;
+    writeVault(vault);
+    return { ok: true, message: `Key rotated. ${Object.keys(reEncrypted).length} entries re-encrypted. Backup saved to ${backupPath}.` };
+  } catch (e: any) {
+    return { ok: false, message: `Key rotation failed: ${e.message}` };
   }
 }

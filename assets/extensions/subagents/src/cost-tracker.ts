@@ -1,6 +1,9 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import zlib from "node:zlib";
+import { logger } from "./logger";
 
 const COST_DIR = path.join(os.homedir(), ".pi", "agent", "costs");
 const BUDGET_FILE = path.join(COST_DIR, "budget.json");
@@ -75,6 +78,15 @@ function getRate(provider: string, model: string): { input: number; output: numb
       return rate;
     }
   }
+  // Check env override for unknown models
+  const envRate = process.env[`PI_COST_RATE_${provider.toUpperCase()}_${model.toUpperCase().replace(/[^a-zA-Z0-9]/g, "_")}`];
+  if (envRate) {
+    const parts = envRate.split(",").map(Number);
+    if (parts.length === 2 && isFinite(parts[0]) && isFinite(parts[1])) {
+      return { input: parts[0], output: parts[1] };
+    }
+  }
+  logger.warn(`Unknown model rate for ${provider}/${model}, returning 0. Set PI_COST_RATE_${provider.toUpperCase()}_${model.toUpperCase().replace(/[^a-zA-Z0-9]/g, "_")}=input,output to configure.`);
   return { input: 0, output: 0 };
 }
 
@@ -185,6 +197,9 @@ export function trackCost(
     sessionTotalCost > budget.maxSessionCostUsd ||
     dailyTotalTokens > budget.maxDailyTokens ||
     dailyTotalCost > budget.maxDailyCostUsd;
+
+  // Size-based rotation: archive to .jsonl.gz if file > 10MB
+  maybeRotateCostFile();
 
   return {
     recorded: true,
@@ -299,4 +314,58 @@ export function getCostSummary(): {
 
 export function getModelRates(): Record<string, { input: number; output: number }> {
   return { ...RATES };
+}
+
+const MAX_COST_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+let lastRotationCheck = 0;
+const ROTATION_COOLDOWN = 60_000; // check at most once per minute
+
+function maybeRotateCostFile(): void {
+  const now = Date.now();
+  if (now - lastRotationCheck < ROTATION_COOLDOWN) return;
+  lastRotationCheck = now;
+  try {
+    if (!fs.existsSync(SESSION_COST_FILE)) return;
+    const stat = fs.statSync(SESSION_COST_FILE);
+    if (stat.size > MAX_COST_FILE_BYTES) {
+      const gzPath = SESSION_COST_FILE + "." + new Date().toISOString().slice(0, 10) + ".gz";
+      const content = fs.readFileSync(SESSION_COST_FILE);
+      const compressed = zlib.gzipSync(content);
+      fs.writeFileSync(gzPath, compressed);
+      fs.writeFileSync(SESSION_COST_FILE, "", "utf8");
+      logger.info(`Rotated cost log: ${SESSION_COST_FILE} -> ${gzPath} (${(compressed.length / 1024).toFixed(0)}KB gzip)`);
+    }
+  } catch (e) {
+    logger.warn("Cost file rotation failed", { error: String(e) });
+  }
+}
+
+// Daily compaction: remove duplicate entries for same event
+export async function compactDailyCosts(): Promise<number> {
+  if (!fs.existsSync(SESSION_COST_FILE)) return 0;
+  try {
+    const lines = (await fsp.readFile(SESSION_COST_FILE, "utf8")).trim().split("\n").filter(Boolean);
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        const key = `${event.sessionId}|${event.timestamp}|${event.provider}|${event.model}|${event.inputTokens}|${event.outputTokens}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(line);
+        }
+      } catch {
+        deduped.push(line);
+      }
+    }
+    if (deduped.length < lines.length) {
+      await fsp.writeFile(SESSION_COST_FILE, deduped.join("\n") + "\n", "utf8");
+      logger.info(`Cost compaction removed ${lines.length - deduped.length} duplicate entries`);
+    }
+    return lines.length - deduped.length;
+  } catch (e) {
+    logger.warn("Cost compaction failed", { error: String(e) });
+    return 0;
+  }
 }

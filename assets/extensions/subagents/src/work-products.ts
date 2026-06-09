@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
+import { logger } from "./logger";
 
 const PRODUCTS_DIR = path.join(os.homedir(), ".pi", "agent", "work-products");
 
@@ -26,13 +28,7 @@ function productFilePath(): string {
 }
 
 function shortHash(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
+  return crypto.createHash("sha256").update(content).digest("hex").slice(0, 8);
 }
 
 let idCounter = 0;
@@ -78,7 +74,7 @@ export function getWorkProducts(sessionId?: string, limit: number = 50): WorkPro
       if (!sessionId || p.sessionId === sessionId) {
         products.push(p);
       }
-    } catch {}
+    } catch { logger.warn("Failed to parse work product entry"); }
   }
   return products;
 }
@@ -110,7 +106,7 @@ export function clearWorkProducts(sessionId?: string): number {
   }
   const lines = fs.readFileSync(fp, "utf8").trim().split("\n").filter(Boolean);
   const remaining = lines.filter(l => {
-    try { const p = JSON.parse(l); return p.sessionId !== sessionId; } catch { return true; }
+    try { const p = JSON.parse(l); return p.sessionId !== sessionId; } catch { logger.warn("Failed to parse work product during clear"); return true; }
   });
   const removed = lines.length - remaining.length;
   fs.writeFileSync(fp, remaining.join("\n") + "\n", "utf8");

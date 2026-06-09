@@ -246,6 +246,35 @@ export const ASSERTIONS: VerificationAssertion[] = [
   memoryLeakAssertion,
 ];
 
+const TEST_FILE_PATTERNS = [
+  /\.test\./, /\.spec\./, /__tests__/, /__mocks__/, /\/test\//, /\/tests\//,
+  /\/fixtures?\//, /\/mock/, /\/stubs?\//,
+];
+
+const CONFIG_FILE_PATTERNS = [
+  /\.config\./, /\/config\//, /\/settings\//, /\.env/, /\.conf/,
+  /\/\.(vscode|idea|github|gitlab)\//,
+];
+
+function isTestFile(fileContext: string): boolean {
+  return TEST_FILE_PATTERNS.some(p => p.test(fileContext));
+}
+
+function isConfigFile(fileContext: string): boolean {
+  return CONFIG_FILE_PATTERNS.some(p => p.test(fileContext));
+}
+
+const WARNINGS_TO_SKIP_FOR_TEST_FILES: string[] = [
+  "No console.log in Production Code",
+  "No var Declarations",
+  "No Hardcoded Absolute Host Paths",
+];
+
+const WARNINGS_TO_SKIP_FOR_CONFIG_FILES: string[] = [
+  "No Hardcoded Absolute Host Paths",
+  "No Potential Memory Leaks",
+];
+
 export async function runVerification(codeDiff: string, fileContext: string): Promise<{
   passed: boolean;
   errors: string[];
@@ -254,7 +283,16 @@ export async function runVerification(codeDiff: string, fileContext: string): Pr
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  const skipWarnings = new Set<string>();
+  if (isTestFile(fileContext)) {
+    for (const r of WARNINGS_TO_SKIP_FOR_TEST_FILES) skipWarnings.add(r);
+  }
+  if (isConfigFile(fileContext)) {
+    for (const r of WARNINGS_TO_SKIP_FOR_CONFIG_FILES) skipWarnings.add(r);
+  }
+
   for (const assertion of ASSERTIONS) {
+    if (assertion.severity === "warning" && skipWarnings.has(assertion.ruleName)) continue;
     try {
       const res = await assertion.assertionFn(codeDiff, fileContext);
       if (!res.passed) {

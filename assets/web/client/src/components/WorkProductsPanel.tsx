@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Markdown from "./Markdown";
+import { showToast } from "./Toast";
 
 interface WorkProduct {
   id: string;
@@ -19,11 +20,11 @@ export default function WorkProductsPanel() {
     fetch("/api/work-products")
       .then(r => r.json())
       .then(d => setProducts(d.products || []))
-      .catch(() => {});
+      .catch(() => showToast("Failed to load work products", "error"));
     fetch("/api/work-products?summary=true")
       .then(r => r.json())
       .then(d => setSummary(d.summary || ""))
-      .catch(() => {});
+      .catch(() => showToast("Failed to load work summary", "error"));
   }, []);
 
   const actionColors: Record<string, string> = {

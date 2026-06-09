@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { usePostApproval } from "../hooks/usePostApproval";
 
 interface PostPreview {
   id: string;
@@ -7,11 +7,6 @@ interface PostPreview {
   title?: string;
   platformSpecific?: string;
   assetUrl?: string;
-}
-
-interface EditRequest {
-  id: string;
-  content: string;
 }
 
 const PLATFORM_STYLES: Record<string, { name: string; icon: string; maxLen: number; bg: string; border: string; accent: string }> = {
@@ -37,7 +32,6 @@ function PostCard({ platform, content, title, platformSpecific, assetUrl }: Post
       animation: "slideUp 0.2s ease-out",
       overflow: "hidden",
     }}>
-      {/* Platform header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px 10px", borderBottom: `1px solid ${style.border}` }}>
         <div style={{
           width: 28, height: 28, borderRadius: 6, background: style.accent,
@@ -48,7 +42,6 @@ function PostCard({ platform, content, title, platformSpecific, assetUrl }: Post
         {platformSpecific && <span style={{ color: style.accent, fontSize: 11, marginLeft: "auto", fontFamily: "var(--font-mono)" }}>{platformSpecific}</span>}
       </div>
 
-      {/* Post body */}
       <div style={{ padding: "12px 16px 10px" }}>
         {title && (
           <div style={{ color: "#e4e4e4", fontSize: 15, fontWeight: 700, marginBottom: 8, lineHeight: 1.3 }}>{title}</div>
@@ -59,7 +52,6 @@ function PostCard({ platform, content, title, platformSpecific, assetUrl }: Post
         }}>{content}</div>
       </div>
 
-      {/* Embedded image */}
       {assetUrl && (
         <div style={{
           borderTop: `1px solid ${style.border}`,
@@ -74,7 +66,6 @@ function PostCard({ platform, content, title, platformSpecific, assetUrl }: Post
         </div>
       )}
 
-      {/* Character count */}
       <div style={{
         display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4,
         padding: "8px 16px 12px",
@@ -92,42 +83,7 @@ function PostCard({ platform, content, title, platformSpecific, assetUrl }: Post
 }
 
 export default function PostApproval({ ws }: { ws: WebSocket | null }) {
-  const [preview, setPreview] = useState<PostPreview | null>(null);
-  const [editReq, setEditReq] = useState<EditRequest | null>(null);
-  const [editText, setEditText] = useState("");
-  const [answered, setAnswered] = useState(false);
-  const clearTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  useEffect(() => {
-    if (!ws) return;
-    const handler = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "post_preview") {
-          setPreview({ id: data.id, platform: data.platform, content: data.content, title: data.title, platformSpecific: data.platformSpecific, assetUrl: data.assetUrl });
-          setAnswered(false);
-        }
-        if (data.type === "post_edit_request") {
-          setEditReq({ id: data.id, content: data.content });
-          setEditText(data.content);
-        }
-        if (data.type === "user_question_resolved") {
-          setAnswered(true);
-          clearTimer.current = setTimeout(() => { setPreview(null); setEditReq(null); }, 800);
-        }
-      } catch {}
-    };
-    ws.addEventListener("message", handler);
-    return () => {
-      ws.removeEventListener("message", handler);
-      if (clearTimer.current) clearTimeout(clearTimer.current);
-    };
-  }, [ws]);
-
-  const send = useCallback((type: string, payload: Record<string, string>) => {
-    if (!ws) return;
-    ws.send(JSON.stringify({ type, ...payload }));
-  }, [ws]);
+  const { preview, editReq, editText, setEditText, answered, send, reset } = usePostApproval(ws);
 
   if (!preview && !editReq) return null;
 
@@ -168,9 +124,9 @@ export default function PostApproval({ ws }: { ws: WebSocket | null }) {
               autoFocus
             />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn btn-small btn-ghost" onClick={() => { send("user_answer", { questionId: editReq.id, answer: "(edit cancelled)" }); setEditReq(null); }}
+              <button className="btn btn-small btn-ghost" onClick={() => { send("user_answer", { questionId: editReq.id, answer: "(edit cancelled)" }); reset(); }}
                 style={{ fontSize: 12, padding: "8px 16px" }}>Cancel</button>
-              <button className="btn btn-small btn-primary" onClick={() => { send("user_answer", { questionId: editReq.id, answer: editText }); setEditReq(null); }}
+              <button className="btn btn-small btn-primary" onClick={() => { send("user_answer", { questionId: editReq.id, answer: editText }); reset(); }}
                 style={{ background: "var(--accent-teal)", color: "#000", border: "none", padding: "8px 20px", borderRadius: 6, fontWeight: 600, fontSize: 12 }}>
                 Submit Edit
               </button>
@@ -197,7 +153,7 @@ export default function PostApproval({ ws }: { ws: WebSocket | null }) {
               borderTop: "1px solid var(--hairline)", paddingTop: 16,
             }}>
               <button
-                onClick={() => { send("user_answer", { questionId: preview.id, answer: "Skip" }); setAnswered(true); }}
+                onClick={() => { send("user_answer", { questionId: preview.id, answer: "Skip" }); }}
                 disabled={answered}
                 style={{
                   padding: "8px 16px", background: "transparent", border: "1px solid var(--hairline)",
@@ -215,7 +171,7 @@ export default function PostApproval({ ws }: { ws: WebSocket | null }) {
                 }}
               >Edit</button>
               <button
-                onClick={() => { send("user_answer", { questionId: preview.id, answer: "Approve" }); setAnswered(true); }}
+                onClick={() => { send("user_answer", { questionId: preview.id, answer: "Approve" }); }}
                 disabled={answered}
                 style={{
                   padding: "8px 22px", background: "var(--accent-teal)", border: "none",

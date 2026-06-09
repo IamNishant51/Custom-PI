@@ -38,6 +38,8 @@ export class TuiApp {
   private messageLimit = 100;
   private scrollOffset = 0;
   private frameCounter = 0;
+  /** Tracks the bottom-most row rendered in the previous frame for stale-region clearing */
+  private lastRenderMaxY = 0;
 
   constructor(ctx?: any, pi?: any) {
     this.ctx = ctx;
@@ -88,7 +90,7 @@ export class TuiApp {
   stop(): void {
     if (!this.active) return;
     this.active = false;
-    this.tui.animFrame.remove("tui:render-loop");
+    this.tui.animFrame.clear();
     if (this.stdinHandler) {
       process.stdin.off("data", this.stdinHandler);
       this.stdinHandler = null;
@@ -206,7 +208,13 @@ export class TuiApp {
     ).length;
 
     const defaultStyle = renderer.style({ bg: renderer.theme.canvas });
-    renderer.screen.clear(defaultStyle);
+
+    // ── Stale-row clearing ────────────────────────────────────────────
+    // Instead of clearing the entire screen (which marks every cell dirty on
+    // every frame), track the bottom-most row rendered last frame. If this
+    // frame renders fewer rows, clear the stale rows that are no longer used.
+    const damageRegions = renderer.screen.getDamageRegions();
+    let currentMaxY = 0;
 
     // ── Layout Regions ─────────────────────────────────────────────────
     // 1. Top: pulse banner line (if active)
@@ -341,6 +349,16 @@ export class TuiApp {
         });
       }
     }
+
+    currentMaxY = y;
+
+    // Clear stale rows from the previous frame that are no longer used
+    if (this.lastRenderMaxY > currentMaxY) {
+      for (let ry = currentMaxY; ry < this.lastRenderMaxY && ry < rows; ry++) {
+        renderer.screen.clearLine(ry, defaultStyle);
+      }
+    }
+    this.lastRenderMaxY = currentMaxY;
 
     renderer.render();
   }

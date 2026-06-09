@@ -642,7 +642,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/twitter/post" && req.method === "POST") {
       const { text, mediaPath } = await parseBody(req);
       if (!text) return json(res, 400, { ok: false, error: "text required" });
-      return json(res, 200, await twitterPost(text, mediaPath));
+      const rateCheck = checkRate("twitter");
+      if (!rateCheck.ok) return json(res, 429, { ok: false, error: rateCheck.reason });
+      const result = await twitterPost(text, mediaPath);
+      if (result.ok) recordPost("twitter");
+      return json(res, 200, result);
     }
     if (url.pathname === "/twitter/reply" && req.method === "POST") {
       const { url: u, text } = await parseBody(req);

@@ -7,7 +7,7 @@ import {
   type ConversationHeader, type ScrollIndicator, type SurfaceLevel,
 } from "./types";
 import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
-import { PulseController, hexToRgb, rgbToHex } from "./app/pulse-controller";
+import { PulseController } from "./app/pulse-controller";
 
 const GUTTER = SPACING.gutter;
 const GUTTER_LG = SPACING.gutterLg;

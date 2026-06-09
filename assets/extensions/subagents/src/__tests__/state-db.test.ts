@@ -1,7 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, afterAll } from "vitest";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+
+const tmpDir = vi.hoisted(() => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const os = require("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-test-"));
+  return dir;
+});
+
+vi.mock("node:os", () => {
+  const actual = require("node:os");
+  const ns = { ...actual, homedir: () => tmpDir };
+  return { default: ns, ...ns };
+});
+
 import {
   ensureSession,
   insertMessage,
@@ -14,9 +29,13 @@ import {
   getRecentSessions,
 } from "../state-db";
 
-const DB_PATH = path.join(os.homedir(), ".pi", "agent", "session-state.db");
+const DB_PATH = path.join(tmpDir, ".pi", "agent", "session-state.db");
 
 describe("state-db", () => {
+  afterAll(() => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  });
+
   beforeEach(() => {
     try { fs.unlinkSync(DB_PATH + "-wal"); } catch {}
     try { fs.unlinkSync(DB_PATH + "-shm"); } catch {}

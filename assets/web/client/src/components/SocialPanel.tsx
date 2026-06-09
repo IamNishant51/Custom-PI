@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { showToast } from "./Toast";
 
 interface SocialStatus {
   ok: boolean;
@@ -81,7 +82,7 @@ export default function SocialPanel() {
       const res = await fetch("/api/social/queue");
       const d = await res.json();
       if (d.ok) setQueueItems(d.items || []);
-    } catch {}
+    } catch { showToast("Failed to load queue", "error"); }
     setQueueLoading(false);
   }, []);
 
@@ -91,7 +92,7 @@ export default function SocialPanel() {
       const res = await fetch("/api/social/drafts");
       const d = await res.json();
       if (d.ok) setDrafts(d.items || []);
-    } catch {}
+    } catch { showToast("Failed to load drafts", "error"); }
     setDraftsLoading(false);
   }, []);
 
@@ -135,7 +136,7 @@ export default function SocialPanel() {
   }
 
   async function disconnectPlatform(platform: string) {
-    try { await fetch(`/api/social/${platform}/disconnect`, { method: "POST" }); fetchStatus(); } catch {}
+    try { await fetch(`/api/social/${platform}/disconnect`, { method: "POST" }); fetchStatus(); } catch { showToast("Failed to disconnect", "error"); }
   }
 
   function toggleSchedulePlatform(platform: string) {
@@ -181,7 +182,7 @@ export default function SocialPanel() {
     try {
       await fetch(`/api/social/queue/${id}`, { method: "DELETE" });
       fetchQueue();
-    } catch {}
+    } catch { showToast("Failed to cancel scheduled post", "error"); }
   }
 
   async function approveDraft(id: string) {
@@ -189,14 +190,14 @@ export default function SocialPanel() {
       await fetch(`/api/social/drafts/${id}/approve`, { method: "POST" });
       fetchDrafts();
       fetchQueue();
-    } catch {}
+    } catch { showToast("Failed to approve draft", "error"); }
   }
 
   async function rejectDraft(id: string) {
     try {
       await fetch(`/api/social/drafts/${id}/reject`, { method: "POST" });
       fetchDrafts();
-    } catch {}
+    } catch { showToast("Failed to reject draft", "error"); }
   }
 
   if (loading) return <div className="social-empty"><div className="loading-spinner" /></div>;

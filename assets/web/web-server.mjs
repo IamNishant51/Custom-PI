@@ -25,7 +25,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max upload
 const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 
 // ── AsyncLocalStorage for per-request context ──────────────────────────────
-import { AsyncLocalError } from "node:async_hooks";
+import { AsyncLocalStorage } from "node:async_hooks";
 let asyncLocalStorage;
 try {
   const { AsyncLocalStorage } = await import("node:async_hooks");
@@ -1410,8 +1410,8 @@ const TOOLS = [
     },
   },
   {
-    name: "ast_grep",
-    description: "AST-aware code search and structural analysis. Uses tree-sitter CLI if available. Falls back to pattern-based structural matching.",
+    name: "pattern_search",
+    description: "Pattern-based code search across source files. Uses regex matching (not AST-based).",
     parameters: {
       type: "object",
       properties: {
@@ -2667,6 +2667,7 @@ Restored: ${result.restored.join(", ")}`;
           return `Unknown plugin action: ${args.action}`;
       }
     }
+    case "pattern_search":
     case "ast_grep": {
       const filePath = args.file_path ? safeResolve(cwd, expandPath(args.file_path)) : null;
       if (args.action === "search" && args.pattern) {
@@ -4437,45 +4438,6 @@ function validateDag(agents) {
   return { valid: errors.length === 0, errors };
 }
 
-function detectCycle(agents) {
-  const adj = {};
-  const inDegree = {};
-  for (const a of agents) {
-    adj[a.id] = [];
-    inDegree[a.id] = 0;
-  }
-  for (const a of agents) {
-    for (const dep of a.waits_for || []) {
-      if (adj[dep]) {
-        adj[dep].push(a.id);
-        inDegree[a.id] = (inDegree[a.id] || 0) + 1;
-      }
-    }
-  }
-
-  const queue = [];
-  for (const a of agents) {
-    if (inDegree[a.id] === 0) {
-      queue.push(a.id);
-    }
-  }
-
-  const processed = new Set();
-  while (queue.length > 0) {
-    const node = queue.shift();
-    processed.add(node);
-    for (const neighbor of adj[node] || []) {
-      inDegree[neighbor]--;
-      if (inDegree[neighbor] === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  const unprocessed = agents.filter(a => !processed.has(a.id)).map(a => a.id);
-  return { hasCycle: unprocessed.length > 0, cycle: unprocessed };
-}
-
 function topologicalSort(agents, mode) {
   const adj = {};
   const inDegree = {};
@@ -4494,15 +4456,40 @@ function topologicalSort(agents, mode) {
     }
   }
 
+  // Compute topological order (shared logic for all modes)
+  const computeOrder = () => {
+    const result = [];
+    const tempInDegree = { ...inDegree };
+    for (const a of agents) {
+      if (tempInDegree[a.id] === 0) result.push(a.id);
+    }
+    const queue = [...result];
+    while (queue.length > 0) {
+      const node = queue.shift();
+      for (const neighbor of adj[node] || []) {
+        tempInDegree[neighbor]--;
+        if (tempInDegree[neighbor] === 0) queue.push(neighbor);
+      }
+    }
+    // Filter to only those actually processed (cycle-safe)
+    return result.filter(id => tempInDegree[id] === undefined || tempInDegree[id] <= 0);
+  };
+
+  const processed = new Set(computeOrder());
+  if (processed.size < agents.length) {
+    const cycle = agents.filter(a => !processed.has(a.id)).map(a => a.id);
+    return { hasCycle: true, cycle, waves: [] };
+  }
+
   if (mode === "pipeline" || mode === "sequential") {
+    // Build order using topological sort (not alphabetical)
+    const tempInDegree = { ...inDegree };
     const result = [];
     const queue = [];
-    const tempInDegree = { ...inDegree };
     for (const a of agents) {
       if (tempInDegree[a.id] === 0) queue.push(a.id);
     }
     while (queue.length > 0) {
-      queue.sort();
       const node = queue.shift();
       result.push(agentMap[node]);
       for (const neighbor of adj[node] || []) {
@@ -4510,7 +4497,7 @@ function topologicalSort(agents, mode) {
         if (tempInDegree[neighbor] === 0) queue.push(neighbor);
       }
     }
-    return [result]; // single wave
+    return { hasCycle: false, cycle: [], waves: [result] };
   }
 
   // Parallel mode: waves
@@ -4525,7 +4512,7 @@ function topologicalSort(agents, mode) {
         wave.push(agentMap[id]);
       }
     }
-    if (wave.length === 0) break; // cycle protection
+    if (wave.length === 0) break;
     waves.push(wave);
     for (const w of wave) {
       remaining.delete(w.id);
@@ -4535,7 +4522,7 @@ function topologicalSort(agents, mode) {
     }
   }
 
-  return waves;
+  return { hasCycle: false, cycle: [], waves };
 }
 
 // ── DAG Agent Execution ──────────────────────────────────────────────────────
@@ -4711,14 +4698,7 @@ async function executeDagCampaign(socket, goal, dagConfig) {
     return;
   }
 
-  // Cycle detection
-  const cycle = detectCycle(agents);
-  if (cycle.hasCycle) {
-    bcast({ type: "ceo_thought", message: `DAG cycle detected in agents: ${cycle.cycle.join(", ")}` });
-    bcast({ type: "swarm_error", message: `DAG contains cycle among agents: ${cycle.cycle.join(", ")}` });
-    return;
-  }
-
+  // Cycle detection (uses topologicalSort's ability to detect cycles)
   const model = resolveModel();
   const auth = getModelAuth(model);
   const activeTools = getActiveTools();
@@ -4744,7 +4724,13 @@ async function executeDagCampaign(socket, goal, dagConfig) {
     }
 
     // Compute topological waves
-    const waves = topologicalSort(agents, mode);
+    const sortResult = topologicalSort(agents, mode);
+    if (sortResult.hasCycle) {
+      bcast({ type: "ceo_thought", message: `DAG cycle detected in agents: ${sortResult.cycle.join(", ")}` });
+      bcast({ type: "swarm_error", message: `DAG contains cycle among agents: ${sortResult.cycle.join(", ")}` });
+      return;
+    }
+    const waves = sortResult.waves || sortResult;
     const iterationResults = {};
 
     for (let waveIdx = 0; waveIdx < waves.length; waveIdx++) {
@@ -5206,6 +5192,13 @@ async function main() {
   // Gracefully terminate child processes on exit
   const handleExit = async () => {
     console.log("\nStopping active servers...");
+    // Close all WebSocket connections (triggers per-socket close handlers which clear ping timers)
+    for (const sock of swarmSockets) {
+      try { sock.close(); } catch {}
+    }
+    swarmSockets.clear();
+    // Close the Fastify HTTP server
+    try { await app.close(); } catch {}
     await stopMcpServers();
     await stopLspServers();
     closeAllDbConnections();
@@ -5305,6 +5298,26 @@ async function main() {
   app.get("/api/health", async () => ({
     status: "ok", version: "1.0.0", timestamp: new Date().toISOString(),
   }));
+
+  // Sub-agent process health — checks bridge processes and active agents
+  app.get("/api/health/subagents", async () => {
+    const info = {
+      bridges: { social: false, email: false },
+      activeSwarms: currentSwarmState ? 1 : 0,
+      websocketClients: swarmSockets.size,
+      bridgePids: { social: socialBridgePid, email: emailBridgePid },
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      const socialResp = await fetch(`${SOCIAL_BRIDGE}/status`, { signal: AbortSignal.timeout(3000) });
+      if (socialResp.ok) info.bridges.social = true;
+    } catch {}
+    try {
+      const emailResp = await fetch(`${EMAIL_BRIDGE}/status`, { signal: AbortSignal.timeout(3000) });
+      if (emailResp.ok) info.bridges.email = true;
+    } catch {}
+    return info;
+  });
 
   app.get("/api/session/checkpoints", async () => ({ checkpoints: listCheckpoints() }));
   app.post("/api/session/checkpoint", async (req) => {

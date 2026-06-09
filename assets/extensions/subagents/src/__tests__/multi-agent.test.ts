@@ -1,13 +1,28 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+
+const tmpDir = vi.hoisted(() => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const os = require("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-test-"));
+  return dir;
+});
+
+vi.mock("node:os", () => {
+  const actual = require("node:os");
+  const ns = { ...actual, homedir: () => tmpDir };
+  return { default: ns, ...ns };
+});
+
 import { discoverAgents, saveCustomAgent, removeCustomAgent, getAgentLabel } from "../agent-manager";
 import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMcpServer, getEnabledMcpServers, buildMcpContextForPrompt } from "../mcp-catalog";
 import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext } from "../team-manager";
 import type { McpServerConfig } from "../acp-types";
 
-const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
+const CONFIG_DIR = path.join(tmpDir, ".pi", "agent");
 const MCP_CONFIG_PATH = path.join(CONFIG_DIR, "mcp-servers.json");
 const TEAMS_CONFIG_PATH = path.join(CONFIG_DIR, "teams.json");
 const AGENTS_CONFIG_PATH = path.join(CONFIG_DIR, "agents.json");
@@ -18,6 +33,10 @@ function cleanAll() {
     try { fs.unlinkSync(p); } catch {}
   }
 }
+
+afterAll(() => {
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+});
 
 describe("agent-manager", () => {
   afterEach(() => {

@@ -1,7 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+
+const tmpDir = vi.hoisted(() => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const os = require("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-test-"));
+  return dir;
+});
+
+vi.mock("node:os", () => {
+  const actual = require("node:os");
+  const ns = { ...actual, homedir: () => tmpDir };
+  return { default: ns, ...ns };
+});
+
 import {
   trackCost,
   getSessionCosts,
@@ -11,9 +26,13 @@ import {
   getModelRates,
 } from "../cost-tracker";
 
-const COST_DIR = path.join(os.homedir(), ".pi", "agent", "costs");
+const COST_DIR = path.join(tmpDir, ".pi", "agent", "costs");
 
 describe("cost-tracker", () => {
+  afterAll(() => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  });
+
   beforeEach(() => {
     try { fs.rmSync(COST_DIR, { recursive: true, force: true }); } catch {}
   });

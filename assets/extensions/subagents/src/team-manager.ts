@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { logger } from "./logger";
 import { spawnAgentSession, closeSession, discoverAgents, getAgentLabel } from "./agent-manager";
 import { buildMcpContextForPrompt, getEnabledMcpServers } from "./mcp-catalog";
 import type { AgentMode, AcpSessionConfig, McpServerConfig } from "./acp-types";
@@ -49,7 +50,7 @@ function loadTeamsStore(): TeamStore {
     if (fs.existsSync(TEAMS_CONFIG_PATH)) {
       return JSON.parse(fs.readFileSync(TEAMS_CONFIG_PATH, "utf8"));
     }
-  } catch {}
+  } catch { logger.warn("Failed to load teams config"); }
   return { teams: [] };
 }
 
@@ -120,7 +121,8 @@ export function addAgentToTeam(teamId: string, agentId: string, role: TeammateRo
   const team = store.teams.find(t => t.id === teamId);
   if (!team) return undefined;
 
-  if (team.agents.length >= 10) return undefined;
+  const maxTeamSize = parseInt(process.env.PI_TEAM_MAX_SIZE || "0", 10) || 50;
+  if (team.agents.length >= maxTeamSize) return undefined;
 
   const agent = discoverAgents().find(a => a.id === agentId);
   if (!agent) return undefined;

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { showToast } from "./Toast";
 
 export default function BudgetPanel() {
   const [stats, setStats] = useState<any>(null);
@@ -7,20 +8,22 @@ export default function BudgetPanel() {
   const [form, setForm] = useState({ maxSessionTokens: 500000, maxDailyTokens: 2000000, warningThreshold: 0.8 });
 
   const fetchData = () => {
-    fetch("/api/budget/stats").then(r => r.json()).then(setStats).catch(() => {});
-    fetch("/api/budget/config").then(r => r.json()).then(d => { setConfig(d); setForm({ maxSessionTokens: d.maxSessionTokens, maxDailyTokens: d.maxDailyTokens, warningThreshold: d.warningThreshold || 0.8 }); }).catch(() => {});
+    fetch("/api/budget/stats").then(r => r.json()).then(setStats).catch(() => showToast("Failed to load budget stats", "error"));
+    fetch("/api/budget/config").then(r => r.json()).then(d => { setConfig(d); setForm({ maxSessionTokens: d.maxSessionTokens, maxDailyTokens: d.maxDailyTokens, warningThreshold: d.warningThreshold || 0.8 }); }).catch(() => showToast("Failed to load budget config", "error"));
   };
 
   useEffect(() => { fetchData(); }, []);
 
   const saveConfig = async () => {
-    await fetch("/api/budget/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    setEditMode(false);
-    fetchData();
+    try {
+      await fetch("/api/budget/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      setEditMode(false);
+      fetchData();
+    } catch { showToast("Failed to save budget config", "error"); }
   };
 
   return (

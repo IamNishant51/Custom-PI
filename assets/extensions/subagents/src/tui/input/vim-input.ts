@@ -13,6 +13,11 @@ export type VimAction =
   | "home" | "end"
   | "pageUp" | "pageDown";
 
+export interface UndoEntry {
+  text: string;
+  cursor: number;
+}
+
 export class VimState {
   mode: VimMode = "normal";
   pendingKeys: string[] = [];
@@ -20,8 +25,46 @@ export class VimState {
   register: string = '"';
   insertCount = 0;
 
+  /** Undo stack: most recent entry at the end */
+  undoStack: UndoEntry[] = [];
+  /** Redo stack: most recent entry at the end */
+  redoStack: UndoEntry[] = [];
+  /** Clipboard register for yank/delete operations */
+  clipboard: string = "";
+
+  /** Maximum entries kept in undo/redo stacks */
+  readonly maxUndoDepth = 100;
+
   reset(): void {
     this.pendingKeys = [];
+  }
+
+  /** Push current state onto the undo stack (clears redo stack on new change) */
+  pushUndo(text: string, cursor: number): void {
+    this.undoStack.push({ text, cursor });
+    if (this.undoStack.length > this.maxUndoDepth) {
+      this.undoStack.shift();
+    }
+    // Any new change invalidates the redo stack
+    this.redoStack = [];
+  }
+
+  /** Pop the most recent undo entry and push the current state onto redo */
+  popUndo(currentText: string, currentCursor: number): UndoEntry | null {
+    const entry = this.undoStack.pop();
+    if (entry) {
+      this.redoStack.push({ text: currentText, cursor: currentCursor });
+    }
+    return entry ?? null;
+  }
+
+  /** Pop the most recent redo entry and push the current state back onto undo */
+  popRedo(currentText: string, currentCursor: number): UndoEntry | null {
+    const entry = this.redoStack.pop();
+    if (entry) {
+      this.undoStack.push({ text: currentText, cursor: currentCursor });
+    }
+    return entry ?? null;
   }
 }
 
@@ -181,19 +224,39 @@ export class VimInputHandler {
       case "visualMode":
         this.state.mode = "visual";
         return { text, cursor, action };
-      case "deleteChar":
+      case "deleteChar": {
         if (cursor < text.length) {
+          this.state.pushUndo(text, cursor);
+          this.state.clipboard = text[cursor];
           text = text.slice(0, cursor) + text.slice(cursor + 1);
         }
         this.state.lastMotion = "x";
         return { text, cursor, action };
+      }
       case "deleteLine":
+        this.state.pushUndo(text, cursor);
+        this.state.clipboard = text;
         text = "";
         cursor = 0;
         this.state.lastMotion = "dd";
         return { text, cursor, action };
+      case "deleteWord": {
+        this.state.pushUndo(text, cursor);
+        // Find end of current/next word
+        let end = cursor;
+        if (end < text.length && text[end] === " ") {
+          // Skip leading spaces
+          while (end < text.length && text[end] === " ") end++;
+        }
+        while (end < text.length && text[end] !== " ") end++;
+        this.state.clipboard = text.slice(cursor, end);
+        text = text.slice(0, cursor) + text.slice(end);
+        this.state.lastMotion = "dw";
+        return { text, cursor, action };
+      }
       case "backspace":
         if (cursor > 0) {
+          this.state.pushUndo(text, cursor);
           text = text.slice(0, cursor - 1) + text.slice(cursor);
           cursor--;
         }
@@ -205,10 +268,50 @@ export class VimInputHandler {
         return { text, cursor: 0, action };
       case "end":
         return { text, cursor: text.length, action };
-      case "undo":
+      case "yankLine":
+        this.state.clipboard = text;
+        this.state.lastMotion = "yy";
         return { text, cursor, action };
-      case "redo":
+      case "pasteAfter": {
+        if (this.state.clipboard) {
+          this.state.pushUndo(text, cursor);
+          const before = text.slice(0, cursor + 1);
+          const after = text.slice(cursor + 1);
+          text = before + this.state.clipboard + after;
+          cursor += this.state.clipboard.length;
+        }
+        this.state.lastMotion = "p";
         return { text, cursor, action };
+      }
+      case "pasteBefore": {
+        if (this.state.clipboard) {
+          this.state.pushUndo(text, cursor);
+          const before = text.slice(0, cursor);
+          const after = text.slice(cursor);
+          text = before + this.state.clipboard + after;
+          cursor += this.state.clipboard.length;
+        }
+        this.state.lastMotion = "P";
+        return { text, cursor, action };
+      }
+      case "undo": {
+        const entry = this.state.popUndo(text, cursor);
+        if (entry) {
+          text = entry.text;
+          cursor = entry.cursor;
+        }
+        this.state.lastMotion = "u";
+        return { text, cursor, action };
+      }
+      case "redo": {
+        const entry = this.state.popRedo(text, cursor);
+        if (entry) {
+          text = entry.text;
+          cursor = entry.cursor;
+        }
+        this.state.lastMotion = "r";
+        return { text, cursor, action };
+      }
       default:
         return { text, cursor };
     }

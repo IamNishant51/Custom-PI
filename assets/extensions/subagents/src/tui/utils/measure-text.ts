@@ -15,7 +15,13 @@ export function measureWidth(text: string): number {
       (code >= 0xFFE0 && code <= 0xFFE6) ||
       (code >= 0x1B000 && code <= 0x1B0FF) ||
       (code >= 0x1D000 && code <= 0x1D0FF) ||
-      (code >= 0x20000 && code <= 0x2FA1F)
+      (code >= 0x20000 && code <= 0x2FA1F) ||
+      // Emoji 5.0+ Chess Symbols
+      (code >= 0x1FA00 && code <= 0x1FA6F) ||
+      // Symbols and Pictographs Extended-A
+      (code >= 0x1FA70 && code <= 0x1FA7F) ||
+      // Supplementary Private Use Area A and B (covers newer emoji)
+      (code >= 0xF0000 && code <= 0x10FFFF)
     )) {
       w += 2;
     } else {

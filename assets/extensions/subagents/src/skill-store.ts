@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import yaml from "yaml";
+import { logger } from "./logger";
 import {
   SkillFrontmatter,
   SkillFile,
@@ -10,7 +11,7 @@ import {
   SkillAuthor,
   SKILLS_DIR,
   SKILL_USAGE_FILE,
-  DEFAULT_SKILL_FRONTMATTER,
+  getDefaultSkillFrontmatter,
   STALE_DAYS,
   ARCHIVE_DAYS,
   makeSkillFilename,
@@ -70,7 +71,7 @@ export function listSkills(author?: SkillAuthor): SkillFile[] {
         const content = fs.readFileSync(filePath, "utf8");
         const parsed = parseSkillFile(content, filePath);
         if (parsed) results.push(parsed);
-      } catch {}
+      } catch { logger.warn("Failed to parse skill file", { file: filePath }); }
     }
   }
   return results;
@@ -84,7 +85,7 @@ export function parseSkillFile(content: string, filePath: string): SkillFile | n
     if (!frontmatter.name || !frontmatter.description) return null;
     return {
       frontmatter: {
-        ...DEFAULT_SKILL_FRONTMATTER,
+        ...getDefaultSkillFrontmatter(),
         ...frontmatter,
         created: frontmatter.created || new Date().toISOString(),
         updated: new Date().toISOString(),

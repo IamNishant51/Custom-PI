@@ -15,6 +15,10 @@
     "showTerminalProgress": true
   },
   "theme": "custom-pi-quantum",
+  "embeddingModel": "nomic-embed-text",
+  "themeMap": {
+    "custom-pi-quantum": "./assets/themes/custom-pi-quantum.json"
+  },
   "compaction": {
     "enabled": true,
     "reserveTokens": 1024,

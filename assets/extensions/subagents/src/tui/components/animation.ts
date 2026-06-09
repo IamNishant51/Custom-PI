@@ -3,10 +3,13 @@ export class AnimationFrame {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private frameId = 0;
+  /** Timestamp of the last tick callback, used for drift correction */
+  private lastTickWall = 0;
 
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.lastTickWall = Date.now();
     this.tick();
   }
 
@@ -28,11 +31,17 @@ export class AnimationFrame {
         try { entry.callback(); } catch {}
       }
     }
-    this.timer = setTimeout(() => this.tick(), 16);
+    // Drift correction: schedule next tick based on actual elapsed time,
+    // not a fixed 16ms. This prevents accumulating drift over time.
+    const elapsedSinceLastTick = now - this.lastTickWall;
+    this.lastTickWall = now;
+    const delay = Math.max(1, 16 - elapsedSinceLastTick);
+    this.timer = setTimeout(() => this.tick(), delay);
   }
 
-  add(id: string, callback: () => void, interval = 80): void {
+  add(id: string, callback: () => void, interval = 80): () => void {
     this.frameCallbacks.set(id, { callback, interval, lastTick: Date.now() });
+    return () => { this.frameCallbacks.delete(id); };
   }
 
   remove(id: string): void {

@@ -6,6 +6,7 @@ export default defineConfig({
       "assets/extensions/subagents/src/__tests__/**/*.test.ts",
       "assets/web/__tests__/**/*.test.ts",
       "assets/web/__tests__/**/*.test.tsx",
+      "tests/integration/**/*.test.ts",
     ],
     environment: "node",
     setupFiles: ["assets/extensions/subagents/src/__tests__/setup.ts"],

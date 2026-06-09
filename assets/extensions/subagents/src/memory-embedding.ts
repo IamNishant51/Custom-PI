@@ -1,5 +1,6 @@
 const OLLAMA_EMBED_URL = "http://localhost:11434/api/embeddings";
-const EMBED_MODELS = ["nomic-embed-text", "all-minilm", "bge-small-en-v1.5", "snowflake-arctic-embed"];
+const OLLAMA_EMBED_MODELS = ["nomic-embed-text", "all-minilm", "bge-small-en-v1.5", "snowflake-arctic-embed"];
+const OPENAI_EMBED_URL = "https://api.openai.com/v1/embeddings";
 const MAX_CACHE_SIZE = 500;
 
 interface CacheEntry {
@@ -60,6 +61,50 @@ function fallbackEmbed(text: string): number[] {
   return vec;
 }
 
+async function tryOllamaEmbed(text: string, signal: AbortSignal): Promise<number[] | null> {
+  for (const model of OLLAMA_EMBED_MODELS) {
+    try {
+      const response = await fetch(OLLAMA_EMBED_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, prompt: text }),
+        signal,
+      });
+      if (!response.ok) continue;
+      const data: { embedding: number[] } = await response.json();
+      return data.embedding;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function tryOpenAIEmbed(text: string, signal: AbortSignal): Promise<number[] | null> {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.CUSTOM_PI_OPENAI_KEY;
+  if (!apiKey) return null;
+  try {
+    const response = await fetch(OPENAI_EMBED_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "text-embedding-3-small",
+        input: text,
+      }),
+      signal,
+    });
+    if (!response.ok) return null;
+    const data: { data: { embedding: number[] }[] } = await response.json();
+    if (data.data?.[0]?.embedding) return data.data[0].embedding;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function embed(text: string): Promise<number[]> {
   const key = text.slice(0, 200);
   const fromCache = cacheGet(key);
@@ -68,30 +113,26 @@ export async function embed(text: string): Promise<number[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
 
-  for (const model of EMBED_MODELS) {
-    try {
-      const response = await fetch(OLLAMA_EMBED_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, prompt: text }),
-        signal: controller.signal,
-      });
+  const embeddingModel = process.env.CUSTOM_PI_EMBEDDING_MODEL || "nomic-embed-text";
 
-      if (!response.ok) continue;
+  let result: number[] | null = null;
 
-      const data: { embedding: number[] } = await response.json();
-      cacheSet(key, data.embedding);
-      return data.embedding;
-    } catch {
-      continue;
-    }
+  if (embeddingModel.startsWith("openai/") || embeddingModel === "text-embedding-3-small" || embeddingModel === "text-embedding-3-large" || embeddingModel === "text-embedding-ada-002") {
+    result = await tryOpenAIEmbed(text, controller.signal);
+  }
+
+  if (!result) {
+    result = await tryOllamaEmbed(text, controller.signal);
   }
 
   clearTimeout(timeout);
 
-  const fb = fallbackEmbed(text);
-  cacheSet(key, fb);
-  return fb;
+  if (!result) {
+    result = fallbackEmbed(text);
+  }
+
+  cacheSet(key, result);
+  return result;
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {

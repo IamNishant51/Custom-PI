@@ -14,7 +14,7 @@ export default function VaultPanel() {
     fetch("/api/vault/list")
       .then(r => r.json())
       .then(d => setKeys(d.keys || []))
-      .catch(() => {});
+      .catch(() => toast("Failed to load secrets", "error"));
   };
 
   useEffect(() => { refreshKeys(); }, []);
@@ -48,7 +48,7 @@ export default function VaultPanel() {
       });
       const d = await res.json();
       if (d.ok) setRevealed(prev => ({ ...prev, [key]: d.value }));
-    } catch {}
+    } catch { toast("Failed to reveal secret", "error"); }
   };
 
   const deleteSecret = async (key: string) => {

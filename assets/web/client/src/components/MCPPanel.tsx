@@ -22,7 +22,7 @@ export default function MCPPanel() {
     fetch("/api/mcp/config")
       .then(r => r.json())
       .then(d => setServers(d.servers || []))
-      .catch(() => {});
+      .catch(() => toast("Failed to load MCP config", "error"));
   }, []);
 
   const save = useCallback(async () => {

@@ -52,25 +52,18 @@ export function strictifySchema(schema: Record<string, any>): Record<string, any
   const strict = { ...schema };
   strict.additionalProperties = false;
 
-  // Ensure at least an empty required array
   if (!strict.required) {
     strict.required = [];
   }
 
-  // All properties that aren't explicitly optional become required
   if (strict.properties) {
-    for (const key of Object.keys(strict.properties)) {
-      if (!strict.required.includes(key)) {
-        const prop = strict.properties[key];
-        // Properties without default, without optional
-        if (prop && !prop.default && !prop.optional && !prop["default"]) {
-          // Skip if it looks optional
-          if (!prop.anyOf && !prop.oneOf) {
-            // This is already not required — leave as is
-          }
-        }
+    const requiredSet = new Set<string>(strict.required);
+    for (const [key, prop] of Object.entries(strict.properties) as [string, any][]) {
+      if (prop && !prop.default && !prop["default"] && !prop.optional && !prop.anyOf && !prop.oneOf) {
+        requiredSet.add(key);
       }
     }
+    strict.required = Array.from(requiredSet);
   }
 
   return strict;

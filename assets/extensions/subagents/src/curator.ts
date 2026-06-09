@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { logger } from "./logger";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { listSkills, getSkillUsage, deleteSkill, getAllUsage } from "./skill-store";
 import { SkillFile, SkillLifecycle, STALE_DAYS, ARCHIVE_DAYS, SKILLS_DIR, type SkillInputSchema, type SkillOutputContract } from "./skill-types";
@@ -31,7 +32,7 @@ Output JSON:
   "reasoning": "brief explanation"
 }`;
 
-export async function runCurator(model: any, auth: { apiKey?: string; headers?: Record<string, string> }): Promise<CuratorReport> {
+export async function runCurator(model: any, auth: { apiKey?: string; headers?: Record<string, string> }, dryRun = false): Promise<CuratorReport> {
   const report: CuratorReport = { archived: [], deleted: [], staleCount: 0, activeCount: 0 };
 
   try {
@@ -78,31 +79,39 @@ export async function runCurator(model: any, auth: { apiKey?: string; headers?: 
 
     // Archive skills — move to archived subdirectory
     if (Array.isArray(decision.toArchive)) {
-      const archiveDir = path.join(os.homedir(), SKILLS_DIR, "archived");
-      if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
-      for (const name of decision.toArchive) {
-        const skill = skills.find(s => s.frontmatter.name === name);
-        if (skill && skill.filePath) {
-          try {
-            const dest = path.join(archiveDir, path.basename(skill.filePath));
-            fs.copyFileSync(skill.filePath, dest);
-            fs.unlinkSync(skill.filePath);
-            report.archived.push(name);
-          } catch { /* skip failed archives */ }
+      if (dryRun) {
+        report.archived.push(...decision.toArchive.map((n: string) => `${n} (dry-run)`));
+      } else {
+        const archiveDir = path.join(os.homedir(), SKILLS_DIR, "archived");
+        if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+        for (const name of decision.toArchive) {
+          const skill = skills.find(s => s.frontmatter.name === name);
+          if (skill && skill.filePath) {
+            try {
+              const dest = path.join(archiveDir, path.basename(skill.filePath));
+              fs.copyFileSync(skill.filePath, dest);
+              fs.unlinkSync(skill.filePath);
+              report.archived.push(name);
+          } catch (e) { logger.warn("Failed to archive skill", { name, error: String(e) }); }
+          }
         }
       }
     }
 
     // Delete skills
     if (Array.isArray(decision.toDelete)) {
-      for (const name of decision.toDelete) {
-        if (deleteSkill(name)) {
-          report.deleted.push(name);
+      if (dryRun) {
+        report.deleted.push(...decision.toDelete.map((n: string) => `${n} (dry-run)`));
+      } else {
+        for (const name of decision.toDelete) {
+          if (deleteSkill(name)) {
+            report.deleted.push(name);
+          }
         }
       }
     }
-  } catch {
-    // Curator fails silently — never crash the main agent
+  } catch (e: any) {
+    logger.warn("Curator run failed", { error: e?.message || String(e) });
   }
 
   return report;

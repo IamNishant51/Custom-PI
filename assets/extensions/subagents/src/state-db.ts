@@ -23,6 +23,23 @@ export interface Checkpoint {
 
 let db: any = null;
 
+let walCheckpointCounter = 0;
+const WAL_CHECKPOINT_INTERVAL = 100;
+
+function checkpointWal(): void {
+  try {
+    if (db) db.pragma("wal_checkpoint(TRUNCATE)");
+  } catch {}
+}
+
+function maybeCheckpointWal(): void {
+  walCheckpointCounter++;
+  if (walCheckpointCounter >= WAL_CHECKPOINT_INTERVAL) {
+    walCheckpointCounter = 0;
+    checkpointWal();
+  }
+}
+
 function openDb(): any {
   if (db) return db;
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
@@ -212,6 +229,7 @@ export function insertMessage(
     "INSERT INTO messages (session_id, role, content, tool_name, tool_args, token_count) VALUES (?, ?, ?, ?, ?, ?)"
   ).run(sessionId, role, content, toolName || null, toolArgs || null, tokenCount || 0);
   d.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE session_id = ?").run(sessionId);
+  maybeCheckpointWal();
   return Number(result.lastInsertRowid);
 }
 
@@ -258,6 +276,7 @@ export function saveTaskState(sessionId: string, stateJson: string): void {
   d.prepare(
     "INSERT INTO task_states (session_id, state_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET state_json = ?, updated_at = datetime('now')"
   ).run(sessionId, stateJson, stateJson);
+  maybeCheckpointWal();
 }
 
 export function getTaskState(sessionId: string): TaskStateRecord | null {
@@ -314,6 +333,7 @@ export function insertTriplet(record: TripletRecord): void {
     record.confidenceScore, lastUpdated, record.sourceSession,
     record.confidenceScore, lastUpdated
   );
+  maybeCheckpointWal();
 }
 
 export function queryTriplets(filter: {
@@ -424,6 +444,7 @@ export function findConnectedEntities(entityId: string): ConnectedEntity[] {
 export function deleteTriplet(id: string): boolean {
   const d = openDb();
   const res = d.prepare("DELETE FROM triplets WHERE id = ?").run(id);
+  maybeCheckpointWal();
   return res.changes > 0;
 }
 
@@ -488,7 +509,25 @@ export function pruneStaleTriplets(): { count: number; items: string[] } {
     }
   }
 
+  maybeCheckpointWal();
   return { count: items.length, items };
+}
+
+function tokenOverlap(a: string, b: string): number {
+  const tokensA = new Set(a.toLowerCase().split(/\W+/).filter(Boolean));
+  const tokensB = new Set(b.toLowerCase().split(/\W+/).filter(Boolean));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const t of tokensA) if (tokensB.has(t)) intersection++;
+  return intersection / Math.min(tokensA.size, tokensB.size);
+}
+
+function labelSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a.toLowerCase() === b.toLowerCase()) return 0.95;
+  const overlap = tokenOverlap(a, b);
+  if (overlap > 0.5) return 0.5 + overlap * 0.4;
+  return overlap * 0.8;
 }
 
 export function mergeRedundantTriplets(): { count: number; items: { kept: string; removed: string; reason: string }[] } {
@@ -512,27 +551,30 @@ export function mergeRedundantTriplets(): { count: number; items: { kept: string
 
       const a = all[i];
       const b = all[j];
-      const sim =
-        (a.subject_id === b.subject_id ? 0.3 : 0) +
-        (a.predicate_type === b.predicate_type ? 0.3 : 0) +
-        (a.object_id === b.object_id ? 0.3 : 0) +
+
+      // Combined similarity: exact field match + label token overlap
+      const fieldSim =
+        (a.subject_id === b.subject_id ? 0.25 : labelSimilarity(a.subject_label, b.subject_label) * 0.25) +
+        (a.predicate_type === b.predicate_type ? 0.25 : labelSimilarity(a.predicate_label, b.predicate_label) * 0.15) +
+        (a.object_id === b.object_id ? 0.25 : labelSimilarity(a.object_label, b.object_label) * 0.25) +
         (a.confidence_score > 0.7 && b.confidence_score > 0.7 ? 0.1 : 0);
 
-      if (sim >= REDUNDANCY_SIMILARITY_THRESHOLD) {
+      if (fieldSim >= REDUNDANCY_SIMILARITY_THRESHOLD) {
         // Keep the higher-confidence entry, delete the other
         if (a.confidence_score >= b.confidence_score) {
           d.prepare("DELETE FROM triplets WHERE id = ?").run(b.id);
           processed.add(b.id);
-          items.push({ kept: `${a.subject_label} → ${a.predicate_label} → ${a.object_label}`, removed: `${b.subject_label} → ${b.predicate_label} → ${b.object_label}`, reason: `redundant (sim=${sim.toFixed(2)}, kept confidence=${a.confidence_score})` });
+          items.push({ kept: `${a.subject_label} → ${a.predicate_label} → ${a.object_label}`, removed: `${b.subject_label} → ${b.predicate_label} → ${b.object_label}`, reason: `redundant (sim=${fieldSim.toFixed(2)}, kept confidence=${a.confidence_score})` });
         } else {
           d.prepare("DELETE FROM triplets WHERE id = ?").run(a.id);
           processed.add(a.id);
-          items.push({ kept: `${b.subject_label} → ${b.predicate_label} → ${b.object_label}`, removed: `${a.subject_label} → ${a.predicate_label} → ${a.object_label}`, reason: `redundant (sim=${sim.toFixed(2)}, kept confidence=${b.confidence_score})` });
+          items.push({ kept: `${b.subject_label} → ${b.predicate_label} → ${b.object_label}`, removed: `${a.subject_label} → ${a.predicate_label} → ${a.object_label}`, reason: `redundant (sim=${fieldSim.toFixed(2)}, kept confidence=${b.confidence_score})` });
         }
       }
     }
   }
 
+  maybeCheckpointWal();
   return { count: items.length, items };
 }
 
@@ -613,6 +655,29 @@ export function getLatestCheckpoint(): Checkpoint | null {
   return latest;
 }
 
+export function restoreCheckpoint(sessionId: string): { success: boolean; checkpoint: Checkpoint | null; error?: string } {
+  const cp = loadCheckpoint(sessionId);
+  if (!cp) {
+    return { success: false, checkpoint: null, error: `Checkpoint not found for session: ${sessionId}` };
+  }
+  try {
+    ensureSession(sessionId, cp.goal?.slice(0, 100) || "restored");
+    saveTaskState(sessionId, JSON.stringify({
+      goal: cp.goal,
+      currentSubtask: cp.currentSubtask,
+      completedSubtasks: cp.completedSubtasks,
+      pendingSubtasks: cp.pendingSubtasks,
+      stateNotes: cp.stateNotes,
+      activeAgentName: cp.activeAgentName,
+      lastToolResult: cp.lastToolResult,
+      restoredAt: Date.now(),
+    }));
+    return { success: true, checkpoint: cp };
+  } catch (e: any) {
+    return { success: false, checkpoint: null, error: e.message };
+  }
+}
+
 // ── Failure Triplets & Incidents ────────────────────────────────────────────
 
 export interface FailureTripletRecord {
@@ -634,6 +699,7 @@ export function insertFailureTriplet(record: FailureTripletRecord): void {
     INSERT INTO failure_triplets (id, component_id, component_label, error_code, error_message, severity, source, raw_log, created_at, acknowledged)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(record.id, record.componentId, record.componentLabel, record.errorCode, record.errorMessage || "", record.severity, record.source, record.rawLog || "", record.createdAt, record.acknowledged);
+  maybeCheckpointWal();
 }
 
 export function queryFailureTriplets(filter: { severity?: string; component?: string; limit?: number }): FailureTripletRecord[] {
@@ -658,6 +724,7 @@ export function insertIncident(record: {
     VALUES (?, ?, ?, ?, 1, ?, ?, ?, 'open', ?, ?)
     ON CONFLICT(id) DO UPDATE SET count = count + 1, last_seen = ?, severity = ?
   `).run(record.id, record.summary, record.component || "", record.errorCode || "", now, now, record.severity || "medium", record.triageTaskId || "", now, now, record.severity || "medium");
+  maybeCheckpointWal();
 }
 
 export function queryOpenIncidents(): any[] {
@@ -693,6 +760,7 @@ export function upsertServiceHealth(record: ServiceHealthRecord): void {
     record.status, record.endpoint, record.latencyMs, record.jitterMs,
     record.lastOk, record.lastFail, record.consecutiveFailures, record.updatedAt
   );
+  maybeCheckpointWal();
 }
 
 export function getServiceHealth(name: string): ServiceHealthRecord | null {
@@ -731,6 +799,7 @@ export function upsertRateLimit(record: RateLimitRecord): void {
     record.remaining, record.limitTotal, record.resetAt, record.breached ? 1 : 0,
     record.backoffDelayMs, record.lastChecked
   );
+  maybeCheckpointWal();
 }
 
 export function getRateLimit(service: string): RateLimitRecord | null {

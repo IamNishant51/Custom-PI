@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { showToast } from "./Toast";
 
 interface AssetInfo {
   filename: string;
@@ -21,7 +22,7 @@ export default function AssetGallery() {
       const res = await fetch("/api/assets", { signal: controller.signal });
       const data = await res.json();
       if (!controller.signal.aborted) setAssets(data.assets || []);
-    } catch {} finally {
+    } catch { showToast("Failed to load assets", "error"); } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
@@ -35,7 +36,7 @@ export default function AssetGallery() {
     try {
       await fetch(`/api/assets/${encodeURIComponent(filename)}`, { method: "DELETE" });
       setAssets(prev => prev.filter(a => a.filename !== filename));
-    } catch {}
+    } catch { showToast("Failed to delete asset", "error"); }
   };
 
   const copyPath = (filename: string) => {

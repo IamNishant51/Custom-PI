@@ -1,19 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-
-interface PendingAssetSelection {
-  id: string;
-  filenames: string[];
-  prompt?: string;
-}
-
-interface PendingPostPreview {
-  id: string;
-  platform: string;
-  content: string;
-  title?: string;
-  platformSpecific?: Record<string, string>;
-  assetUrl?: string;
-}
+import { useAssetSelection } from "../hooks/useAssetSelection";
+import { usePostApproval } from "../hooks/usePostApproval";
 
 interface CooldownInfo {
   platform: string;
@@ -21,12 +8,9 @@ interface CooldownInfo {
 }
 
 export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
-  const [assetReq, setAssetReq] = useState<PendingAssetSelection | null>(null);
-  const [postPreview, setPostPreview] = useState<PendingPostPreview | null>(null);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [editText, setEditText] = useState("");
+  const { request: assetReq, selected: selectedImage, setSelected: setSelectedImage, answered: assetAnswered, send: sendAsset, reset: resetAsset } = useAssetSelection(ws);
+  const { preview: postPreview, editText, setEditText, answered: postAnswered, send: sendPost } = usePostApproval(ws);
   const [cooldowns, setCooldowns] = useState<CooldownInfo[]>([]);
-  const [answered, setAnswered] = useState(false);
   const mountedRef = useRef(true);
   const cooldownTimer = useRef<ReturnType<typeof setInterval>>(undefined);
 
@@ -34,34 +18,6 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
-
-  useEffect(() => {
-    if (!ws) return;
-    const handler = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "asset_selection_request") {
-          if (!mountedRef.current) return;
-          setAssetReq({ id: data.id, filenames: data.filenames, prompt: data.prompt });
-          setSelectedImage(null);
-          setAnswered(false);
-        }
-        if (data.type === "post_preview") {
-          if (!mountedRef.current) return;
-          setPostPreview({ id: data.id, platform: data.platform, content: data.content, title: data.title, platformSpecific: data.platformSpecific, assetUrl: data.assetUrl });
-          setEditText(data.content);
-          setAnswered(false);
-        }
-        if (data.type === "user_question_resolved") {
-          if (!mountedRef.current) return;
-          setAnswered(true);
-          setTimeout(() => { if (mountedRef.current) { setAssetReq(null); setPostPreview(null); } }, 600);
-        }
-      } catch {}
-    };
-    ws.addEventListener("message", handler);
-    return () => ws.removeEventListener("message", handler);
-  }, [ws]);
 
   useEffect(() => {
     const checkCooldowns = async () => {
@@ -85,12 +41,10 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
     if (!ws) return;
     if (assetReq && selectedImage) {
       ws.send(JSON.stringify({ type: "user_response", questionId: assetReq.id, response: selectedImage }));
-      setAnswered(true);
     }
     if (postPreview) {
       ws.send(JSON.stringify({ type: "post_approved", id: postPreview.id, content: editText }));
-      setAnswered(true);
-      setTimeout(() => { if (mountedRef.current) setPostPreview(null); }, 600);
+      setTimeout(() => { if (mountedRef.current) resetAsset(); }, 600);
     }
   };
 
@@ -98,11 +52,9 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
     if (!ws) return;
     if (assetReq) {
       ws.send(JSON.stringify({ type: "user_response", questionId: assetReq.id, response: null }));
-      setAnswered(true);
     }
     if (postPreview) {
       ws.send(JSON.stringify({ type: "post_skip", id: postPreview.id }));
-      setAnswered(true);
     }
   };
 
@@ -125,7 +77,6 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
         maxHeight: "88vh", display: "flex", flexDirection: "column",
         animation: "slideUp 0.25s ease-out",
       }}>
-        {/* Header */}
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
           padding: "16px 20px", borderBottom: "1px solid var(--hairline)",
@@ -147,12 +98,10 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
           </div>
         </div>
 
-        {/* Body */}
         <div style={{
           display: "flex", flex: 1, overflow: "hidden",
           flexDirection: hasAsset && hasPost ? "row" : "column",
         }}>
-          {/* Left: Asset Grid */}
           {hasAsset && (
             <div style={{
               flex: hasPost ? "0 0 45%" : "1", overflow: "auto",
@@ -177,7 +126,7 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
                         border: isSelected ? "2px solid var(--accent-teal)" : "2px solid transparent",
                         boxShadow: isSelected ? "0 0 12px rgba(90,176,176,0.3)" : "none",
                         transition: "all 0.15s",
-                        opacity: answered ? 0.5 : 1,
+                        opacity: assetAnswered ? 0.5 : 1,
                         position: "relative",
                       }}
                     >
@@ -202,7 +151,6 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
             </div>
           )}
 
-          {/* Right: Text Editor */}
           {hasPost && (
             <div style={{
               flex: hasAsset ? "0 0 55%" : "1", overflow: "auto",
@@ -213,7 +161,6 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
                 {postPreview!.title && <span> — Title: {postPreview!.title}</span>}
               </div>
 
-              {/* Inline image if assetUrl present */}
               {postPreview!.assetUrl && (
                 <div style={{ borderRadius: 8, overflow: "hidden", maxHeight: 200 }}>
                   <img
@@ -227,7 +174,7 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
               <textarea
                 value={editText}
                 onChange={e => setEditText(e.target.value)}
-                disabled={answered}
+                disabled={postAnswered}
                 style={{
                   flex: 1, minHeight: 120,
                   background: "var(--surface-soft)", border: "1px solid var(--hairline)",
@@ -244,7 +191,6 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
           )}
         </div>
 
-        {/* Footer Actions */}
         <div style={{
           display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8,
           padding: "12px 20px", borderTop: "1px solid var(--hairline)",
@@ -254,9 +200,8 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
               className="btn btn-small btn-ghost"
               onClick={() => {
                 ws?.send(JSON.stringify({ type: "user_response", questionId: assetReq!.id, response: null }));
-                setAnswered(true);
               }}
-              disabled={answered}
+              disabled={assetAnswered}
               style={{ fontSize: 12, padding: "6px 14px", borderRadius: 6 }}
             >Skip</button>
           )}
@@ -265,18 +210,18 @@ export default function PostEditorCanvas({ ws }: { ws: WebSocket | null }) {
             onClick={() => {
               ws?.send(JSON.stringify({ type: "regenerate_image", prompt: assetReq?.prompt || "" }));
             }}
-            disabled={!!(answered || !assetReq)}
+            disabled={!!(assetAnswered || !assetReq)}
             style={{ fontSize: 12, padding: "6px 14px", borderRadius: 6 }}
           >Regenerate</button>
           <button
             className="btn btn-small btn-primary"
             onClick={sendApprove}
-            disabled={answered || (hasAsset && !selectedImage)}
+            disabled={assetAnswered || postAnswered || (hasAsset && !selectedImage)}
             style={{
               background: "var(--accent-teal)", color: "#000", border: "none",
               padding: "6px 20px", borderRadius: 6, fontWeight: 600, fontSize: 12,
               cursor: "pointer", fontFamily: "var(--font-mono)",
-              opacity: answered || (hasAsset && !selectedImage) ? 0.4 : 1,
+              opacity: assetAnswered || postAnswered || (hasAsset && !selectedImage) ? 0.4 : 1,
             }}
           >
             {hasAsset && hasPost ? "Approve & Post" : hasAsset ? "Select" : "Approve"}

@@ -46,14 +46,21 @@ export type SkillLifecycle = "active" | "stale" | "archived";
 export const SKILLS_DIR = ".pi/skills";
 export const SKILL_USAGE_FILE = ".skill-usage.json";
 
-export const DEFAULT_SKILL_FRONTMATTER: Omit<SkillFrontmatter, "name" | "description"> = {
-  author: "agent",
-  created: new Date().toISOString(),
-  updated: new Date().toISOString(),
-  version: 1,
-  tags: [],
-  complexity: 3,
-};
+let _defaultFrontmatterCreated: string | null = null;
+
+export function getDefaultSkillFrontmatter(): Omit<SkillFrontmatter, "name" | "description"> {
+  if (!_defaultFrontmatterCreated) {
+    _defaultFrontmatterCreated = new Date().toISOString();
+  }
+  return {
+    author: "agent",
+    created: _defaultFrontmatterCreated,
+    updated: new Date().toISOString(),
+    version: 1,
+    tags: [],
+    complexity: 3,
+  };
+}
 
 export const STALE_DAYS = 30;
 export const ARCHIVE_DAYS = 90;

@@ -21,7 +21,7 @@ export default function MemoryPanel() {
   const { toast } = useToast();
 
   useEffect(() => {
-    fetch("/api/memory/stats").then(r => r.json()).then(setStats).catch(() => {});
+        fetch("/api/memory/stats").then(r => r.json()).then(setStats).catch(() => toast("Failed to refresh stats", "error"));
   }, []);
 
   const search = async () => {
@@ -55,7 +55,7 @@ export default function MemoryPanel() {
       if (d.id) {
         toast("Memory stored", "success");
         setStoreContent("");
-        fetch("/api/memory/stats").then(r => r.json()).then(setStats).catch(() => {});
+    fetch("/api/memory/stats").then(r => r.json()).then(setStats).catch(() => toast("Failed to load memory stats", "error"));
       }
     } catch { toast("Failed to store", "error"); }
   };

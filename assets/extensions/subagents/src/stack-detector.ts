@@ -1,5 +1,6 @@
 import { readFileSync, existsSync, readdirSync, statSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
 export interface StackIndicator {
   file: string;
@@ -47,7 +48,20 @@ export interface DetectedStack {
   confidence: number;
 }
 
-const STACK_MAPPINGS_PATH = resolve(join(__dirname, "..", "..", "..", "..", "config", "project-stack-mappings.json"));
+function resolveConfigPath(): string {
+  try {
+    return require.resolve("@earendil-works/pi-config/config/project-stack-mappings.json");
+  } catch {
+    try {
+      const _dirname = typeof __dirname !== "undefined" ? __dirname : dirname(fileURLToPath(import.meta.url));
+      return resolve(join(_dirname, "..", "..", "..", "..", "config", "project-stack-mappings.json"));
+    } catch {
+      return resolve(join(process.cwd(), "config", "project-stack-mappings.json"));
+    }
+  }
+}
+
+const STACK_MAPPINGS_PATH = resolveConfigPath();
 
 let cachedMappings: StackDefinition[] | null = null;
 

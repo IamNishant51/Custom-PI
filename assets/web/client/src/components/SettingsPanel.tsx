@@ -20,11 +20,11 @@ export default function SettingsPanel() {
           defaultThinkingLevel: d.defaultThinkingLevel || "off",
         });
       })
-      .catch(() => {});
+      .catch(() => toast("Failed to load settings", "error"));
     fetch("/api/models")
       .then(r => r.json())
       .then(d => setModels(Array.isArray(d) ? d : []))
-      .catch(() => {});
+      .catch(() => toast("Failed to load models", "error"));
   }, []);
 
   const [form, setForm] = useState({

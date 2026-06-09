@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { showToast } from "./Toast";
 
 export default function HealthPanel() {
   const [services, setServices] = useState<any[]>([]);
@@ -6,9 +7,9 @@ export default function HealthPanel() {
   const [rateLimits, setRateLimits] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("/api/health/services").then(r => r.json()).then(d => setServices(d.services || [])).catch(() => {});
-    fetch("/api/system/resources").then(r => r.json()).then(setMetrics).catch(() => {});
-    fetch("/api/system/rate-limits").then(r => r.json()).then(d => setRateLimits(d.limits || [])).catch(() => {});
+    fetch("/api/health/services").then(r => r.json()).then(d => setServices(d.services || [])).catch(() => showToast("Failed to load health data", "error"));
+    fetch("/api/system/resources").then(r => r.json()).then(setMetrics).catch(() => showToast("Failed to load system resources", "error"));
+    fetch("/api/system/rate-limits").then(r => r.json()).then(d => setRateLimits(d.limits || [])).catch(() => showToast("Failed to load rate limits", "error"));
   }, []);
 
   return (
