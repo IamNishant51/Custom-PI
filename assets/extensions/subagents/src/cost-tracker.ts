@@ -79,8 +79,11 @@ function getRate(provider: string, model: string): { input: number; output: numb
 }
 
 function estimateCost(provider: string, model: string, inputTokens: number, outputTokens: number): number {
+  const safeInput = isFinite(inputTokens) && inputTokens >= 0 ? inputTokens : 0;
+  const safeOutput = isFinite(outputTokens) && outputTokens >= 0 ? outputTokens : 0;
   const rate = getRate(provider, model);
-  return (inputTokens * rate.input) + (outputTokens * rate.output);
+  const cost = (safeInput * rate.input) + (safeOutput * rate.output);
+  return isFinite(cost) ? cost : 0;
 }
 
 // ── In-memory cache to avoid re-reading the full JSONL on every trackCost ──
@@ -130,8 +133,10 @@ export function trackCost(
   outputTokens: number,
 ): CostResult {
   ensureCostDir();
-  const totalTokens = inputTokens + outputTokens;
-  const costUsd = estimateCost(provider, model, inputTokens, outputTokens);
+  const safeInput = isFinite(inputTokens) && inputTokens >= 0 ? inputTokens : 0;
+  const safeOutput = isFinite(outputTokens) && outputTokens >= 0 ? outputTokens : 0;
+  const totalTokens = safeInput + safeOutput;
+  const costUsd = estimateCost(provider, model, safeInput, safeOutput);
   const budget = loadBudget();
 
   const event: CostEvent = {

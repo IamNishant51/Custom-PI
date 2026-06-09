@@ -24,33 +24,67 @@ function log(msg) { console.log(`[social ${new Date().toISOString().slice(11, 19
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 
+const RATE_FILE = path.join(STATE_DIR, "post-rate.json");
+const POST_LOG_FILE = path.join(STATE_DIR, "posted-content.jsonl");
 
+function loadRate() {
+  try { return JSON.parse(fs.readFileSync(RATE_FILE, "utf8")); } catch { return {}; }
+}
 
-function checkRate(platform) { return { ok: true }; }
+function saveRate(rate) {
+  fs.writeFileSync(RATE_FILE, JSON.stringify(rate, null, 2));
+}
+
+function checkRate(platform) {
+  const rate = loadRate();
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `${platform}_${today}`;
+  const count = rate[key] || 0;
+  const limit = platform === "twitter" ? 50 : 100;
+  if (count >= limit) return { ok: false, reason: `Daily limit of ${limit} reached for ${platform}` };
+  return { ok: true, remaining: limit - count };
+}
+
+function recordPost(platform) {
+  const rate = loadRate();
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `${platform}_${today}`;
+  rate[key] = (rate[key] || 0) + 1;
+  saveRate(rate);
+  try {
+    fs.appendFileSync(POST_LOG_FILE, JSON.stringify({ platform, timestamp: new Date().toISOString() }) + "\n");
+  } catch {}
+}
 
 // ── Browser ─────────────────────────────────────────────────────────────────
 
 let chromium = null;
 const contexts = {};
+const contextLocks = {};
 
 async function getCtx(platform, headless = true) {
   if (contexts[platform]) {
     try { await contexts[platform].pages(); } catch { delete contexts[platform]; }
   }
   if (contexts[platform]) return contexts[platform];
-  if (!chromium) { chromium = (await import("playwright")).chromium; }
-  const profileDir = path.join(PROFILES_DIR, platform);
-  ensureDir(profileDir);
-  log(`Launching ${platform} browser (headless=${headless})...`);
-  const ctx = await chromium.launchPersistentContext(profileDir, {
-    headless,
-    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"],
-    viewport: { width: 1280, height: 800 },
-    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  });
-  contexts[platform] = ctx;
-  return ctx;
-}
+  if (contextLocks[platform]) {
+    return await contextLocks[platform];
+  }
+  contextLocks[platform] = (async () => {
+    if (!chromium) { chromium = (await import("playwright")).chromium; }
+    const profileDir = path.join(PROFILES_DIR, platform);
+    ensureDir(profileDir);
+    log(`Launching ${platform} browser (headless=${headless})...`);
+    const ctx = await chromium.launchPersistentContext(profileDir, {
+      headless,
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"],
+      viewport: { width: 1280, height: 800 },
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    });
+    contexts[platform] = ctx;
+    delete contextLocks[platform];
+    return ctx;
+  })();
 
 // ── Twitter ─────────────────────────────────────────────────────────────────
 

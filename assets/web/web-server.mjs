@@ -24,6 +24,22 @@ const HOST = process.env.WEB_HOST || "127.0.0.1";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max upload
 const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 
+// Dangerous commands that should never be executed via the bash tool
+const DANGEROUS_COMMANDS = [
+  "rm", "mkfs", "dd", "sudo", "su", "chmod", "chown",
+  "wget", "curl", "nc", "ncat", "telnet", "ssh", "scp",
+  "poweroff", "reboot", "shutdown", "init", "systemctl",
+  "passwd", "useradd", "userdel", "usermod", "groupadd",
+  "mount", "umount", "fdisk", "parted", "mkfs.ext4",
+  "iptables", "ufw", "firewall-cmd",
+];
+
+function isDangerousCommand(command) {
+  const firstToken = command.trim().split(/\s+/)[0];
+  const baseCmd = path.basename(firstToken);
+  return DANGEROUS_COMMANDS.includes(baseCmd);
+}
+
 // Global swarm state for persistence across refresh
 let currentSwarmState = null;
 let _swarmPaused = false;
@@ -922,6 +938,7 @@ const TOOLS = [
       properties: {
         pattern: { type: "string", description: "Pattern to search for" },
         path: { type: "string", description: "Optional path to search in" },
+        regex: { type: "boolean", description: "Set to true to treat pattern as a regex (default: literal string match)" },
       },
       required: ["pattern"],
     },
@@ -2038,6 +2055,9 @@ async function executeTool(name, args, cwd) {
       return `Successfully edited: ${args.path}`;
     }
     case "bash": {
+      if (isDangerousCommand(args.command)) {
+        return `Error: Command '${args.command.trim().split(/\s+/)[0]}' is blocked for security reasons.`;
+      }
       const result = spawnSync("bash", ["-c", args.command], { cwd, encoding: "utf8", timeout: 30000, shell: false, maxBuffer: 10 * 1024 * 1024 });
       if (result.error) throw result.error;
       return result.stdout || result.stderr || "";
@@ -2066,8 +2086,10 @@ async function executeTool(name, args, cwd) {
             else if (entry.isFile()) {
               try {
                 const lines = fs.readFileSync(full, "utf8").split("\n");
-                // Safe regex: wrap in try/catch, limit pattern complexity
-                const regex = new RegExp(args.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100), "i");
+                // Safe regex: literal mode by default (no special chars), use regex mode only if explicitly requested
+                const isRegex = args.regex === true;
+                const pattern = isRegex ? args.pattern.slice(0, 100) : args.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+                const regex = new RegExp(pattern, "i");
                 for (let i = 0; i < lines.length; i++) {
                   if (regex.test(lines[i])) results.push(`${full}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
                 }
@@ -2522,11 +2544,14 @@ Restored: ${result.restored.join(", ")}`;
         const sshArgs = ["-p", String(validPort), "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", host, cmd];
         let result;
         if (sshKey) {
-          const keyFile = path.join(PI_DIR, ".ssh_temp_key");
-          fs.writeFileSync(keyFile, sshKey, { mode: 0o600 });
-          sshArgs.unshift("-i", keyFile);
-          result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
-          try { fs.unlinkSync(keyFile); } catch {}
+          const keyFile = path.join(PI_DIR, `.ssh_temp_key_${Date.now()}`);
+          try {
+            fs.writeFileSync(keyFile, sshKey, { mode: 0o600 });
+            sshArgs.unshift("-i", keyFile);
+            result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
+          } finally {
+            try { if (fs.existsSync(keyFile)) fs.unlinkSync(keyFile); } catch {}
+          }
         } else if (sshPassword) {
           result = spawnSync("sshpass", ["-p", sshPassword, "ssh", ...sshArgs], { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
         } else {
@@ -3633,33 +3658,16 @@ async function loadPluginCode(name) {
       const code = fs.readFileSync(codeFile, "utf8");
       const vm = await import('vm');
       const safeModules = {
-        console,
-        setTimeout,
-        clearTimeout,
-        setInterval,
-        clearInterval,
-        Buffer,
-        TextEncoder,
-        TextDecoder,
-        URL,
-        URLSearchParams,
-        JSON,
-        Math,
-        Date,
-        RegExp,
-        String,
-        Number,
-        Boolean,
-        Array,
-        Object,
-        Map,
-        Set,
-        Promise,
+        console: { log: console.log, warn: console.warn, error: console.error },
+        JSON, Math, Date, RegExp,
+        String, Number, Boolean, Array, Object, Map, Set, Promise,
+        TextEncoder, TextDecoder, URL, URLSearchParams,
       };
-      const sandbox = { ...safeModules, module: {}, exports: {} };
+      const sandbox = Object.create(null);
+      Object.assign(sandbox, safeModules, { module: {}, exports: {} });
       vm.createContext(sandbox);
-      const script = new vm.Script(code);
-      script.runInContext(sandbox);
+      const script = new vm.Script(code, { timeout: 5000 });
+      script.runInContext(sandbox, { timeout: 5000 });
       return sandbox.module.exports || sandbox.exports;
     } catch (e) {
       return { error: e.message };
@@ -5175,6 +5183,23 @@ async function main() {
   await app.register(fastifyWebsocket);
   await app.register(compress, { global: true, threshold: 1024 });
 
+  // CORS — restrict to configured origin
+  const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4322";
+  app.addHook("onRequest", async (req, reply) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      if (origin === CORS_ORIGIN || CORS_ORIGIN === "*") {
+        reply.header("Access-Control-Allow-Origin", origin);
+      } else {
+        reply.header("Access-Control-Allow-Origin", CORS_ORIGIN);
+      }
+      reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
+      reply.header("Access-Control-Allow-Credentials", "true");
+    }
+    if (req.method === "OPTIONS") return reply.status(204).send();
+  });
+
   // Serve static client
   if (fs.existsSync(CLIENT_DIR)) {
     await app.register(fastifyStatic, {
@@ -5290,7 +5315,7 @@ async function main() {
     const value = vaultGet(req.body.key);
     if (value === null) return { ok: false, value: null };
     const redacted = value.length > 4 ? value.slice(0, 4) + "***" : "***";
-    return { ok: true, value: redacted, fullValue: value };
+    return { ok: true, value: redacted };
   });
   app.post("/api/vault/delete", async (req) => {
     const err = validateBody(req.body, ["key"]);
@@ -6028,18 +6053,32 @@ async function main() {
   });
 
   // Start Social Bridge automatically if not running
+  let socialBridgePid = null;
+  let emailBridgePid = null;
+
+  function killBridge(pid) {
+    if (pid === null) return;
+    try { process.kill(pid, "SIGTERM"); } catch {}
+    socialBridgePid = socialBridgePid === pid ? null : socialBridgePid;
+    emailBridgePid = emailBridgePid === pid ? null : emailBridgePid;
+  }
+
   async function ensureSocialBridge() {
+    if (socialBridgePid !== null) {
+      try { process.kill(socialBridgePid, 0); return; } catch { socialBridgePid = null; }
+    }
     try {
       await fetch(`${SOCIAL_BRIDGE}/status`);
+      return;
     } catch {
-      // Bridge not running — try to start it
-      const { spawn } = await import("node:child_process");
       const bridgePath = path.join(__dirname, "social-bridge.mjs");
       if (fs.existsSync(bridgePath)) {
+        const { spawn } = await import("node:child_process");
         const child = spawn(process.execPath, [bridgePath], {
           detached: true,
           stdio: "ignore",
         });
+        socialBridgePid = child.pid;
         child.unref();
         console.log("  ✦ Social bridge started on port 9877");
       }
@@ -6047,16 +6086,21 @@ async function main() {
   }
 
   async function ensureEmailBridge() {
+    if (emailBridgePid !== null) {
+      try { process.kill(emailBridgePid, 0); return; } catch { emailBridgePid = null; }
+    }
     try {
       await fetch(`${EMAIL_BRIDGE}/status`);
+      return;
     } catch {
-      const { spawn } = await import("node:child_process");
       const bridgePath = path.join(__dirname, "email-bridge.mjs");
       if (fs.existsSync(bridgePath)) {
+        const { spawn } = await import("node:child_process");
         const child = spawn(process.execPath, [bridgePath], {
           detached: true,
           stdio: "ignore",
         });
+        emailBridgePid = child.pid;
         child.unref();
         console.log("  ✦ Email bridge started on port 9878");
       }
@@ -6346,9 +6390,11 @@ Return a JSON array. Each item:
     return { ok: true, message: "Autonomous content generation started. Check /api/social/drafts in a minute." };
   });
 
-  // Schedule autonomous tick
-  setInterval(autonomousContentTick, AUTONOMOUS_INTERVAL);
-  setTimeout(autonomousContentTick, 60_000); // first tick after 1 minute
+  // Autonomous tick is NOT auto-started. Use POST /api/social/autonomous/tick to trigger.
+  // To enable periodic ticking, set AUTONOMOUS_ENABLED=true env var.
+  if (process.env.AUTONOMOUS_ENABLED === "true") {
+    setInterval(autonomousContentTick, AUTONOMOUS_INTERVAL);
+  }
 
   // ── WebSocket ──────────────────────────────────────────────────────────
 

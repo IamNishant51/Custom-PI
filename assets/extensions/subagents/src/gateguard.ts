@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 // ── GateGuard (first-edit investigation) with disk persistence ─────────────
 
@@ -12,7 +13,7 @@ export interface GateGuardEntry {
 }
 
 const STATE = new Map<string, GateGuardEntry>();
-const STATE_FILE = path.join(process.env.HOME || "~", ".pi", "agent", "gateguard-state.json");
+const STATE_FILE = path.join(os.homedir(), ".pi", "agent", "gateguard-state.json");
 
 function loadState(): void {
   try {

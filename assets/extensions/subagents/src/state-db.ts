@@ -146,10 +146,10 @@ function initializeSchema(): void {
         INSERT INTO messages_fts(rowid, content, role) VALUES (new.id, new.content, new.role);
       END;
       CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, content, role) VALUES('delete', old.id, old.content, old.role);
+        INSERT INTO messages_fts(messages_fts, rowid) VALUES('delete', old.id);
       END;
       CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, content, role) VALUES('delete', old.id, old.content, old.role);
+        INSERT INTO messages_fts(messages_fts, rowid) VALUES('delete', old.id);
         INSERT INTO messages_fts(rowid, content, role) VALUES (new.id, new.content, new.role);
       END;
     `);

@@ -26,7 +26,7 @@ if (fs.existsSync(envPath)) {
       const key = parts[0].trim();
       const value = parts.slice(1).join('=').trim().replace(/^['"]|['"]$/g, '');
       if (key && !(key in process.env)) {
-        process.env[key] = cleanedValue = value;
+        process.env[key] = value;
       }
     }
   });
