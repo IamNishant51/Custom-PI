@@ -16,14 +16,14 @@ jobs:
           node-version: 20
           cache: npm
       - id: cache-key
-        run: echo "value=${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(sha256sum package-lock.json | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/save@v4
         id: cache-node
         with:
           path: node_modules
-          key: ${{ steps.cache-key.outputs.value }}
+          key: ${{ runner.os }}-node-${{ steps.cache-key.outputs.value }}
     outputs:
-      cache-key: ${{ steps.cache-key.outputs.value }}
+      cache-key: ${{ runner.os }}-node-${{ steps.cache-key.outputs.value }}
 
   typecheck:
     runs-on: ubuntu-latest
