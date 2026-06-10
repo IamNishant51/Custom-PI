@@ -28,8 +28,10 @@ interface StoredEvent {
 
 interface EventBusConfig {
   maxHistoryPerTopic: number;
+  maxHistoryAge: number;
   replaySpeed: "sync" | "async";
   persistPath?: string;
+  lazyEmit: boolean;
 }
 
 export class EventBus {
@@ -43,10 +45,18 @@ export class EventBus {
   constructor(config?: Partial<EventBusConfig>) {
     this.config = {
       maxHistoryPerTopic: 100,
+      maxHistoryAge: 300_000,
       replaySpeed: "async",
       persistPath: config?.persistPath,
+      lazyEmit: true,
       ...config,
     };
+  }
+
+  hasSubscribers(topic: string): boolean {
+    const direct = (this.subscribers.get(topic) || []).length > 0;
+    const wildcard = (this.subscribers.get("*") || []).length > 0;
+    return direct || wildcard;
   }
 
   emit<T>(topic: string, data: T, options?: {
@@ -71,6 +81,11 @@ export class EventBus {
     const wildcardSubs = this.subscribers.get("*") || [];
 
     this.storeEvent(stored);
+    this.pruneHistory();
+
+    if (this.config.lazyEmit && subs.length === 0 && wildcardSubs.length === 0) {
+      return id;
+    }
 
     const allSubs = [...subs, ...wildcardSubs].sort((a, b) => b.priority - a.priority);
     for (const sub of allSubs) {
@@ -203,6 +218,21 @@ export class EventBus {
       existing.splice(0, existing.length - this.config.maxHistoryPerTopic);
     }
     this.history.set(event.topic, existing);
+  }
+
+  private pruneHistory(): void {
+    const cutoff = Date.now() - this.config.maxHistoryAge;
+    for (const [topic, events] of this.history) {
+      const pruned = events.filter(e => e.meta.timestamp >= cutoff);
+      if (pruned.length < events.length) {
+        if (pruned.length === 0) this.history.delete(topic);
+        else this.history.set(topic, pruned);
+      }
+    }
+  }
+
+  getQueueDepth(): number {
+    return this.eventCount - this.processing.size;
   }
 }
 
