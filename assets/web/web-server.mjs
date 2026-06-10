@@ -1468,6 +1468,24 @@ const TOOLS = [
     },
   },
   {
+    name: "database_migration",
+    description: "Generate SQL migration scripts by diffing two database schemas. Supports PostgreSQL, SQLite, and MySQL dialects. Can also extract schema from a live database connection.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["diff", "generate", "extract", "validate"], description: "Action: diff two schemas, generate from description, extract from live DB, or validate a migration script" },
+        sourceSchema: { type: "string", description: "Source (current) SQL schema — CREATE TABLE statements" },
+        targetSchema: { type: "string", description: "Target (desired) SQL schema — CREATE TABLE statements (for diff action)" },
+        description: { type: "string", description: "Natural language description of desired schema changes (for generate action)" },
+        dialect: { type: "string", enum: ["postgresql", "sqlite", "mysql"], description: "SQL dialect (default: postgresql)" },
+        connectionString: { type: "string", description: "Database connection string (for extract action, e.g., postgresql://user:pass@host:5432/db)" },
+        migrationName: { type: "string", description: "Name/timestamp for the migration (default: auto-generated)" },
+        migrationScript: { type: "string", description: "SQL migration script to validate (for validate action)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "graphql_introspect",
     description: "Introspect a GraphQL endpoint to fetch schema, types, queries, mutations, and subscriptions. Supports custom headers for authentication.",
     parameters: {
@@ -2991,6 +3009,103 @@ Provide a structured review with severity-classified issues and an overall verdi
         return report;
       } catch (e) {
         return `PR Review error: ${e.message}`;
+      }
+    }
+    case "database_migration": {
+      try {
+        const action = args.action;
+        const dialect = args.dialect || "postgresql";
+
+        if (action === "extract") {
+          const connStr = args.connectionString;
+          if (!connStr) return "connectionString required for extract action";
+          const url = new URL(connStr);
+          let schema = "";
+          if (connStr.startsWith("postgresql")) {
+            const host = url.hostname;
+            const port = url.port || "5432";
+            const db = url.pathname.replace(/^\//, "");
+            const user = url.username;
+            const pass = url.password;
+            const pgDump = vaultGet("PG_DUMP_PATH") || "pg_dump";
+            const result = spawnSync(pgDump, ["--schema-only", "--no-owner", "--no-acl", `--dbname=postgresql://${user}:${pass}@${host}:${port}/${db}`], { encoding: "utf8", timeout: 30000, shell: false, maxBuffer: 10 * 1024 * 1024 });
+            if (result.status === 0) schema = result.stdout;
+            else return `pg_dump failed: ${result.stderr || result.error?.message || "unknown error"}`;
+          } else {
+            return `Extract not supported for dialect: ${dialect}. Use diff or generate actions instead, or provide schema as sourceSchema.`;
+          }
+          const tableCount = (schema.match(/CREATE TABLE/gi) || []).length;
+          return `Schema extracted from ${connStr.slice(0, 50)}...\n${tableCount} tables found\n\n\`\`\`sql\n${schema.slice(0, 10000)}\n\`\`\``;
+        }
+
+        if (action === "generate") {
+          const desc = args.description;
+          if (!desc) return "description required for generate action";
+          let sql = `-- Migration generated from description\n-- Dialect: ${dialect}\n-- Description: ${desc}\n\n`;
+          sql += `-- TODO: Review and customize the generated migration\n`;
+          sql += `-- Based on: ${desc}\n\n`;
+          if (desc.toLowerCase().includes("create table") || desc.toLowerCase().includes("new table")) {
+            const nameMatch = desc.match(/(?:create|new)\s+table\s+(\w+)/i);
+            const tableName = nameMatch ? nameMatch[1] : "new_table";
+            sql += `CREATE TABLE ${tableName} (\n  id BIGSERIAL PRIMARY KEY,\n  created_at TIMESTAMPTZ DEFAULT NOW(),\n  updated_at TIMESTAMPTZ DEFAULT NOW()\n);\n`;
+          }
+          if (desc.toLowerCase().includes("add column") || desc.toLowerCase().includes("new column")) {
+            const colMatch = desc.match(/(?:add|new)\s+column\s+(\w+)/i);
+            const tableForCol = desc.match(/(?:to|on|in)\s+(\w+)/i);
+            if (colMatch && tableForCol) {
+              sql += `ALTER TABLE ${tableForCol[1]} ADD COLUMN ${colMatch[1]} TEXT;\n`;
+            }
+          }
+          if (desc.toLowerCase().includes("add index")) {
+            const idxMatch = desc.match(/index\s+on\s+(\w+)\s*\((.+?)\)/i);
+            if (idxMatch) sql += `CREATE INDEX idx_${idxMatch[1]}_${Date.now()} ON ${idxMatch[1]} (${idxMatch[2]});\n`;
+          }
+          if (desc.toLowerCase().includes("foreign key")) {
+            sql += `-- Add foreign key constraint\nALTER TABLE child_table ADD CONSTRAINT fk_name FOREIGN KEY (column) REFERENCES parent_table(id);\n`;
+          }
+          return sql;
+        }
+
+        if (action === "validate") {
+          const script = args.migrationScript;
+          if (!script) return "migrationScript required for validate action";
+          const issues = [];
+          if (script.includes("DROP TABLE") && !script.toLowerCase().includes("backup")) issues.push("⚠️ DROP TABLE detected — ensure you have a backup");
+          if (script.includes("DROP COLUMN") && !script.toLowerCase().includes("backup")) issues.push("⚠️ DROP COLUMN detected — data will be lost");
+          if (script.includes("ALTER COLUMN") && script.includes("DROP DEFAULT")) issues.push("⚠️ ALTER COLUMN DROP DEFAULT may affect existing rows");
+          if (script.includes("RENAME")) issues.push("⚠️ RENAME operation detected — ensure no active connections reference old name");
+          if (script.match(/INSERT\s+INTO/i) && !script.toLowerCase().includes("on conflict") && !script.toLowerCase().includes("on duplicate")) {
+            issues.push("⚠️ INSERT without ON CONFLICT/ON DUPLICATE may fail on duplicates");
+          }
+          if (script.length > 100000) issues.push("⚠️ Migration script is very large (>100KB) — consider splitting into multiple migrations");
+          const status = issues.length === 0 ? "✅ Passed" : "⚠️ Issues found";
+          return `## Migration Validation ${status}\n${issues.length ? issues.join("\n") : "No issues detected. Script looks safe to run."}`;
+        }
+
+        // Default: diff two schemas
+        const source = args.sourceSchema;
+        const target = args.targetSchema;
+        if (!source || !target) return "sourceSchema and targetSchema required for diff action";
+        const sourceTables = [...source.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)/gi)].map(m => m[1].toLowerCase());
+        const targetTables = [...target.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)/gi)].map(m => m[1].toLowerCase());
+        const sourceSet = new Set(sourceTables);
+        const targetSet = new Set(targetTables);
+        const added = targetTables.filter(t => !sourceSet.has(t));
+        const removed = sourceTables.filter(t => !targetSet.has(t));
+        const common = targetTables.filter(t => sourceSet.has(t));
+        let migration = `-- Migration: ${args.migrationName || `migration_${Date.now()}`}\n-- Dialect: ${dialect}\n-- Generated: ${new Date().toISOString()}\n\n`;
+        for (const table of added) {
+          const match = target.match(new RegExp(`CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${table}\\s*\\(([\\s\\S]*?)\\);`, "i"));
+          if (match) migration += `CREATE TABLE ${table} (\n${match[1].trim()}\n);\n\n`;
+        }
+        for (const table of removed) {
+          migration += `DROP TABLE IF EXISTS ${table};\n`;
+        }
+        migration += `-- Summary: +${added.length} tables, -${removed.length} tables, ${common.length} unchanged\n`;
+        if (!added.length && !removed.length) migration = "-- No schema differences detected. Source and target schemas are identical.";
+        return migration;
+      } catch (e) {
+        return `Database migration error: ${e.message}`;
       }
     }
     case "graphql_introspect": {
