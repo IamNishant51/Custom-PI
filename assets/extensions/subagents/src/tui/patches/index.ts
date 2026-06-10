@@ -6,6 +6,7 @@ import { C } from "../../tui-colors";
 import { stripAnsi, truncateToWidth, truncateLines } from "../render/format";
 import { getGlobalFrame, getDotPulse, getPulseColor, getSpinner, activeTrackers, globalPulse, startGlobalAnimation, stopGlobalAnimation } from "../../animations";
 import { QuantumHUDWidget } from "../components/quantum-hud";
+import { getHostAdapter } from "../../host-adapter";
 
 let chatContainerStartLine = 0;
 let renderedComponents: Array<{
@@ -193,9 +194,9 @@ function patchToolExecution(proto: any) {
     }
 
     const allLines = [headerLine, ...contentLines];
+    const adapter = getHostAdapter();
     return allLines.map((l: string) => {
-      const { visibleWidth } = require("@earendil-works/pi-tui");
-      const vw = visibleWidth(l);
+      const vw = adapter.visibleWidth(l);
       if (vw > width) return truncateToWidth(l, width);
       return l;
     });
@@ -299,7 +300,9 @@ function patchCustomEditor(proto: any) {
       ? this.segment.bind(this)
       : (s: string) => [...s].map(c => ({ segment: c }));
 
-    const { CURSOR_MARKER, visibleWidth: vw } = require("@earendil-works/pi-tui");
+    const adapter2 = getHostAdapter();
+    const CURSOR_MARKER = adapter2.cursorMarker();
+    const vw = adapter2.visibleWidth;
 
     for (let i = 0; i < visibleLines.length; i++) {
       const layoutLine = visibleLines[i];
