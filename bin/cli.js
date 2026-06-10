@@ -83,6 +83,7 @@ const filesToCopy = [
   { src: 'agents/reviewer.md', dest: 'agents/reviewer.md' },
   { src: 'agents/ceo.md', dest: 'agents/ceo.md' },
   { src: 'agents/security-auditor.md', dest: 'agents/security-auditor.md' },
+  { src: 'agents/pr-reviewer.md', dest: 'agents/pr-reviewer.md' },
   // operator.md removed — not needed
   { src: 'extensions/subagents/package.json', dest: 'extensions/subagents/package.json' },
   { src: 'extensions/subagents/src/index.ts', dest: 'extensions/subagents/src/index.ts' },

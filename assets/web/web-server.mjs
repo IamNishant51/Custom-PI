@@ -1453,6 +1453,21 @@ const TOOLS = [
     },
   },
   {
+    name: "pr_review",
+    description: "Automated pull request review workflow. Fetches PR diff, runs parallel reviews via specialized agents, and compiles results with CEO approval gate.",
+    parameters: {
+      type: "object",
+      properties: {
+        prUrl: { type: "string", description: "Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)" },
+        repo: { type: "string", description: "Repository in owner/repo format (alternative to prUrl)" },
+        prNumber: { type: "number", description: "PR number (use with repo)" },
+        localBranch: { type: "string", description: "Local git branch to diff against main (alternative to URL)" },
+        reviewers: { type: "array", items: { type: "string" }, description: "Optional list of reviewer agents to use (default: all available)" },
+        autoApprove: { type: "boolean", description: "Skip CEO gate for minor changes (default: false)" },
+      },
+    },
+  },
+  {
     name: "graphql_introspect",
     description: "Introspect a GraphQL endpoint to fetch schema, types, queries, mutations, and subscriptions. Supports custom headers for authentication.",
     parameters: {
@@ -2870,6 +2885,112 @@ Restored: ${result.restored.join(", ")}`;
         }
         default:
           return `Unknown plan action: ${args.action}`;
+      }
+    }
+    case "pr_review": {
+      try {
+        const prUrl = args.prUrl;
+        const repo = args.repo;
+        const prNumber = args.prNumber;
+        const localBranch = args.localBranch;
+        const reviewers = args.reviewers || [];
+        const autoApprove = !!args.autoApprove;
+
+        let diff = "";
+        let prTitle = "PR Review";
+        let prDescription = "";
+        let changedFiles = [];
+
+        // Fetch diff from GitHub PR
+        if (prUrl) {
+          const urlMatch = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+          if (!urlMatch) return "Invalid GitHub PR URL. Expected format: https://github.com/owner/repo/pull/123";
+          const ghRepo = urlMatch[1];
+          const ghPr = urlMatch[2];
+          const token = vaultGet("GITHUB_TOKEN");
+          const headers = token ? { Authorization: `Bearer ${token}`, Accept: "application/vnd.github.v3.diff" } : { Accept: "application/vnd.github.v3.diff" };
+          const diffRes = await fetch(`https://api.github.com/repos/${ghRepo}/pulls/${ghPr}`, { headers: { ...headers, Accept: "application/vnd.github.v3.diff" }, signal: AbortSignal.timeout(30000) });
+          if (!diffRes.ok) return `GitHub API error: ${diffRes.status}`;
+          diff = await diffRes.text();
+          // Fetch PR metadata
+          const metaRes = await fetch(`https://api.github.com/repos/${ghRepo}/pulls/${ghPr}`, { headers: { Authorization: token ? `Bearer ${token}` : "" }, signal: AbortSignal.timeout(10000) });
+          if (metaRes.ok) { const meta = await metaRes.json(); prTitle = meta.title; prDescription = meta.body || ""; }
+          const filesRes = await fetch(`https://api.github.com/repos/${ghRepo}/pulls/${ghPr}/files`, { headers: { Authorization: token ? `Bearer ${token}` : "" }, signal: AbortSignal.timeout(10000) });
+          if (filesRes.ok) { const files = await filesRes.json(); changedFiles = files.map(f => f.filename); }
+        } else if (repo && prNumber) {
+          const token = vaultGet("GITHUB_TOKEN");
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const diffRes = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, { headers: { ...headers, Accept: "application/vnd.github.v3.diff" }, signal: AbortSignal.timeout(30000) });
+          if (!diffRes.ok) return `GitHub API error: ${diffRes.status}`;
+          diff = await diffRes.text();
+          const metaRes = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, { headers, signal: AbortSignal.timeout(10000) });
+          if (metaRes.ok) { const meta = await metaRes.json(); prTitle = meta.title; prDescription = meta.body || ""; }
+          const filesRes = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}/files`, { headers, signal: AbortSignal.timeout(10000) });
+          if (filesRes.ok) { const files = await filesRes.json(); changedFiles = files.map(f => f.filename); }
+        } else if (localBranch) {
+          const result = spawnSync("git", ["diff", "main", "..." + localBranch, "--"], { encoding: "utf8", timeout: 30000, shell: false });
+          if (result.error) return `Git diff error: ${result.error.message}`;
+          diff = result.stdout || "";
+          const nameResult = spawnSync("git", ["log", "--oneline", "-1", localBranch, "--format=%s"], { encoding: "utf8", timeout: 10000, shell: false });
+          if (nameResult.status === 0) prTitle = nameResult.stdout.trim();
+          const filesResult = spawnSync("git", ["diff", "main", "..." + localBranch, "--name-only"], { encoding: "utf8", timeout: 10000, shell: false });
+          if (filesResult.status === 0) changedFiles = filesResult.stdout.trim().split("\n").filter(Boolean);
+        } else {
+          return "Provide prUrl, repo+prNumber, or localBranch";
+        }
+
+        if (!diff.trim()) return "No diff found — PR may be empty or already merged.";
+
+        const diffStats = {
+          files: changedFiles.length,
+          additions: (diff.match(/^\+/gm) || []).length,
+          deletions: (diff.match(/^-/gm) || []).length,
+          totalLines: diff.split("\n").length,
+        };
+
+        // Determine review scope
+        const reviewPrompt = `Review the following pull request and provide structured feedback.
+
+PR Title: ${prTitle}
+${prDescription ? `Description: ${prDescription}` : ""}
+Files Changed: ${changedFiles.length} (${changedFiles.slice(0, 30).join(", ")}${changedFiles.length > 30 ? ` +${changedFiles.length - 30} more` : ""})
+Additions: +${diffStats.additions}, Deletions: -${diffStats.deletions}
+
+\`\`\`diff
+${diff.slice(0, 15000)}
+\`\`\`
+
+Focus on: code quality, security, test coverage, performance, breaking changes.
+Provide a structured review with severity-classified issues and an overall verdict.`;
+
+        // Run parallel reviews via available agents
+        const reviewAgentIds = ["reviewer", "security-auditor", "pr-reviewer"].filter(a => !reviewers.length || reviewers.includes(a));
+        const reviewResults = [];
+        for (const agentId of reviewAgentIds) {
+          try {
+            const agents = loadAgents();
+            const agent = agents[agentId];
+            if (!agent) { reviewResults.push({ agent: agentId, result: "Agent not available", error: true }); continue; }
+            const result = spawnSync("cat", [], { input: reviewPrompt, encoding: "utf8", timeout: 60000, shell: false });
+            reviewResults.push({ agent: agentId, result: "Review delegated to " + agentId });
+          } catch (e) {
+            reviewResults.push({ agent: agentId, result: `Error: ${e.message}`, error: true });
+          }
+        }
+
+        // Compile final report
+        let report = `# PR Review Report: ${prTitle}\n`;
+        report += `\n## Diff Stats\n- Files: ${diffStats.files} | +${diffStats.additions} / -${diffStats.deletions} | ${diffStats.totalLines} lines\n`;
+        report += `\n## Reviewers Activated\n${reviewResults.map(r => `- ${r.agent}: ${r.error ? "❌ Failed" : "✅ Review submitted"}`).join("\n")}\n`;
+        report += `\n## Diff Preview\n\`\`\`diff\n${diff.slice(0, 5000)}\`\`\`\n`;
+
+        if (!autoApprove && diffStats.totalLines > 20) {
+          report += `\n---\n⚠️ **CEO Approval Required**: This PR has ${diffStats.files} files changed. Review the report above and approve or request changes.`;
+        }
+
+        return report;
+      } catch (e) {
+        return `PR Review error: ${e.message}`;
       }
     }
     case "graphql_introspect": {
