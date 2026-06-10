@@ -5892,6 +5892,17 @@ export async function createApp() {
     if (req.method === "OPTIONS") return reply.status(204).send();
   });
 
+  // Optional API key authentication
+  const AUTH_KEY = process.env.WEB_API_KEY || process.env.CUSTOM_PI_WEB_KEY;
+  app.addHook("onRequest", async (req, reply) => {
+    if (AUTH_KEY) {
+      const key = req.headers["x-api-key"];
+      if (!key || key !== AUTH_KEY) {
+        return reply.code(401).send({ error: "Unauthorized" });
+      }
+    }
+  });
+
   // Per-request context for API handlers
   app.addHook("onRequest", async (req, reply) => {
     const contextStore = {

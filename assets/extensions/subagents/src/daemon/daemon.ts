@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { EventEmitter } from "node:events";
 import { bus, Topics } from "../event-bus/event-bus";
+import { getSystemStore } from "../system-store";
 
 export type DaemonState = "idle" | "active" | "sleeping" | "error" | "shutdown";
 export type TaskPriority = "critical" | "high" | "normal" | "low";
@@ -50,6 +51,7 @@ export class Daemon extends EventEmitter {
   private idleSince: number | null = null;
   private tickCount = 0;
   private startTime = Date.now();
+  private sigtermHandler: (() => void) | null = null;
 
   constructor(config?: Partial<DaemonConfig>) {
     super();
@@ -79,7 +81,7 @@ export class Daemon extends EventEmitter {
     this.loadState();
     bus.emit(Topics.DAEMON_TICK, { action: "start", timestamp: Date.now() }, { source: "daemon" });
 
-    this.tickTimer = setInterval(() => this.tick(), this.config.tickInterval);
+    this.startAdaptiveTick();
 
     bus.on(Topics.MESSAGE_RECEIVED, () => { this.lastUserActivity = Date.now(); this.idleSince = null; });
     bus.on(Topics.TOOL_CALL, () => { this.lastUserActivity = Date.now(); this.idleSince = null; });
@@ -89,16 +91,53 @@ export class Daemon extends EventEmitter {
       const task = event.data as DaemonTask;
       this.registerTask(task);
     });
+
+    this.sigtermHandler = () => this.gracefulShutdown();
+    process.on("SIGTERM", this.sigtermHandler);
+    process.on("SIGINT", this.sigtermHandler);
   }
 
   stop(): void {
+    this.gracefulShutdown();
+  }
+
+  private gracefulShutdown(): void {
+    if (this.state === "shutdown") return;
+    this.state = "shutdown";
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
-    this.state = "shutdown";
     this.saveState();
+    if (this.sigtermHandler) {
+      process.off("SIGTERM", this.sigtermHandler);
+      process.off("SIGINT", this.sigtermHandler);
+      this.sigtermHandler = null;
+    }
     bus.emit(Topics.SYSTEM_SHUTDOWN, { action: "daemon_stop", uptime: this.getUptime() }, { source: "daemon" });
+  }
+
+  private startAdaptiveTick(): void {
+    const tick = () => {
+      this.tick();
+      const isIdle = this.isIdle();
+      const interval = isIdle ? 5000 : 500;
+      this.tickTimer = setTimeout(tick, interval) as unknown as ReturnType<typeof setInterval>;
+    };
+    this.tickTimer = setTimeout(tick, this.config.tickInterval) as unknown as ReturnType<typeof setInterval>;
+  }
+
+  getHealth(): { status: string; uptime: number; state: DaemonState; tasks: { total: number; running: number; queued: number } } {
+    return {
+      status: this.state === "error" ? "degraded" : "healthy",
+      uptime: this.getUptime(),
+      state: this.state,
+      tasks: {
+        total: this.tasks.size,
+        running: this.running.size,
+        queued: this.taskQueue.length,
+      },
+    };
   }
 
   registerTask(task: DaemonTask): void {
@@ -239,25 +278,34 @@ export class Daemon extends EventEmitter {
 
   private saveState(): void {
     try {
-      const dir = path.dirname(this.config.stateFile);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const state = {
-        tasks: Array.from(this.tasks.values()).map(t => ({
-          id: t.id,
-          name: t.name,
-          priority: t.priority,
-          interval: t.interval,
-          scheduledAt: t.scheduledAt,
-          lastRun: t.lastRun,
-          runsOnIdle: t.runsOnIdle,
-        })),
-        stats: this.stats,
-        lastUserActivity: this.lastUserActivity,
-        startTime: this.startTime,
-      };
-      const tmp = this.config.stateFile + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-      fs.renameSync(tmp, this.config.stateFile);
+      const store = getSystemStore();
+      const tasksData = Array.from(this.tasks.values()).map(t => ({
+        id: t.id,
+        name: t.name,
+        priority: t.priority,
+        interval: t.interval,
+        scheduledAt: t.scheduledAt,
+        lastRun: t.lastRun,
+        runsOnIdle: t.runsOnIdle,
+        timeout: t.timeout,
+      }));
+      store.kvSet("daemon", "tasks", JSON.stringify(tasksData));
+      store.kvSet("daemon", "stats", JSON.stringify(this.stats));
+      store.kvSet("daemon", "lastUserActivity", String(this.lastUserActivity));
+      store.kvSet("daemon", "startTime", String(this.startTime));
+      try {
+        const dir = path.dirname(this.config.stateFile);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const state = {
+          tasks: tasksData,
+          stats: this.stats,
+          lastUserActivity: this.lastUserActivity,
+          startTime: this.startTime,
+        };
+        const tmp = this.config.stateFile + ".tmp";
+        fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+        fs.renameSync(tmp, this.config.stateFile);
+      } catch {}
     } catch (err) {
       console.error("[Daemon] Failed to save state:", err);
     }
@@ -265,10 +313,15 @@ export class Daemon extends EventEmitter {
 
   private loadState(): void {
     try {
-      if (!fs.existsSync(this.config.stateFile)) return;
-      const data = JSON.parse(fs.readFileSync(this.config.stateFile, "utf8"));
-      if (data.tasks && Array.isArray(data.tasks)) {
-        for (const t of data.tasks) {
+      const store = getSystemStore();
+      const tasksRaw = store.kvGet("daemon", "tasks");
+      if (tasksRaw) {
+        const tasks: Array<{
+          id: string; name: string; priority: TaskPriority;
+          interval?: number; scheduledAt?: number; lastRun?: number;
+          runsOnIdle?: boolean; timeout?: number;
+        }> = JSON.parse(tasksRaw);
+        for (const t of tasks) {
           if (!this.tasks.has(t.id)) {
             this.tasks.set(t.id, {
               id: t.id,
@@ -279,16 +332,45 @@ export class Daemon extends EventEmitter {
               scheduledAt: t.scheduledAt,
               lastRun: t.lastRun,
               runsOnIdle: t.runsOnIdle,
+              timeout: t.timeout,
             });
           }
         }
       }
-      if (data.stats) {
-        this.stats = { ...this.stats, ...data.stats, uptime: this.getUptime() };
+      const statsRaw = store.kvGet("daemon", "stats");
+      if (statsRaw) {
+        this.stats = { ...this.stats, ...JSON.parse(statsRaw), uptime: this.getUptime() };
       }
-      if (data.lastUserActivity) this.lastUserActivity = data.lastUserActivity;
+      const lastActivity = store.kvGet("daemon", "lastUserActivity");
+      if (lastActivity) this.lastUserActivity = Number(lastActivity);
+      const savedStart = store.kvGet("daemon", "startTime");
+      if (savedStart) this.startTime = Number(savedStart);
     } catch (err) {
-      console.error("[Daemon] Failed to load state:", err);
+      console.error("[Daemon] Failed to load state from SQLite:", err);
+      try {
+        if (!fs.existsSync(this.config.stateFile)) return;
+        const data = JSON.parse(fs.readFileSync(this.config.stateFile, "utf8"));
+        if (data.tasks && Array.isArray(data.tasks)) {
+          for (const t of data.tasks) {
+            if (!this.tasks.has(t.id)) {
+              this.tasks.set(t.id, {
+                id: t.id,
+                name: t.name || t.id,
+                priority: t.priority || "normal",
+                execute: async () => {},
+                interval: t.interval,
+                scheduledAt: t.scheduledAt,
+                lastRun: t.lastRun,
+                runsOnIdle: t.runsOnIdle,
+              });
+            }
+          }
+        }
+        if (data.stats) {
+          this.stats = { ...this.stats, ...data.stats, uptime: this.getUptime() };
+        }
+        if (data.lastUserActivity) this.lastUserActivity = data.lastUserActivity;
+      } catch {}
     }
   }
 
