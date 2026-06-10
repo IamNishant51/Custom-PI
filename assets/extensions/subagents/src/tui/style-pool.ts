@@ -1,4 +1,5 @@
-import { hexToAnsi, hexToRgb, type TruecolorStyle } from "./types";
+import { hexToAnsi, type TruecolorStyle } from "./types";
+import { hexToRgb } from "./utils/color";
 
 interface StyleDef {
   fg: number;

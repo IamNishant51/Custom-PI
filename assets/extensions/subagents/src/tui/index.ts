@@ -15,7 +15,8 @@ export type { EasingFn, AnimClipConfig, AnimTarget, ShimmerBorderConfig, PulseCo
 export { measureWidth, truncateToWidth, wordWrap, stripAnsi } from "./utils/measure-text";
 export { SPINNERS, THEME, BOX, SPACING, hexToAnsi, getResponsiveBreakpoint } from "./types";
 export type { ThemeColors, SpinnerConfig, Message, AgentState, VimMode, PulseConfig, TruecolorStyle, ConversationHeader, ScrollIndicator, ResponsiveBreakpoint, SurfaceLevel, LayoutRegion } from "./types";
-export { PulseController, hexToRgb, rgbToHex } from "./app/pulse-controller";
+export { PulseController } from "./app/pulse-controller";
+export { hexToRgb, rgbToHex } from "./utils/color";
 export type { PulseConfig as PulseControllerConfig } from "./app/pulse-controller";
 export {
   registerPlugin, deregisterPlugin, getCardRenderer, getCommand,

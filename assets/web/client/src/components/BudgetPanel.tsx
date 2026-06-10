@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { showToast } from "./Toast";
 
-function ProgressBar({ value, max, label, color }) {
+interface ProgressBarProps {
+  value: number;
+  max: number;
+  label: string;
+  color?: string;
+}
+
+function ProgressBar({ value, max, label, color }: ProgressBarProps) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   const barColor = pct > 90 ? "var(--danger)" : pct > 75 ? "var(--warning)" : (color || "var(--primary)");
   return (
@@ -17,7 +24,19 @@ function ProgressBar({ value, max, label, color }) {
   );
 }
 
-function TrendSparkline({ data, height = 40, width = 200 }) {
+interface TrendPoint {
+  date: string;
+  tokens: number;
+  costUsd: number;
+}
+
+interface TrendSparklineProps {
+  data: TrendPoint[];
+  height?: number;
+  width?: number;
+}
+
+function TrendSparkline({ data, height = 40, width = 200 }: TrendSparklineProps) {
   if (!data || data.length < 2) return <span style={{ color: "var(--muted)" }}>Insufficient data</span>;
   const values = data.map(d => d.costUsd);
   const max = Math.max(...values);
@@ -40,13 +59,54 @@ function TrendSparkline({ data, height = 40, width = 200 }) {
   );
 }
 
+interface BudgetStats {
+  totalSessions: number;
+  totalTokens: number;
+  totalCostUsd: number;
+  dailyTokens: number;
+  dailyCostUsd: number;
+  today: string;
+}
+
+interface ModelCost {
+  modelId: string;
+  provider: string;
+  tokens: number;
+  costUsd: number;
+  calls: number;
+}
+
+interface SessionInfo {
+  sessionId: string;
+  tokens: number;
+  costUsd: number;
+  calls: number;
+  lastActive: string;
+}
+
+interface BudgetDetails {
+  models: ModelCost[];
+  sessions: SessionInfo[];
+  dailyTrend: TrendPoint[];
+  totalCostUsd: number;
+  totalTokens: number;
+}
+
+interface BudgetConfig {
+  maxSessionTokens: number;
+  maxDailyTokens: number;
+  maxSessionCostUsd?: number;
+  maxDailyCostUsd?: number;
+  warningThreshold: number;
+}
+
 export default function BudgetPanel() {
-  const [stats, setStats] = useState(null);
-  const [details, setDetails] = useState(null);
-  const [config, setConfig] = useState(null);
+  const [stats, setStats] = useState<BudgetStats | null>(null);
+  const [details, setDetails] = useState<BudgetDetails | null>(null);
+  const [config, setConfig] = useState<BudgetConfig | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [form, setForm] = useState({ maxSessionTokens: 500000, maxDailyTokens: 2000000, maxSessionCostUsd: 2, maxDailyCostUsd: 5, warningThreshold: 0.8 });
-  const wsRef = useRef(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const fetchData = () => {
     fetch("/api/budget/stats").then(r => r.json()).then(setStats).catch(() => showToast("Failed to load budget stats", "error"));
@@ -58,9 +118,9 @@ export default function BudgetPanel() {
     fetchData();
     const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${wsProto}//${location.host}/ws`);
-    ws.onmessage = (e) => {
+    ws.onmessage = (e: MessageEvent) => {
       try {
-        const msg = JSON.parse(e.data);
+        const msg = JSON.parse(e.data as string) as Record<string, unknown>;
         if (msg.type === "cost" || msg.type === "budget") fetchData();
       } catch {}
     };
@@ -82,35 +142,37 @@ export default function BudgetPanel() {
     } catch { showToast("Failed to save budget config", "error"); }
   };
 
-  const statCards = [
-    { label: "Total Cost", value: `$${stats?.totalCostUsd?.toFixed(4) || "—"}`, sub: `${(stats?.totalTokens || 0).toLocaleString()} tokens` },
-    { label: "Today Cost", value: `$${stats?.dailyCostUsd?.toFixed(4) || "—"}`, sub: `${(stats?.dailyTokens || 0).toLocaleString()} tokens today` },
-    { label: "Sessions", value: stats?.totalSessions || "—", sub: "total sessions" },
-    { label: "Avg Cost / Session", value: stats?.totalSessions ? `$${(stats.totalCostUsd / stats.totalSessions).toFixed(4)}` : "—", sub: "per session avg" },
+  const statCards = !stats ? [] : [
+    { label: "Total Cost", value: `$${stats.totalCostUsd.toFixed(4)}`, sub: `${stats.totalTokens.toLocaleString()} tokens` },
+    { label: "Today Cost", value: `$${stats.dailyCostUsd.toFixed(4)}`, sub: `${stats.dailyTokens.toLocaleString()} tokens today` },
+    { label: "Sessions", value: stats.totalSessions, sub: "total sessions" },
+    { label: "Avg Cost / Session", value: stats.totalSessions ? `$${(stats.totalCostUsd / stats.totalSessions).toFixed(4)}` : "—", sub: "per session avg" },
   ];
 
-  const modelColors = {};
+  const modelColors: Record<string, string> = {};
   const palette = ["var(--primary)", "var(--warning)", "var(--danger)", "var(--success)", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 
   return (
     <div>
-      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 16 }}>
-        {statCards.map((c, i) => (
-          <div className="stat-card" key={i}>
-            <div className="stat-label">{c.label}</div>
-            <div className="stat-value">{c.value}</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{c.sub}</div>
-          </div>
-        ))}
-      </div>
+      {statCards.length > 0 && (
+        <div className="stats-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 16 }}>
+          {statCards.map((c, i) => (
+            <div className="stat-card" key={i}>
+              <div className="stat-label">{c.label}</div>
+              <div className="stat-value">{c.value}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{c.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {config && (
+      {config && stats && (
         <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <ProgressBar value={stats?.dailyTokens || 0} max={config.maxDailyTokens} label="Daily Token Usage" color="var(--primary)" />
+            <ProgressBar value={stats.dailyTokens} max={config.maxDailyTokens} label="Daily Token Usage" color="var(--primary)" />
           </div>
           <div style={{ flex: 1 }}>
-            <ProgressBar value={stats?.dailyCostUsd || 0} max={config.maxDailyCostUsd || 5} label="Daily Cost Budget" color="var(--warning)" />
+            <ProgressBar value={stats.dailyCostUsd} max={config.maxDailyCostUsd || 5} label="Daily Cost Budget" color="var(--warning)" />
           </div>
         </div>
       )}
@@ -142,7 +204,7 @@ export default function BudgetPanel() {
         </div>
         <div className="card" style={{ flex: 1 }}>
           <div className="card-header">Daily Trend (30d)</div>
-          {details?.dailyTrend?.length > 1 ? (
+          {details?.dailyTrend && details.dailyTrend.length > 1 ? (
             <div style={{ textAlign: "center" }}>
               <TrendSparkline data={details.dailyTrend} height={50} width={260} />
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
@@ -159,7 +221,7 @@ export default function BudgetPanel() {
         </div>
       </div>
 
-      {details?.sessions?.length > 0 && (
+      {details?.sessions && details.sessions.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">Recent Sessions</div>
           <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>

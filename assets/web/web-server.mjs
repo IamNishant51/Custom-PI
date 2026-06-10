@@ -5836,37 +5836,7 @@ Return your plan strictly as a JSON object with this shape:
 
 // ── Server ─────────────────────────────────────────────────────────────────
 
-async function main() {
-  // Import env vars into vault on startup
-  try {
-    await vaultImportFromEnv(["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"]);
-  } catch {}
-
-  // Initialize and start MCP servers
-  try {
-    await startMcpServers();
-  } catch (err) {
-    console.error("[MCP] Failed to start MCP servers on startup:", err);
-  }
-
-  // Gracefully terminate child processes on exit
-  const handleExit = async () => {
-    console.log("\nStopping active servers...");
-    // Close all WebSocket connections (triggers per-socket close handlers which clear ping timers)
-    for (const sock of swarmSockets) {
-      try { sock.close(); } catch {}
-    }
-    swarmSockets.clear();
-    // Close the Fastify HTTP server
-    try { await app.close(); } catch {}
-    await stopMcpServers();
-    await stopLspServers();
-    closeAllDbConnections();
-    process.exit(0);
-  };
-  process.on("SIGINT", handleExit);
-  process.on("SIGTERM", handleExit);
-
+export async function createApp() {
   const app = Fastify({ logger: { level: "warn" } });
 
   // Auth middleware — optional bearer token via PI_API_KEY env var
@@ -7369,7 +7339,41 @@ Return a JSON array. Each item:
     });
   });
 
-  // ── Auto-detect LM Studio models ─────────────────────────────────────────
+  return app;
+}
+
+// ── Server entry point ───────────────────────────────────────────────────
+
+async function main() {
+  // Import env vars into vault on startup
+  try {
+    await vaultImportFromEnv(["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"]);
+  } catch {}
+
+  // Initialize and start MCP servers
+  try {
+    await startMcpServers();
+  } catch (err) {
+    console.error("[MCP] Failed to start MCP servers on startup:", err);
+  }
+
+  const app = await createApp();
+
+  // Gracefully terminate child processes on exit
+  const handleExit = async () => {
+    console.log("\nStopping active servers...");
+    for (const sock of swarmSockets) {
+      try { sock.close(); } catch {}
+    }
+    swarmSockets.clear();
+    try { await app.close(); } catch {}
+    await stopMcpServers();
+    await stopLspServers();
+    closeAllDbConnections();
+    process.exit(0);
+  };
+  process.on("SIGINT", handleExit);
+  process.on("SIGTERM", handleExit);
 
   async function syncLmStudioModels() {
     try {
@@ -7395,8 +7399,6 @@ Return a JSON array. Each item:
     } catch {}
   }
 
-  // ── Start ──────────────────────────────────────────────────────────────
-
   try {
     await syncLmStudioModels();
     await app.listen({ port: PORT, host: HOST });
@@ -7410,4 +7412,6 @@ Return a JSON array. Each item:
   }
 }
 
-main();
+if (!process.env.VITEST) {
+  main();
+}
