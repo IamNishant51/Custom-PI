@@ -1,12 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-
-export interface NudgeState {
-  turnsSinceMemory: number;
-  turnsSinceSkill: number;
-  totalTurns: number;
-}
+import { getSystemStore, type NudgeState } from "./system-store";
 
 const EMPTY_STATE: NudgeState = {
   turnsSinceMemory: 0,
@@ -14,15 +6,11 @@ const EMPTY_STATE: NudgeState = {
   totalTurns: 0,
 };
 
-const STATE_FILE = path.join(os.homedir(), ".pi", "agent", "nudge-state.json");
-
 let state: NudgeState = loadState();
 
 function loadState(): NudgeState {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      return { ...EMPTY_STATE, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) };
-    }
+    return { ...EMPTY_STATE, ...getSystemStore().getNudgeState() };
   } catch (err) {
     console.error("[MemoryNudge] Failed to load state:", err);
   }
@@ -31,9 +19,7 @@ function loadState(): NudgeState {
 
 function saveState(): void {
   try {
-    const dir = path.dirname(STATE_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state), "utf8");
+    getSystemStore().setNudgeState(state);
   } catch (err) {
     console.error("[MemoryNudge] Failed to save state:", err);
   }

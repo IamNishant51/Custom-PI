@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { resetSystemStore } from "../system-store";
 import {
   initNudgeState,
   incrementTurn,
@@ -12,6 +13,7 @@ import {
 
 describe("memory-nudge", () => {
   beforeEach(() => {
+    resetSystemStore();
     initNudgeState();
   });
 

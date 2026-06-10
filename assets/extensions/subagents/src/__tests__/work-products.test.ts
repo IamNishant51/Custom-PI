@@ -17,6 +17,7 @@ vi.mock("node:os", () => {
   return { default: ns, ...ns };
 });
 
+import { resetSystemStore } from "../system-store";
 import {
   recordWorkProduct,
   getWorkProducts,
@@ -24,19 +25,18 @@ import {
   clearWorkProducts,
 } from "../work-products";
 
-const PRODUCTS_DIR = path.join(tmpDir, ".pi", "agent", "work-products");
-
 describe("work-products", () => {
   afterAll(() => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   });
 
   beforeEach(() => {
-    try { fs.rmSync(PRODUCTS_DIR, { recursive: true, force: true }); } catch {}
+    resetSystemStore();
+    try { fs.rmSync(path.join(tmpDir, ".pi", "agent"), { recursive: true, force: true }); } catch {}
   });
 
   afterEach(() => {
-    try { fs.rmSync(PRODUCTS_DIR, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(path.join(tmpDir, ".pi", "agent"), { recursive: true, force: true }); } catch {}
   });
 
   it("recordWorkProduct creates an entry", () => {

@@ -134,7 +134,7 @@ describe("cross-module: state-db + cost-tracker", () => {
     expect(summary.totalSessions).toBeGreaterThanOrEqual(2);
   });
 
-  it("cost data persists separately from state-db (different files/dirs)", () => {
+  it("cost data persists separately from state-db (different tables)", () => {
     ensureSession("persist-test");
     insertMessage("persist-test", "user", "Test persistence");
 
@@ -145,8 +145,8 @@ describe("cross-module: state-db + cost-tracker", () => {
     const dbFileExists = fs.existsSync(DB_PATH);
     expect(dbFileExists).toBe(true);
 
-    const costDirExists = fs.existsSync(COST_DIR);
-    expect(costDirExists).toBe(true);
+    const systemDbExists = fs.existsSync(path.join(tmpDir, ".pi", "agent", "system.db"));
+    expect(systemDbExists).toBe(true);
   });
 
   it("budget config and state-db operate on different files", () => {

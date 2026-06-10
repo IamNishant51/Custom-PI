@@ -17,6 +17,7 @@ vi.mock("node:os", () => {
   return { default: ns, ...ns };
 });
 
+import { resetSystemStore } from "../../system-store";
 import {
   trackCost, getSessionCosts, getCostSummary, getModelRates,
   setBudgetConfig, getBudgetConfig, trackToolCost, trackAgentStepCost,
@@ -31,7 +32,8 @@ describe("cost-tracker integration", () => {
   });
 
   beforeEach(() => {
-    try { fs.rmSync(COST_DIR, { recursive: true, force: true }); } catch {}
+    resetSystemStore();
+    try { fs.rmSync(path.join(tmpDir, ".pi", "agent"), { recursive: true, force: true }); } catch {}
     setBudgetConfig({ maxSessionTokens: 500000, maxDailyTokens: 2000000, maxSessionCostUsd: 1.0, maxDailyCostUsd: 5.0, warningThreshold: 0.8 });
   });
 

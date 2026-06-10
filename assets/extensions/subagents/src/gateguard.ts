@@ -1,38 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { getSystemStore, type GateGuardEntry } from "./system-store";
 
-// ── GateGuard (first-edit investigation) with disk persistence ─────────────
-
-export interface GateGuardEntry {
-  path: string;
-  blocked: boolean;
-  approved: boolean;
-  blockedAt: number;
-  approvedAt: number | null;
-}
+// ── GateGuard (first-edit investigation) with SQLite persistence ─────────────
 
 const STATE = new Map<string, GateGuardEntry>();
-const STATE_FILE = path.join(os.homedir(), ".pi", "agent", "gateguard-state.json");
 
 function loadState(): void {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
-      for (const [key, val] of Object.entries(raw)) {
-        STATE.set(key, val as GateGuardEntry);
-      }
+    const entries = getSystemStore().getAllGateGuardEntries();
+    for (const [key, val] of Object.entries(entries)) {
+      STATE.set(key, val);
     }
   } catch { /* ignore corrupt state */ }
 }
 
 function saveState(): void {
   try {
-    const dir = path.dirname(STATE_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const obj: Record<string, GateGuardEntry> = {};
-    for (const [k, v] of STATE) obj[k] = v;
-    fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2));
+    for (const [, entry] of STATE) {
+      getSystemStore().setGateGuardEntry(entry);
+    }
   } catch { /* ignore write errors */ }
 }
 const INVESTIGATION_PROMPT = "\n[GateGuard] This is the first edit to this file. Before making changes, investigate:\n- What imports/schemas does this file use?\n- What existing code depends on this file?\n- Is this the right approach, or is there a simpler way?\nState your findings, then the edit will proceed.\n";
