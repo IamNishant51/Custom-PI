@@ -1452,6 +1452,20 @@ const TOOLS = [
       required: ["action"],
     },
   },
+  {
+    name: "graphql_introspect",
+    description: "Introspect a GraphQL endpoint to fetch schema, types, queries, mutations, and subscriptions. Supports custom headers for authentication.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "GraphQL endpoint URL (e.g., https://api.example.com/graphql)" },
+        headers: { type: "object", description: "Optional HTTP headers (e.g., Authorization, Content-Type)" },
+        includeDirectives: { type: "boolean", description: "Include directive definitions in schema (default: false)" },
+        includeDeprecated: { type: "boolean", description: "Include deprecated fields/enums (default: false)" },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 // ── MCP Server Client ────────────────────────────────────────────────────────
@@ -2856,6 +2870,100 @@ Restored: ${result.restored.join(", ")}`;
         }
         default:
           return `Unknown plan action: ${args.action}`;
+      }
+    }
+    case "graphql_introspect": {
+      try {
+        const url = args.url;
+        if (!url || typeof url !== "string" || url.length > 2000) return "Error: Valid url required";
+        const headers = args.headers || {};
+        const introspectionQuery = JSON.stringify({
+          query: `
+            query IntrospectionQuery {
+              __schema {
+                queryType { name }
+                mutationType { name }
+                subscriptionType { name }
+                types {
+                  kind name description
+                  fields(includeDeprecated: ${!!args.includeDeprecated}) {
+                    name description
+                    args { name description type { kind name ofType { kind name } } defaultValue }
+                    type { kind name ofType { kind name } }
+                    isDeprecated deprecationReason
+                  }
+                  inputFields { name description type { kind name ofType { kind name } } }
+                  interfaces { kind name }
+                  enumValues(includeDeprecated: ${!!args.includeDeprecated}) { name description isDeprecated deprecationReason }
+                  possibleTypes { kind name }
+                }
+                directives${args.includeDirectives ? ` { name description locations args { name description type { kind name } } }` : ""}
+              }
+            }
+          `.replace(/\s+/g, " ").trim()
+        });
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: introspectionQuery,
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) return `GraphQL server responded with status ${response.status}: ${response.statusText}`;
+        const json = await response.json();
+        if (json.errors) return `GraphQL introspection errors:\n${json.errors.map(e => `  - ${e.message}`).join("\n")}`;
+        const schema = json.data?.__schema;
+        if (!schema) return "No schema returned from introspection query.";
+        const queryType = schema.queryType?.name || "Query";
+        const mutationType = schema.mutationType?.name || null;
+        const subscriptionType = schema.subscriptionType?.name || null;
+        const typeCount = schema.types?.length || 0;
+        const queryFields = schema.types?.find(t => t.name === queryType)?.fields || [];
+        const mutationFields = mutationType ? schema.types?.find(t => t.name === mutationType)?.fields || [] : [];
+        const subscriptionFields = subscriptionType ? schema.types?.find(t => t.name === subscriptionType)?.fields || [] : [];
+        const customTypes = schema.types?.filter(t =>
+          t.name !== queryType && t.name !== mutationType && t.name !== subscriptionType &&
+          !t.name.startsWith("__") && t.kind !== "SCALAR"
+        ) || [];
+        let output = `## GraphQL Schema: ${url}\n`;
+        output += `\n### Overview\n- **Types**: ${typeCount} total (${customTypes.length} custom)\n`;
+        output += `- **Queries**: ${queryFields.length}\n`;
+        output += mutationFields.length ? `- **Mutations**: ${mutationFields.length}\n` : "";
+        output += subscriptionFields.length ? `- **Subscriptions**: ${subscriptionFields.length}\n` : "";
+        if (queryFields.length) {
+          output += "\n### Queries\n";
+          for (const f of queryFields) {
+            const args = f.args?.length ? `(${f.args.map(a => `${a.name}: ${a.type.name || a.type.ofType?.name || "?"}`).join(", ")})` : "";
+            output += `- \`${f.name}${args}: ${f.type.name || f.type.ofType?.name || "?"}\` ${f.description ? `— ${f.description}` : ""}\n`;
+          }
+        }
+        if (mutationFields.length) {
+          output += "\n### Mutations\n";
+          for (const f of mutationFields) {
+            const args = f.args?.length ? `(${f.args.map(a => `${a.name}: ${a.type.name || a.type.ofType?.name || "?"}`).join(", ")})` : "";
+            output += `- \`${f.name}${args}: ${f.type.name || f.type.ofType?.name || "?"}\` ${f.description ? `— ${f.description}` : ""}\n`;
+          }
+        }
+        if (customTypes.length) {
+          output += "\n### Custom Types\n";
+          for (const t of customTypes.slice(0, 30)) {
+            output += `- **${t.name}** (${t.kind})${t.description ? `: ${t.description}` : ""}\n`;
+            if (t.fields) {
+              for (const f of t.fields.slice(0, 10)) {
+                output += `  - \`${f.name}: ${f.type.name || f.type.ofType?.name || "?"}\`\n`;
+              }
+              if (t.fields.length > 10) output += `  - ... and ${t.fields.length - 10} more fields\n`;
+            }
+            if (t.enumValues) {
+              for (const ev of t.enumValues) {
+                output += `  - \`${ev.name}\`${ev.isDeprecated ? " (deprecated)" : ""}\n`;
+              }
+            }
+          }
+          if (customTypes.length > 30) output += `\n... and ${customTypes.length - 30} more types\n`;
+        }
+        return output;
+      } catch (e) {
+        return `GraphQL introspection error: ${e.message}`;
       }
     }
     default:
