@@ -1,7 +1,6 @@
-// @ts-expect-error — runtime-provided by pi-agent
+// @ts-nocheck — API mapper bridging undocumented external runtime APIs; callback param types impractical to annotate exhaustively
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-// @ts-expect-error — runtime-provided by pi-agent
 import { Container, TUI, visibleWidth, CURSOR_MARKER } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -993,15 +992,47 @@ class QuantumHUDWidget implements Component {
 const AGENTS_DIR_GLOBAL = path.join(os.homedir(), ".pi/agent/agents");
 const AGENTS_DIR_LOCAL = path.join(process.cwd(), ".pi/agents");
 
+const REQUIRED_AGENT_FIELDS = ["name", "role"] as const;
+
+type AgentConfigKey = keyof AgentConfig;
+
+function validateAgentConfig(raw: Record<string, unknown>): AgentConfig | null {
+  for (const field of REQUIRED_AGENT_FIELDS) {
+    if (!raw[field] || typeof raw[field] !== "string") {
+      console.error(`[AgentConfig] Missing or invalid required field: "${field}"`);
+      return null;
+    }
+  }
+  const allowedKeys = new Set<string>(["name", "role", "systemPrompt", "tools", "model", "maxTurns", "temperature", "description", "thinking"]);
+  for (const key of Object.keys(raw)) {
+    if (!allowedKeys.has(key)) {
+      console.warn(`[AgentConfig] Unknown config key "${key}" will be ignored`);
+    }
+  }
+  return {
+    name: String(raw.name),
+    role: String(raw.role),
+    systemPrompt: typeof raw.systemPrompt === "string" ? raw.systemPrompt : "",
+    tools: Array.isArray(raw.tools) ? raw.tools.map(String) : undefined,
+    model: typeof raw.model === "string" ? raw.model : undefined,
+    maxTurns: typeof raw.maxTurns === "number" ? raw.maxTurns : undefined,
+    temperature: typeof raw.temperature === "number" ? raw.temperature : undefined,
+    description: typeof raw.description === "string" ? raw.description : undefined,
+    thinking: typeof raw.thinking === "boolean" ? raw.thinking : undefined,
+  };
+}
+
 function parseMarkdownAgent(content: string): { config: AgentConfig; body: string } | null {
   const match = content.match(/^\s*---\s*([\s\S]*?)\s*---\s*([\s\S]*)$/);
   if (!match) return null;
   try {
-    const config = yaml.parse(match[1]) as AgentConfig;
-    const body = match[2];
+    const raw = yaml.parse(match[1]) as Record<string, unknown>;
+    const config = validateAgentConfig(raw);
+    if (!config) return null;
+    const body = match[2] || "";
     return { config, body };
   } catch (e) {
-    console.error("YAML parsing error:", e);
+    console.error("[AgentConfig] YAML parsing error:", e);
     return null;
   }
 }

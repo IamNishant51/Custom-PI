@@ -1,7 +1,7 @@
 import { PropertyGraph, getGraph } from "./property-graph";
 import { cosineSimilarity } from "../memory-embedding";
 
-export type SearchStrategy = "bm25" | "dense" | "graph" | "hybrid" | "cross-encoder";
+export type SearchStrategy = "bm25" | "dense" | "graph" | "hybrid" | "rerank";
 
 export interface SearchOptions {
   strategy?: SearchStrategy;
@@ -61,8 +61,8 @@ export class HybridSearch {
       case "graph":
         results = await this.graphSearch(query, options);
         break;
-      case "cross-encoder":
-        results = await this.crossEncoderSearch(query, topK);
+      case "rerank":
+        results = await this.rerankSearch(query, topK);
         break;
       case "hybrid":
       default: {
@@ -273,20 +273,21 @@ export class HybridSearch {
       }).filter(Boolean) as SearchResult[];
   }
 
-  private async crossEncoderSearch(query: string, topK: number): Promise<SearchResult[]> {
+  private async rerankSearch(query: string, topK: number): Promise<SearchResult[]> {
     const bm25Results = await this.bm25Search(query, topK * 3);
     if (bm25Results.length === 0) return [];
 
     const pairs = bm25Results.map(r => ({ query, text: r.label }));
-    const scores = await this.rerankWithLLM(pairs);
+    const scores = await this.lexicalRerank(pairs);
     const reranked = bm25Results.map((r, i) => ({ ...r, score: scores[i] || 0 }));
     return reranked
       .sort((a, b) => b.score - a.score)
       .slice(0, topK)
-      .map(r => ({ ...r, matchedOn: [...r.matchedOn, "cross-encoder"] as SearchStrategy[] }));
+      .map(r => ({ ...r, matchedOn: [...r.matchedOn, "rerank"] as SearchStrategy[] }));
   }
 
-  private async rerankWithLLM(pairs: Array<{ query: string; text: string }>): Promise<number[]> {
+  /** Lexical overlap reranking (Jaccard + exact match) — NOT a neural cross-encoder */
+  private async lexicalRerank(pairs: Array<{ query: string; text: string }>): Promise<number[]> {
     return pairs.map(p => {
       const q = p.query.toLowerCase();
       const t = p.text.toLowerCase();

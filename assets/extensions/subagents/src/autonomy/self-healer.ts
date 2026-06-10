@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execSync, execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
+import { logger } from "../logger";
+import Database from "better-sqlite3";
 
 type HealthStatus = "healthy" | "degraded" | "unhealthy" | "unknown";
 
@@ -42,10 +44,32 @@ export class SelfHealer {
   private recoveryActions: RecoveryAction[] = [];
   private isHealing = false;
 
-  constructor() {
+  private _initialized = false;
+  private _listenerIds: string[] = [];
+
+  /** Initialize: register checks, setup listeners, start background task. Safe to call multiple times. */
+  init(): void {
+    if (this._initialized) return;
+    this._initialized = true;
     this.registerDefaultChecks();
     this.setupListeners();
     this.registerBackgroundTask();
+  }
+
+  /** Destroy: clean up listeners and state. */
+  destroy(): void {
+    for (const id of this._listenerIds) {
+      bus.unsubscribe(id);
+    }
+    this._listenerIds = [];
+    this.healthChecks = [];
+    this.healthHistory.clear();
+    this.recoveryActions = [];
+    this._initialized = false;
+  }
+
+  constructor() {
+    // No side effects in constructor — call init() explicitly
   }
 
   private registerDefaultChecks(): void {
@@ -56,16 +80,29 @@ export class SelfHealer {
         try {
           const dbPath = path.join(os.homedir(), ".pi", "agent", "session-state.db");
           if (!fs.existsSync(dbPath)) return "degraded";
-          execFileSync("sqlite3", [dbPath, "PRAGMA integrity_check"], { encoding: "utf8", timeout: 5000 });
-          return "healthy";
-        } catch { return "unhealthy"; }
+          const dbCheck = new Database(dbPath, { readonly: true });
+          const result = dbCheck.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
+          dbCheck.close();
+          if (result.length > 0 && result[0]?.integrity_check === "ok") return "healthy";
+          return "unhealthy";
+        } catch (err) {
+          logger.error("SQLite integrity check failed", { error: String(err) });
+          return "unhealthy";
+        }
       },
       recovery: async () => {
         try {
           const dbPath = path.join(os.homedir(), ".pi", "agent", "session-state.db");
-          if (fs.existsSync(dbPath + "-wal")) execSync(`sqlite3 ${dbPath} "PRAGMA wal_checkpoint(TRUNCATE)"`, { timeout: 5000 });
+          if (fs.existsSync(dbPath + "-wal")) {
+            const dbRecover = new Database(dbPath);
+            dbRecover.pragma("wal_checkpoint(TRUNCATE)");
+            dbRecover.close();
+          }
           return true;
-        } catch { return false; }
+        } catch (err) {
+          logger.error("SQLite WAL recovery failed", { error: String(err) });
+          return false;
+        }
       },
     });
 
@@ -146,16 +183,18 @@ export class SelfHealer {
   }
 
   private setupListeners(): void {
-    bus.on(Topics.SYSTEM_ERROR, (event) => {
+    const id1 = bus.on(Topics.SYSTEM_ERROR, (event) => {
       const error = event.data;
       this.handleError(error.source, error.error || error.message);
     });
+    this._listenerIds.push(id1);
 
-    bus.on(Topics.TOOL_ERROR, (event) => {
+    const id2 = bus.on(Topics.TOOL_ERROR, (event) => {
       if (event.data.error?.includes("database") || event.data.error?.includes("SQLITE")) {
         this.triggerRecovery("sqlite-database");
       }
     });
+    this._listenerIds.push(id2);
   }
 
   private registerBackgroundTask(): void {

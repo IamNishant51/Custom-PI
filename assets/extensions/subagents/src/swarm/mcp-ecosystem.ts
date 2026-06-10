@@ -306,7 +306,7 @@ export class MCPEcosystem {
               inputSchema: t.inputSchema,
               serverName: name,
             }));
-            for (const tool of server.tools) {
+            for (const tool of server.tools ?? []) {
               this.toolRegistry.set(`${name}:${tool.name}`, tool);
             }
           }

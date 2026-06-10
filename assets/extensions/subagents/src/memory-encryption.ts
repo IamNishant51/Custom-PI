@@ -18,7 +18,9 @@ function getEncryptionKey(): Buffer | null {
         return key;
       }
     }
-  } catch {}
+    } catch (err) {
+      console.error("[MemoryEncryption] Failed to get encryption key:", err);
+    }
   return null;
 }
 
@@ -29,7 +31,9 @@ async function ensureKey(): Promise<Buffer> {
   try {
     const { vaultSet } = await import("./secret-vault");
     vaultSet("__memory_encryption_key__", key.toString("hex"));
-  } catch {}
+  } catch (err) {
+    console.error("[MemoryEncryption] Failed to store encryption key:", err);
+  }
   _encryptionKey = key;
   return key;
 }
@@ -54,7 +58,8 @@ export async function encryptMemory(plaintext: string): Promise<string> {
     const tag = cipher.getAuthTag();
     const combined = Buffer.concat([iv, tag, encrypted]);
     return "enc:v1:" + combined.toString("base64");
-  } catch {
+  } catch (err) {
+    console.error("[MemoryEncryption] Encrypt failed, falling back to plaintext:", err);
     return plaintext;
   }
 }
@@ -72,7 +77,8 @@ export function decryptMemory(ciphertext: string): string {
     decipher.setAuthTag(tag);
     const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
     return decrypted.toString("utf8");
-  } catch {
+  } catch (err) {
+    console.error("[MemoryEncryption] Decrypt failed, returning ciphertext:", err);
     return ciphertext;
   }
 }

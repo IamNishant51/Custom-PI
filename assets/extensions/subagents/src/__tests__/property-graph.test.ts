@@ -70,8 +70,8 @@ describe("PropertyGraph", () => {
     const a = graph.addNode("entity", "A");
     const b = graph.addNode("entity", "B");
     const c = graph.addNode("entity", "C");
-    graph.addEdge(a, b, "connects");
-    graph.addEdge(b, c, "connects");
+    graph.addEdge(a, b, "relates_to");
+    graph.addEdge(b, c, "relates_to");
     const pathResult = graph.findPath(a, c);
     expect(pathResult).not.toBeNull();
     expect(pathResult!.nodes).toHaveLength(3);
@@ -82,8 +82,8 @@ describe("PropertyGraph", () => {
     const a = graph.addNode("entity", "Center");
     const b = graph.addNode("entity", "Neighbor1");
     const c = graph.addNode("entity", "Neighbor2");
-    graph.addEdge(a, b, "connects");
-    graph.addEdge(a, c, "connects");
+    graph.addEdge(a, b, "relates_to");
+    graph.addEdge(a, c, "relates_to");
     const neighbors = graph.findNeighbors(a);
     expect(neighbors.nodes).toHaveLength(3);
     expect(neighbors.edges).toHaveLength(2);
@@ -100,7 +100,7 @@ describe("PropertyGraph", () => {
   it("deletes nodes and cascades edges", () => {
     const a = graph.addNode("entity", "A");
     const b = graph.addNode("entity", "B");
-    graph.addEdge(a, b, "connects");
+    graph.addEdge(a, b, "relates_to");
     expect(graph.deleteNode(a)).toBe(true);
     const edges = graph.queryEdges(a);
     expect(edges).toHaveLength(0);
@@ -109,7 +109,7 @@ describe("PropertyGraph", () => {
   it("deletes edges", () => {
     const a = graph.addNode("entity", "A");
     const b = graph.addNode("entity", "B");
-    const eid = graph.addEdge(a, b, "connects");
+    const eid = graph.addEdge(a, b, "relates_to");
     expect(graph.deleteEdge(eid)).toBe(true);
     expect(graph.getEdge(eid)).toBeNull();
   });
@@ -120,7 +120,7 @@ describe("PropertyGraph", () => {
     graph.addNode("session", "S");
     const a = graph.getNode("A") ? graph.queryNodes({ nodeType: "entity" })[0]?.id : "";
     const b = graph.getNode("B") ? graph.queryNodes({ nodeType: "entity" })[1]?.id : "";
-    if (a && b) graph.addEdge(a, b, "connects");
+    if (a && b) graph.addEdge(a, b, "relates_to");
     expect(graph.countNodes()).toBe(3);
     expect(graph.countNodes("entity")).toBe(2);
   });

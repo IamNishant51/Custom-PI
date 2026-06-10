@@ -1,7 +1,14 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
 import { environmentSensor } from "../perception/environment-sensor";
 import { getGraph } from "../state-graph/property-graph";
+import { writeAtomic } from "../storage-driver";
+import { logger } from "../logger";
+
+const INITIATIVE_STATE_FILE = path.join(os.homedir(), ".pi", "agent", "initiative-state.json");
 
 interface Opportunity {
   id: string;
@@ -21,21 +28,73 @@ export class InitiativeEngine {
   private opportunities: Opportunity[] = [];
   private lastCheck: Record<string, number> = {};
   private userReceptivity = 0.5;
+  private _initialized = false;
+  private _listenerIds: string[] = [];
 
-  constructor() {
+  init(): void {
+    if (this._initialized) return;
+    this._initialized = true;
+    this.loadState();
     this.setupListeners();
     this.registerBackgroundTasks();
   }
 
+  destroy(): void {
+    this.persistState();
+    for (const id of this._listenerIds) {
+      bus.unsubscribe(id);
+    }
+    this._listenerIds = [];
+    this.opportunities = [];
+    this._initialized = false;
+  }
+
+  /** Persist state to disk so it survives restarts */
+  private persistState(): void {
+    try {
+      const data = {
+        opportunities: this.opportunities,
+        userReceptivity: this.userReceptivity,
+        lastCheck: this.lastCheck,
+      };
+      const dir = path.dirname(INITIATIVE_STATE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      writeAtomic(INITIATIVE_STATE_FILE, JSON.stringify(data));
+    } catch (err) {
+      logger.error("[InitiativeEngine] Failed to persist state", { error: String(err) });
+    }
+  }
+
+  /** Load state from disk */
+  private loadState(): void {
+    try {
+      if (fs.existsSync(INITIATIVE_STATE_FILE)) {
+        const raw = fs.readFileSync(INITIATIVE_STATE_FILE, "utf8");
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.opportunities)) this.opportunities = data.opportunities;
+        if (typeof data.userReceptivity === "number") this.userReceptivity = data.userReceptivity;
+        if (data.lastCheck && typeof data.lastCheck === "object") this.lastCheck = data.lastCheck;
+      }
+    } catch (err) {
+      logger.error("[InitiativeEngine] Failed to load state", { error: String(err) });
+    }
+  }
+
+  constructor() {
+    // No side effects — call init() explicitly
+  }
+
   private setupListeners(): void {
-    bus.on(Topics.USER_FEEDBACK, (event) => {
+    const id1 = bus.on(Topics.USER_FEEDBACK, (event) => {
       if (event.data.positive) this.userReceptivity = Math.min(1, this.userReceptivity + 0.05);
       if (event.data.negative) this.userReceptivity = Math.max(0, this.userReceptivity - 0.05);
     });
+    this._listenerIds.push(id1);
 
-    bus.on(Topics.MEMORY_CONSOLIDATED, () => {
+    const id2 = bus.on(Topics.MEMORY_CONSOLIDATED, () => {
       this.evaluate("maintenance", "Memory consolidation completed. Check if pruning thresholds need adjustment.");
     });
+    this._listenerIds.push(id2);
   }
 
   private registerBackgroundTasks(): void {
@@ -115,6 +174,7 @@ export class InitiativeEngine {
     if (this.opportunities.length > 100) {
       this.opportunities.splice(0, this.opportunities.length - 100);
     }
+    this.persistState();
 
     bus.emit(Topics.PROACTIVE_ACTION, {
       type: "opportunity",
@@ -135,7 +195,7 @@ export class InitiativeEngine {
 
   dismiss(id: string): void {
     const opp = this.opportunities.find(o => o.id === id);
-    if (opp) opp.dismissed = true;
+    if (opp) { opp.dismissed = true; this.persistState(); }
   }
 
   getUserReceptivity(): number {

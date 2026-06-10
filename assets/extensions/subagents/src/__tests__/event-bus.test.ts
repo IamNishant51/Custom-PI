@@ -38,9 +38,9 @@ describe("EventBus", () => {
 
   it("respects priority ordering", () => {
     const order: number[] = [];
-    bus.on("test.event", () => order.push(1), { priority: 10 });
-    bus.on("test.event", () => order.push(2), { priority: 20 });
-    bus.on("test.event", () => order.push(3), { priority: 5 });
+    bus.on("test.event", () => { order.push(1); }, { priority: 10 });
+    bus.on("test.event", () => { order.push(2); }, { priority: 20 });
+    bus.on("test.event", () => { order.push(3); }, { priority: 5 });
     bus.emit("test.event", {});
     expect(order).toEqual([2, 1, 3]);
   });

@@ -23,7 +23,9 @@ function loadState(): NudgeState {
     if (fs.existsSync(STATE_FILE)) {
       return { ...EMPTY_STATE, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) };
     }
-  } catch {}
+  } catch (err) {
+    console.error("[MemoryNudge] Failed to load state:", err);
+  }
   return { ...EMPTY_STATE };
 }
 
@@ -32,7 +34,9 @@ function saveState(): void {
     const dir = path.dirname(STATE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify(state), "utf8");
-  } catch {}
+  } catch (err) {
+    console.error("[MemoryNudge] Failed to save state:", err);
+  }
 }
 
 const MEMORY_NUDGE_INTERVAL = 10;

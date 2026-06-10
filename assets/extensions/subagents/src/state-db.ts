@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import Database from "better-sqlite3";
 import { writeAtomic, writeAtomicAsync } from "./storage-driver";
+import { logger } from "./logger";
 
 const DB_DIR = path.join(os.homedir(), ".pi", "agent");
 const DB_PATH = path.join(DB_DIR, "session-state.db");
@@ -29,7 +30,9 @@ const WAL_CHECKPOINT_INTERVAL = 100;
 function checkpointWal(): void {
   try {
     if (db) db.pragma("wal_checkpoint(TRUNCATE)");
-  } catch {}
+  } catch (err) {
+    logger.error("WAL checkpoint failed", { error: String(err) });
+  }
 }
 
 function maybeCheckpointWal(): void {
@@ -244,7 +247,8 @@ export function getMessages(sessionId: string, limit: number = 50, offset: numbe
 export function searchSession(query: string, sessionId?: string, k: number = 10): FtsResult[] {
   const d = openDb();
   if (!query.trim()) return [];
-  const q = query.trim().replace(/'/g, "''");
+  // FTS5 MATCH parameter is bound via prepared statement, not concatenated
+  const q = query.trim();
   let sql: string;
   let params: any[];
   if (sessionId) {
@@ -390,7 +394,7 @@ export function aggregateByEntity(entityId: string): AggregatedEntity | null {
   const triples = queryTriplets({ subjectId: entityId });
   if (triples.length === 0) return null;
 
-  const first = triples[0];
+  const first = triples[0]!;
   return {
     entityId,
     entityType: first.subjectType,

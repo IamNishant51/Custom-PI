@@ -116,9 +116,13 @@ function getDailyCost(): CostEvent[] {
       try {
         const event = JSON.parse(line) as CostEvent;
         if (event.timestamp.startsWith(today)) costs.push(event);
-      } catch {}
+      } catch (parseErr) {
+        console.warn("[CostTracker] Parse error in daily costs line:", parseErr);
+      }
     }
-  } catch {}
+  } catch (readErr) {
+    console.error("[CostTracker] Failed to read daily costs file:", readErr);
+  }
   cachedDailyCosts = costs;
   cachedDailyDate = today;
   return costs;
@@ -233,9 +237,13 @@ export function getSessionCosts(sessionId: string): CostEvent[] {
       try {
         const event = JSON.parse(line) as CostEvent;
         if (event.sessionId === sessionId) costs.push(event);
-      } catch {}
+      } catch (parseErr) {
+        console.warn("[CostTracker] Parse error in session costs line:", parseErr);
+      }
     }
-  } catch {}
+  } catch (readErr) {
+    console.error("[CostTracker] Failed to read session costs file:", readErr);
+  }
   cachedSessionCosts.set(sessionId, costs);
   return costs;
 }

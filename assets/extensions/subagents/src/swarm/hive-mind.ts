@@ -1,5 +1,6 @@
 import { bus, Topics } from "../event-bus/event-bus";
 import { getGraph } from "../state-graph/property-graph";
+import { logger } from "../logger";
 
 export type AgentRole = "architect" | "backend-dev" | "frontend-dev" | "devops" | "security-reviewer" | "tester" | "researcher" | "writer" | "reviewer" | "planner" | "builder";
 
@@ -110,7 +111,7 @@ export class HiveMind {
     for (const role of request.requiredRoles) {
       const available = this.findAgentsByRole(role);
       if (available.length > 0) {
-        const agent = available.sort((a, b) => b.performance.successRate - a.performance.successRate)[0];
+        const agent = available.sort((a, b) => b.performance.successRate - a.performance.successRate)[0]!;
         agent.status = "working";
         teamAgents.push(agent);
       }
@@ -228,7 +229,9 @@ export class HiveMind {
     try {
       const graph = getGraph();
       graph.addNode("concept", topic.slice(0, 200), { topic, value, source, timestamp: Date.now() });
-    } catch {}
+    } catch (err) {
+      logger.error("Failed to broadcast knowledge", { topic, error: String(err) });
+    }
   }
 
   private updateAgentPerformance(agentId: string, success: boolean): void {

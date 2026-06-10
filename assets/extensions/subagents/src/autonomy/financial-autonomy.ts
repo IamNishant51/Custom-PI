@@ -1,6 +1,7 @@
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
 import { getGraph } from "../state-graph/property-graph";
+import { logger } from "../logger";
 
 interface CostEntry {
   id: string;
@@ -169,7 +170,9 @@ export class FinancialAutonomy {
     try {
       const graph = getGraph();
       graph.addNode("custom", "Financial Budget", { ...this.budget }, { id: "financial_budget" });
-    } catch {}
+    } catch (err) {
+      logger.error("Failed to persist budget", { error: String(err) });
+    }
   }
 
   private loadBudget(): void {
@@ -179,7 +182,9 @@ export class FinancialAutonomy {
       if (node?.properties) {
         Object.assign(this.budget, node.properties);
       }
-    } catch {}
+    } catch (err) {
+      logger.error("Failed to load budget", { error: String(err) });
+    }
   }
 }
 

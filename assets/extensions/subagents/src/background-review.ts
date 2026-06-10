@@ -91,8 +91,8 @@ async function callSimple(
     headers: auth.headers,
   });
   return response.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map(c => c.text)
+    .filter((c: any): c is { type: "text"; text: string } => c.type === "text")
+    .map((c: { type: "text"; text: string }) => c.text)
     .join("\n");
 }
 

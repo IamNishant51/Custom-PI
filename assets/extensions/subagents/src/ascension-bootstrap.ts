@@ -45,6 +45,11 @@ export function initializeAscension(config: AscensionConfig = {}): void {
   const hybridSearch = new HybridSearch(graph);
   const daemon = getDaemon({ tickInterval: config.daemonTickInterval || 5000 });
 
+  // Initialize all subsystems explicitly (no constructor side effects)
+  selfHealer.init();
+  initiativeEngine.init();
+  securityAutopilot.init();
+
   bus.emit(Topics.SYSTEM_STARTUP, {
     version: "1.9.0",
     subsystems: [
@@ -217,6 +222,9 @@ export function shutdownAscension(): void {
   bus.emit(Topics.SYSTEM_SHUTDOWN, { reason: "user_initiated" }, { source: "ascension-bootstrap" });
   stopDaemon();
   closeGraph();
+  selfHealer.destroy();
+  initiativeEngine.destroy();
+  securityAutopilot.destroy();
   episodicMemory.destroy();
   environmentSensor.destroy();
   webSentience.destroy();

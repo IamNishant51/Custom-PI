@@ -258,7 +258,9 @@ export class Daemon extends EventEmitter {
       const tmp = this.config.stateFile + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
       fs.renameSync(tmp, this.config.stateFile);
-    } catch { }
+    } catch (err) {
+      console.error("[Daemon] Failed to save state:", err);
+    }
   }
 
   private loadState(): void {
@@ -285,7 +287,9 @@ export class Daemon extends EventEmitter {
         this.stats = { ...this.stats, ...data.stats, uptime: this.getUptime() };
       }
       if (data.lastUserActivity) this.lastUserActivity = data.lastUserActivity;
-    } catch { }
+    } catch (err) {
+      console.error("[Daemon] Failed to load state:", err);
+    }
   }
 
   static createIdleTask(name: string, fn: () => Promise<void>, priority: TaskPriority = "low"): DaemonTask {

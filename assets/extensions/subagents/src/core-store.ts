@@ -97,11 +97,11 @@ export function loadSync(): MemoryEntry[] {
     const decrypted = decryptMemory(raw);
     cache = JSON.parse(decrypted).map(migrateEntry);
     cacheTs = now;
-    return cache;
+    return cache!;
   } catch {
     cache = [];
     cacheTs = now;
-    return cache;
+    return cache!;
   }
 }
 

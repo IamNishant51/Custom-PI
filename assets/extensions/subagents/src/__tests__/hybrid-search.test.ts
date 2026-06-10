@@ -81,8 +81,8 @@ describe("HybridSearch", () => {
     expect(true).toBe(true);
   });
 
-  it("cross-encoder search falls back gracefully", async () => {
-    const results = await search.search("Docker", { strategy: "cross-encoder", topK: 3 });
+  it("rerank search falls back gracefully", async () => {
+    const results = await search.search("Docker", { strategy: "rerank", topK: 3 });
     expect(results.length).toBeGreaterThanOrEqual(0);
   });
 

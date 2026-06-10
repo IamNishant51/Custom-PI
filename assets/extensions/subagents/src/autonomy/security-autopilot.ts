@@ -1,8 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
+import { writeAtomic } from "../storage-driver";
+import { logger } from "../logger";
+
+const SECURITY_STATE_FILE = path.join(os.homedir(), ".pi", "agent", "security-state.json");
 
 interface SecurityFinding {
   id: string;
@@ -27,11 +32,58 @@ export class SecurityAutopilot {
   private findings: SecurityFinding[] = [];
   private secretPatterns: SecretPattern[] = [];
   private scannedFiles = new Set<string>();
+  private _initialized = false;
+  private _listenerIds: string[] = [];
 
-  constructor() {
+  init(): void {
+    if (this._initialized) return;
+    this._initialized = true;
     this.initializePatterns();
+    this.loadState();
     this.setupListeners();
     this.registerBackgroundTask();
+  }
+
+  destroy(): void {
+    this.persistState();
+    for (const id of this._listenerIds) {
+      bus.unsubscribe(id);
+    }
+    this._listenerIds = [];
+    this.findings = [];
+    this.scannedFiles.clear();
+    this._initialized = false;
+  }
+
+  constructor() {
+    // No side effects — call init() explicitly
+  }
+
+  private persistState(): void {
+    try {
+      const data = {
+        findings: this.findings.map(f => ({ ...f })),
+        scannedFiles: Array.from(this.scannedFiles),
+      };
+      const dir = path.dirname(SECURITY_STATE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      writeAtomic(SECURITY_STATE_FILE, JSON.stringify(data));
+    } catch (err) {
+      logger.error("[SecurityAutopilot] Failed to persist state", { error: String(err) });
+    }
+  }
+
+  private loadState(): void {
+    try {
+      if (fs.existsSync(SECURITY_STATE_FILE)) {
+        const raw = fs.readFileSync(SECURITY_STATE_FILE, "utf8");
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.findings)) this.findings = data.findings;
+        if (Array.isArray(data.scannedFiles)) this.scannedFiles = new Set(data.scannedFiles);
+      }
+    } catch (err) {
+      logger.error("[SecurityAutopilot] Failed to load state", { error: String(err) });
+    }
   }
 
   private initializePatterns(): void {
@@ -52,7 +104,7 @@ export class SecurityAutopilot {
   }
 
   private setupListeners(): void {
-    bus.on(Topics.FILE_CHANGED, (event) => {
+    const id = bus.on(Topics.FILE_CHANGED, (event) => {
       const change = event.data;
       if (change.type === "created" || change.type === "modified") {
         if (this.shouldScan(change.path)) {
@@ -60,6 +112,7 @@ export class SecurityAutopilot {
         }
       }
     });
+    this._listenerIds.push(id);
   }
 
   private registerBackgroundTask(): void {
@@ -115,7 +168,9 @@ export class SecurityAutopilot {
           }
         }
       }
-    } catch {}
+    } catch (err) {
+      logger.error(`Security scan failed for ${filePath}`, { error: String(err) });
+    }
 
     for (const finding of fileFindings) {
       const existing = this.findings.find(f => f.file === finding.file && f.line === finding.line && f.type === finding.type);
@@ -123,6 +178,8 @@ export class SecurityAutopilot {
         this.findings.push(finding);
       }
     }
+
+    this.persistState();
 
     return fileFindings;
   }
@@ -153,6 +210,7 @@ export class SecurityAutopilot {
     if (finding) {
       finding.resolved = true;
       finding.resolvedAt = Date.now();
+      this.persistState();
     }
   }
 
@@ -178,7 +236,9 @@ export class SecurityAutopilot {
           }
         }
       }
-    } catch {}
+    } catch (err) {
+      logger.error("Vault exposure scan failed", { error: String(err) });
+    }
 
     return vaultFindings;
   }
@@ -212,7 +272,9 @@ export class SecurityAutopilot {
         findings: this.getUnresolvedFindings().length,
         score: this.getSecurityScore().score,
       }, { source: "security-autopilot" });
-    } catch {}
+    } catch (err) {
+      logger.error("Scheduled security scan failed", { error: String(err) });
+    }
   }
 
   private scanDirectory(dir: string): void {
@@ -231,7 +293,9 @@ export class SecurityAutopilot {
           }
         }
       }
-    } catch {}
+    } catch (err) {
+      logger.error(`Directory scan failed for ${dir}`, { error: String(err) });
+    }
   }
 }
 

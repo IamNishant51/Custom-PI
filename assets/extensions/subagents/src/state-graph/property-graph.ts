@@ -260,7 +260,7 @@ export class PropertyGraph {
   }
 
   searchNodes(query: string, limit = 20): GraphNode[] {
-    const q = query.trim().replace(/'/g, "''");
+    const q = query.trim();
     if (!q) return [];
     const sql = `
       SELECT n.* FROM nodes_fts
@@ -334,7 +334,9 @@ export class PropertyGraph {
   }
 
   close(): void {
-    try { this.db.close(); } catch {}
+    try { this.db.close(); } catch (err) {
+      console.error("[PropertyGraph] Close error:", err);
+    }
   }
 
   private mapNode(row: any): GraphNode {
