@@ -1,0 +1,336 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { EventEmitter } from "node:events";
+import { bus, Topics } from "../event-bus/event-bus";
+
+export type DaemonState = "idle" | "active" | "sleeping" | "error" | "shutdown";
+export type TaskPriority = "critical" | "high" | "normal" | "low";
+
+interface DaemonTask {
+  id: string;
+  name: string;
+  priority: TaskPriority;
+  execute: () => Promise<void>;
+  interval?: number;
+  scheduledAt?: number;
+  lastRun?: number;
+  cronExpression?: string;
+  runsOnIdle?: boolean;
+  timeout?: number;
+}
+
+interface DaemonConfig {
+  tickInterval: number;
+  idleThreshold: number;
+  maxConcurrentTasks: number;
+  stateFile: string;
+  autoRecovery: boolean;
+}
+
+interface DaemonStats {
+  uptime: number;
+  totalTicks: number;
+  tasksExecuted: number;
+  tasksFailed: number;
+  tasksSkipped: number;
+  currentState: DaemonState;
+  activeTasks: number;
+}
+
+export class Daemon extends EventEmitter {
+  private tasks: Map<string, DaemonTask> = new Map();
+  private taskQueue: DaemonTask[] = [];
+  private running = new Set<string>();
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private state: DaemonState = "idle";
+  private config: DaemonConfig;
+  private stats: DaemonStats;
+  private lastUserActivity = Date.now();
+  private idleSince: number | null = null;
+  private tickCount = 0;
+  private startTime = Date.now();
+
+  constructor(config?: Partial<DaemonConfig>) {
+    super();
+    this.config = {
+      tickInterval: 5000,
+      idleThreshold: 120_000,
+      maxConcurrentTasks: 3,
+      stateFile: path.join(os.homedir(), ".pi", "agent", "daemon-state.json"),
+      autoRecovery: true,
+      ...config,
+    };
+    this.stats = {
+      uptime: 0,
+      totalTicks: 0,
+      tasksExecuted: 0,
+      tasksFailed: 0,
+      tasksSkipped: 0,
+      currentState: "idle",
+      activeTasks: 0,
+    };
+  }
+
+  start(): void {
+    if (this.tickTimer) return;
+    this.state = "idle";
+    this.startTime = Date.now();
+    this.loadState();
+    bus.emit(Topics.DAEMON_TICK, { action: "start", timestamp: Date.now() }, { source: "daemon" });
+
+    this.tickTimer = setInterval(() => this.tick(), this.config.tickInterval);
+
+    bus.on(Topics.MESSAGE_RECEIVED, () => { this.lastUserActivity = Date.now(); this.idleSince = null; });
+    bus.on(Topics.TOOL_CALL, () => { this.lastUserActivity = Date.now(); this.idleSince = null; });
+    bus.on(Topics.USER_ACTION, () => { this.lastUserActivity = Date.now(); this.idleSince = null; });
+
+    bus.on(Topics.DAEMON_TASK, async (event) => {
+      const task = event.data as DaemonTask;
+      this.registerTask(task);
+    });
+  }
+
+  stop(): void {
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+    this.state = "shutdown";
+    this.saveState();
+    bus.emit(Topics.SYSTEM_SHUTDOWN, { action: "daemon_stop", uptime: this.getUptime() }, { source: "daemon" });
+  }
+
+  registerTask(task: DaemonTask): void {
+    this.tasks.set(task.id, task);
+    if (task.priority === "critical" || task.priority === "high") {
+      this.taskQueue.push(task);
+    }
+    this.saveState();
+  }
+
+  unregisterTask(id: string): boolean {
+    const removed = this.tasks.delete(id);
+    this.taskQueue = this.taskQueue.filter(t => t.id !== id);
+    this.running.delete(id);
+    return removed;
+  }
+
+  reportUserActivity(): void {
+    this.lastUserActivity = Date.now();
+    this.idleSince = null;
+  }
+
+  isIdle(): boolean {
+    return Date.now() - this.lastUserActivity > this.config.idleThreshold;
+  }
+
+  getIdleDuration(): number {
+    return Date.now() - this.lastUserActivity;
+  }
+
+  getState(): DaemonState {
+    return this.state;
+  }
+
+  getStats(): DaemonStats {
+    return {
+      ...this.stats,
+      uptime: this.getUptime(),
+      activeTasks: this.running.size,
+      currentState: this.state,
+    };
+  }
+
+  getTasks(): DaemonTask[] {
+    return Array.from(this.tasks.values());
+  }
+
+  getUptime(): number {
+    return Date.now() - this.startTime;
+  }
+
+  private async tick(): Promise<void> {
+    this.tickCount++;
+    this.stats.totalTicks = this.tickCount;
+    this.stats.uptime = this.getUptime();
+
+    if (this.isIdle()) {
+      if (this.state !== "active") {
+        this.state = "active";
+        this.idleSince = this.idleSince || Date.now();
+        bus.emit(Topics.DAEMON_IDLE, { idleDuration: this.getIdleDuration() }, { source: "daemon" });
+      }
+      this.runBackgroundTasks();
+    } else {
+      this.state = "idle";
+      this.idleSince = null;
+    }
+
+    this.processScheduledTasks();
+    this.saveState();
+  }
+
+  private async runBackgroundTasks(): Promise<void> {
+    const idleTasks = Array.from(this.tasks.values())
+      .filter(t => t.runsOnIdle && !this.running.has(t.id))
+      .sort((a, b) => this.priorityWeight(b.priority) - this.priorityWeight(a.priority));
+
+    for (const task of idleTasks) {
+      if (this.running.size >= this.config.maxConcurrentTasks) break;
+      this.executeTask(task);
+    }
+  }
+
+  private async processScheduledTasks(): Promise<void> {
+    const now = Date.now();
+    const dueTasks = Array.from(this.tasks.values())
+      .filter(t => {
+        if (this.running.has(t.id)) return false;
+        if (!t.interval && !t.scheduledAt) return false;
+        if (t.interval && t.lastRun) {
+          return now - t.lastRun >= t.interval;
+        }
+        if (t.interval && !t.lastRun) return true;
+        if (t.scheduledAt) return now >= t.scheduledAt;
+        return false;
+      })
+      .sort((a, b) => this.priorityWeight(b.priority) - this.priorityWeight(a.priority));
+
+    for (const task of dueTasks) {
+      if (this.running.size >= this.config.maxConcurrentTasks) {
+        this.stats.tasksSkipped++;
+        break;
+      }
+      this.executeTask(task);
+    }
+  }
+
+  private async executeTask(task: DaemonTask): Promise<void> {
+    if (this.running.has(task.id)) return;
+    this.running.add(task.id);
+
+    try {
+      const timeout = task.timeout || 30_000;
+      const result = task.execute();
+      await Promise.race([
+        result,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Task ${task.name} timed out after ${timeout}ms`)), timeout)),
+      ]);
+      task.lastRun = Date.now();
+      this.stats.tasksExecuted++;
+      bus.emit(Topics.DAEMON_TICK, { taskId: task.id, taskName: task.name, status: "completed" }, { source: "daemon" });
+    } catch (err: any) {
+      this.stats.tasksFailed++;
+      bus.emit(Topics.SYSTEM_ERROR, { source: "daemon", task: task.name, error: err.message }, { source: "daemon" });
+    } finally {
+      this.running.delete(task.id);
+    }
+  }
+
+  private priorityWeight(priority: TaskPriority): number {
+    switch (priority) {
+      case "critical": return 100;
+      case "high": return 50;
+      case "normal": return 10;
+      case "low": return 1;
+    }
+  }
+
+  private saveState(): void {
+    try {
+      const dir = path.dirname(this.config.stateFile);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const state = {
+        tasks: Array.from(this.tasks.values()).map(t => ({
+          id: t.id,
+          name: t.name,
+          priority: t.priority,
+          interval: t.interval,
+          scheduledAt: t.scheduledAt,
+          lastRun: t.lastRun,
+          runsOnIdle: t.runsOnIdle,
+        })),
+        stats: this.stats,
+        lastUserActivity: this.lastUserActivity,
+        startTime: this.startTime,
+      };
+      const tmp = this.config.stateFile + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+      fs.renameSync(tmp, this.config.stateFile);
+    } catch { }
+  }
+
+  private loadState(): void {
+    try {
+      if (!fs.existsSync(this.config.stateFile)) return;
+      const data = JSON.parse(fs.readFileSync(this.config.stateFile, "utf8"));
+      if (data.tasks && Array.isArray(data.tasks)) {
+        for (const t of data.tasks) {
+          if (!this.tasks.has(t.id)) {
+            this.tasks.set(t.id, {
+              id: t.id,
+              name: t.name || t.id,
+              priority: t.priority || "normal",
+              execute: async () => {},
+              interval: t.interval,
+              scheduledAt: t.scheduledAt,
+              lastRun: t.lastRun,
+              runsOnIdle: t.runsOnIdle,
+            });
+          }
+        }
+      }
+      if (data.stats) {
+        this.stats = { ...this.stats, ...data.stats, uptime: this.getUptime() };
+      }
+      if (data.lastUserActivity) this.lastUserActivity = data.lastUserActivity;
+    } catch { }
+  }
+
+  static createIdleTask(name: string, fn: () => Promise<void>, priority: TaskPriority = "low"): DaemonTask {
+    return {
+      id: `idle_${name.toLowerCase().replace(/\s+/g, "_")}`,
+      name,
+      priority,
+      execute: fn,
+      runsOnIdle: true,
+    };
+  }
+
+  static createIntervalTask(name: string, fn: () => Promise<void>, intervalMs: number, priority: TaskPriority = "normal"): DaemonTask {
+    return {
+      id: `int_${name.toLowerCase().replace(/\s+/g, "_")}`,
+      name,
+      priority,
+      execute: fn,
+      interval: intervalMs,
+    };
+  }
+
+  static createScheduledTask(name: string, fn: () => Promise<void>, timestamp: number, priority: TaskPriority = "normal"): DaemonTask {
+    return {
+      id: `sched_${name.toLowerCase().replace(/\s+/g, "_")}`,
+      name,
+      priority,
+      execute: fn,
+      scheduledAt: timestamp,
+    };
+  }
+}
+
+let _daemon: Daemon | null = null;
+export function getDaemon(config?: Partial<DaemonConfig>): Daemon {
+  if (!_daemon) _daemon = new Daemon(config);
+  return _daemon;
+}
+
+export function startDaemon(config?: Partial<DaemonConfig>): Daemon {
+  const d = getDaemon(config);
+  d.start();
+  return d;
+}
+
+export function stopDaemon(): void {
+  if (_daemon) { _daemon.stop(); _daemon = null; }
+}

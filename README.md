@@ -1,5 +1,5 @@
 *HERMES meets PAPERCLIP — the coding agent that never forgets, never stops, and never asks twice.*  
-*Knowledge graph memory · Free AI image generation · Social media automation · DAG swarms · Web dashboard*
+*Knowledge graph memory · Free AI image generation · Social media automation · DAG swarms · Web dashboard · Autonomous cognition · Self-evolving AGI*
 
 ![Custom-PI logo](assets/Custom-pi-logo.png)
 
@@ -10,6 +10,11 @@
 ![Asset Pipeline](https://img.shields.io/badge/Asset-Pipeline-ff6b6b.svg?style=for-the-badge)
 ![Social Automata](https://img.shields.io/badge/Social-Automata-00d7ff.svg?style=for-the-badge)
 ![DAG Swarm](https://img.shields.io/badge/DAG-Swarm-af00ff.svg?style=for-the-badge)
+![Event Bus](https://img.shields.io/badge/Event%20Bus-Quantum-00d7ff.svg?style=for-the-badge)
+![State Graph](https://img.shields.io/badge/State%20Graph-Property-00ff88.svg?style=for-the-badge)
+![Cognition](https://img.shields.io/badge/Cognition-9%20Layers-ff6b6b.svg?style=for-the-badge)
+![Swarm](https://img.shields.io/badge/Swarm-Hive%20Mind-af00ff.svg?style=for-the-badge)
+![Self-Evolving](https://img.shields.io/badge/Self-Evolving-True-ffaa00.svg?style=for-the-badge)
 
 ---
 
@@ -164,49 +169,153 @@ The **Social Media Manager** swarm handles the full pipeline:
 ## Interactive Architecture Flow
 
 ```mermaid
-graph TD
-  Goal[User Input / Goal] --> CEO[CEO Orchestrator]
-  CEO --> Config[DAG Planner / dag-config.yaml]
-  Config --> Swarm{DAG Swarm Execution}
-  Swarm -->|Research| Res[Researcher Agent]
-  Swarm -->|Write + Generate| Cod[Writer Agent]
-  Res -.->|Findings| Cod
-  Cod --> Pub[Publisher Agent]
-  Pub --> Approve[Post Approval Modal]
-  Approve -->|Approved| Social[Twitter / Reddit / Bluesky / Discord / Telegram]
-  Approve -->|Edit| Cod
-  
-  subgraph Asset Pipeline
-    Gen[generate_image<br/>Pollinations.ai] --> Sel[request_asset_selection]
-    Sel --> Asset[~/.pi/assets/]
-  end
-  
-  Cod --> Gen
-  Pub --> Asset
+graph TB
+  User[User / Goal] --> CEO[CEO Orchestrator]
 
-  subgraph Memory System
+  subgraph "Nervous System (Event Bus + State Graph)"
+    EB[Event Bus<br/>pub/sub mesh]
+    SG[State Graph<br/>SQLite property graph]
+    HS[Hybrid Search<br/>BM25+Dense+Graph]
+    DA[Background Daemon<br/>24/7 persistent]
+  end
+
+  subgraph "Cognition (Brain)"
+    GD[Goal Decomposer<br/>DAG sub-tasks]
+    EM[Episodic Memory<br/>experience replay]
+    TM[Theory of Mind<br/>user modeling]
+    MC[Metacognition<br/>strategy + confidence]
+  end
+
+  subgraph "Perception (Senses)"
+    ES[Environment Sensor<br/>FS/Git/process]
+    WS[Web Sentience<br/>crawl + monitor]
+  end
+
+  subgraph "Autonomy (Will)"
+    IE[Initiative Engine<br/>proactive actions]
+    FA[Financial Autonomy<br/>cost optimization]
+    SH[Self-Healer<br/>auto-recovery]
+    SA[Security Autopilot<br/>secret scanning]
+  end
+
+  subgraph "Swarm Intelligence"
+    HM[Hive Mind<br/>agent registry + teams]
+    ME[MCP Ecosystem<br/>server discovery]
+  end
+
+  subgraph "Execution"
+    FG[Full-Stack Generator<br/>spec → project]
+    DI[Database Intelligence<br/>queries + migrations]
+  end
+
+  subgraph "Self-Evolution"
+    SM[Self-Modifier<br/>own source patches]
+    CL[Continuous Learning<br/>corrections + patterns]
+  end
+
+  subgraph "Omega"
+    LP[Long-Term Planner<br/>multi-horizon goals]
+    CR[Causal Reasoner<br/>root cause + counterfactuals]
+    UC[Universal Tool Creator<br/>API→tool bindings]
+    PM[Plugin Marketplace<br/>install from npm/git]
+  end
+
+  subgraph "Legacy Systems"
     KG[Knowledge Graph<br/>Triplet Store]
     FTS[FTS5 Chat History]
-    Auto[Auto-Learning<br/>LLM Extraction]
-    Prune[TTL Pruning]
-  end
-
-  subgraph Operational Autonomy
+    AL[Auto-Learning<br/>LLM Extraction]
     WH[Webhook Listener]
-    SM[Service Health]
-    RL[Rate Limiter]
-    RM[Resource Monitor]
+    HL[Health Monitor]
+    DC[DAG Planner]
   end
 
-  CEO --> KG
-  CEO --> FTS
-  Auto --> KG
-  Prune --> KG
-  WH --> CEO
-  SM --> CEO
-  RL --> CEO
-  RM --> CEO
+  CEO --> EB
+  EB --> GD --> EM --> TM --> MC
+  EB --> ES --> WS
+  EB --> IE --> FA --> SH --> SA
+  EB --> HM --> ME
+  EB --> FG --> DI
+  EB --> SM --> CL
+  EB --> LP --> CR --> UC --> PM
+  CEO --> DC
+  EB --> KG --> FTS --> AL
+  EB --> WH --> HL
 ```
+
+---
+
+## 🧠 Ascension Engine
+
+custom-pi has evolved from a reactive coding assistant into a **proactive, self-aware, self-evolving AI system** with 26+ interconnected subsystems organized in 9 phases. All subsystems communicate through a quantum event bus and persist state in a unified property graph database.
+
+### Phase 0 — Foundation (Nervous System)
+
+| Subsystem | Description |
+|:---|:---|
+| **Event Bus** | Typed publish/subscribe mesh with 70+ event topics, filtering, history replay, middleware, and correlation IDs. Every subsystem communicates through events — no direct coupling. |
+| **State Graph** | SQLite-backed property graph with FTS5 indexing, recursive CTE path-finding, neighbor traversal, TTL-based pruning, and typed nodes/edges. Single store for all state. |
+| **Hybrid Search** | Four-strategy fusion: BM25 (sparse keyword), Dense cosine (semantic), Graph traversal (relational), Cross-encoder reranking (precision). Adaptive strategy selection per query. |
+| **Background Daemon** | 24/7 persistent background process with idle detection, scheduled tasks, state persistence, heartbeat monitoring, and a CLI (`daemon.js start\|stop\|status`). |
+
+### Phase 1 — Cognition (Brain)
+
+| Subsystem | Description |
+|:---|:---|
+| **Goal Decomposer** | LLM-powered goal decomposition into DAGs of sub-tasks with dependency resolution, priority scoring, token estimation, and adaptive re-planning on failure. |
+| **Episodic Memory** | Stores sessions, failures, and successes as episodes with emotional valence (success/failure signals). Auto-compression, experience replay, and **dream consolidation** (offline replay during idle, like human sleep). |
+| **Theory of Mind** | Maintains a dynamic user model: expertise level, emotional state, communication style, preferences, and trust calibration. Adapts verbosity, technical depth, and autonomy based on user state. |
+| **Metacognition** | Thinks about its own thinking: strategy selection (CoT, ToT, ReAct, Reflexion), confidence assessment, knowledge gap identification, and self-critique loops. |
+
+### Phase 2 — Perception (Senses)
+
+| Subsystem | Description |
+|:---|:---|
+| **Environment Sensor** | Monitors file system (recursive watchers), git state (branch, dirty files, CI), running processes, disk usage, memory pressure, network status, and system hardware. |
+| **Web Sentience** | Continuous web monitoring: trend detection, GitHub trending tracker, npm package discovery, personalized news aggregation, and deep research capability with scheduled crawling. |
+
+### Phase 3 — Autonomy (Will)
+
+| Subsystem | Description |
+|:---|:---|
+| **Initiative Engine** | Proactive opportunity detection with priority scoring (`Impact × Urgency × Confidence × UserReceptivity`). Curiosity-driven exploration, preventive maintenance, scheduled autonomy, and user receptivity tracking. |
+| **Financial Autonomy** | Token cost tracking per-provider, configurable budget alerts, optimal model selection (cheapest adequate model per task), cumulative spending dashboards, and cost forecasting. |
+| **Self-Healer** | Health checks on SQLite, disk, memory, and network. Circuit breaker with automatic recovery, failure count tracking, severity escalation, and auto-heal after 3+ consecutive failures. |
+| **Security Autopilot** | Scans files for secrets (AWS keys, GitHub tokens, private keys, JWT, connection strings, etc.) with severity scoring. Scheduled background audits, vault integrity checks, and security score calculation. |
+
+### Phase 4 — Swarm Intelligence (Collective)
+
+| Subsystem | Description |
+|:---|:---|
+| **Hive Mind** | Agent registry with dynamic team formation based on task requirements, consensus voting for critical decisions, and shared knowledge broadcasting across all agents. |
+| **MCP Ecosystem** | MCP server lifecycle management (install/start/stop/remove), tool/resource discovery, auto-discovery from npm/GitHub, and capability composition across servers. |
+
+### Phase 5 — Execution (Muscles)
+
+| Subsystem | Description |
+|:---|:---|
+| **Full-Stack Generator** | Generates complete projects from a spec: config files, database schema + migrations, JWT auth, REST API with Express/Fastify, React frontend, Docker setup, CI pipeline, and README. |
+| **Database Intelligence** | SQLite analyzer (schema, table stats, index usage), index suggestions, query EXPLAIN analysis, migration manager with rollback, and automated backup with gzip compression. |
+
+### Phase 6 — Self-Evolution (Metamorphosis)
+
+| Subsystem | Description |
+|:---|:---|
+| **Self-Modifier** | Proposes and applies patches to its own source code. Generates diffs, creates backups before modification, allows rollback, and validates changes with type-check testing. |
+| **Continuous Learning** | Learns from user corrections, tool call outcomes (success/failure patterns), and feedback. Extracts patterns from repeated behaviors, consolidates knowledge weekly, and adjusts behavior based on correction rate. |
+
+### Phase 7 — Omega (Advanced Cognition)
+
+| Subsystem | Description |
+|:---|:---|
+| **Long-Term Planner** | Multi-horizon goal planning (days/months/years), milestone tracking with status, risk forecasting, roadmap generation, and strategic advice delivery. |
+| **Causal Reasoner** | Causal link inference from event sequences, root cause analysis with path tracing, counterfactual evaluation ("what if we used X instead of Y?"), and causal pathfinding through the state graph. |
+| **Universal Tool Creator** | Generates tool bindings from API specs (OpenAPI) or README documentation. Persists custom tools to the tool registry, supports dynamic loading at runtime, and validates tool calls against generated schemas. |
+
+### Phase 8 — Transcendence
+
+| Subsystem | Description |
+|:---|:---|
+| **Plugin Marketplace** | Install plugins from npm, GitHub, or local paths. Hook system for lifecycle events (before/after tool calls, message processing). Sandboxed execution with resource limits. Registry with versioning and metadata. |
 
 ---
 
@@ -255,15 +364,40 @@ graph TD
 * `send_email`: Gmail via OAuth 2.0 Device Flow.
 * `plugin`: Dynamic JavaScript extension system.
 
+### Ascension (Autonomous)
+
+* `initialize_ascension` — Boot all 26+ subsystems: event bus, state graph, daemon, cognition, perception, autonomy, swarm, execution, evolution, omega.
+* `shutdown_ascension` — Gracefully stop all subsystems, persist state, close graph database.
+* `daemon start|stop|status` — Background daemon lifecycle management.
+
 ### Orchestration
 
 * `plan`: Multi-step checklist creation and tracking.
 * `session`: State checkpoint serialization.
 * `todo_write`: Structured task lists.
+* `decompose_goal` — Break a high-level goal into DAG of sub-tasks with dependency resolution.
+* `long_term_plan` — Generate multi-horizon roadmap with milestones and risk forecasts.
+* `causal_analyze` — Root cause analysis and counterfactual evaluation via causal graph.
+* `create_tool` — Generate a tool binding from an API spec or README documentation.
 
 ---
 
 ## Multi-Agent Swarms
+
+### Hive Mind (Dynamic Teams)
+
+Beyond static DAG configs, the **Hive Mind** forms teams on-the-fly based on task requirements:
+
+```
+Goal: "Deploy a full-stack app with monitoring"
+→ Team formed: [architect, backend-dev, frontend-dev, devops, security-reviewer]
+→ Communication: shared event bus + state graph
+→ Decision model: consensus for critical choices
+```
+
+All agents share the same episodic memory — when one learns, all benefit. Teams negotiate task handoff, share knowledge through the event bus, and vote on critical decisions.
+
+### DAG Swarms (Pipeline Mode)
 
 Configure parallel workflows with `~/.pi/agent/dag-config.yaml`:
 
@@ -328,6 +462,24 @@ The React dashboard provides real-time control over all features:
 
 ## Operational Autonomy
 
+### Proactive Initiative Engine
+
+No longer waits for commands. Scans for opportunities continuously:
+- **Curiosity-driven exploration** — explores the codebase during idle time, learns new patterns
+- **Opportunity detection** — "I noticed your test coverage dropped. Want me to write tests?"
+- **Preventive maintenance** — "Your disk is at 85%. I'll archive old sessions."
+- **Scheduled autonomy** — "Every Monday, generate the weekly report and email it."
+
+Scored as: `Initiative_Score = Impact × Urgency × Confidence × UserReceptivity`
+
+### Self-Healing System
+
+Regular health checks on all subsystems (SQLite, disk, memory, network). Circuit breaker with automatic recovery — if a component fails 3+ times consecutively, auto-heal is triggered. Failed checks are logged with severity escalation.
+
+### Security Autopilot
+
+Background file scanning for secret patterns (AWS keys, GitHub tokens, private keys, JWT, connection strings, etc.) with severity ratings (critical/high/medium/low). Computes a security score and alerts on critical findings.
+
 ### Webhook Ingestion & Anomaly Detection
 
 Runs a webhook listener at `POST /api/webhooks/:source` accepting events from Sentry, Datadog, GitHub Actions. Each event is normalized → LLM-parsed → persisted as a failure triplet → aggregated into incidents. 3+ related failures trigger automatic triage.
@@ -344,11 +496,34 @@ Circuit breaker pattern tracking `X-RateLimit-Remaining` headers. Below threshol
 
 Reads `/proc/stat` and `/proc/meminfo` every check cycle. Task priority scored as `Score = Importance / (Resources × Cost)`. At 90% CPU, parallel execution cost skyrockets — favors sequential.
 
+### Financial Autonomy
+
+Tracks token costs per-provider (OpenAI, Anthropic, Google, Ollama, LM Studio). Routes tasks to the cheapest adequate model automatically. Budget alerts when approaching limits. Cumulative spending dashboard with per-session breakdowns.
+
 ---
 
 ## Memory System
 
-### Knowledge Graph (Triplet Store)
+custom-pi has three memory tiers, each optimized for different recall patterns:
+
+### Tier 1: Episodic Memory (Experience)
+
+Stores entire sessions, failures, and successes as **episodes** with emotional valence. Features auto-compression (old episodes summarized into gist memories), experience replay (past episodes retrieved when facing similar situations), and **dream consolidation** — offline replay during idle time (like human sleep).
+
+### Tier 2: Hybrid Search (Knowledge)
+
+Four-strategy fusion engine:
+
+| Strategy | Type | Use Case |
+|:---|:---|:---|
+| **BM25** | Sparse (keyword) | Exact matching, code symbols, identifiers |
+| **Dense Cosine** | Dense (semantic) | Conceptual similarity, paraphrased queries |
+| **Graph Traversal** | Relational | "What connects to X?", path finding |
+| **Cross-encoder** | Precision reranking | Final relevance sorting |
+
+Strategy selection adapts per query — code queries favor BM25, conceptual queries favor dense search.
+
+### Tier 3: Knowledge Graph (Triplet Store)
 
 SQLite-backed: `(Subject) → [Predicate] → (Object)`. Each triplet has confidence score (0.0–1.0), entity type (tool, file, function, class, concept, dependency, setting, person), and TTL (7d–5y).
 
@@ -357,19 +532,13 @@ SQLite-backed: `(Subject) → [Predicate] → (Object)`. Each triplet has confid
 /triplets <entity>   — Drill into connections
 ```
 
-### TF-IDF Semantic Memory
-
-Vector memory using cosine similarity with recency decay:
-
-$$\text{Retrieved Weight} = \text{Cosine Similarity}(Q, M_i) \times e^{-\lambda t}$$
-
 ### Auto-Learning
 
-Every significant tool output is LLM-parsed for triplet extraction. Validated against TripletRecord schema, deduplicated, upserted into knowledge graph (min confidence: 0.4).
+Every significant tool output is LLM-parsed for triplet extraction. Validated against TripletRecord schema, deduplicated, upserted into knowledge graph (min confidence: 0.4). Additionally, the **Continuous Learning** subsystem learns from user corrections and tool call outcomes, extracting behavioral patterns with confidence scoring.
 
 ### Memory Pruning
 
-Daily cron: TTL-based staleness deletion + redundancy merging (near-duplicate triplets keep highest confidence). All actions logged to `prune-log.json`.
+Daily cron: TTL-based staleness deletion + redundancy merging (near-duplicate triplets keep highest confidence). All actions logged to `prune-log.json`. Episode compression runs during idle cycles.
 
 ---
 
@@ -377,27 +546,41 @@ Daily cron: TTL-based staleness deletion + redundancy merging (near-duplicate tr
 
 ```
 ~/.pi/agent/
-├── SOUL.md                 # Identity definition
-├── SYSTEM.md               # Core programming rules
-├── settings.json           # Model profiles
-├── models.json             # API keys and providers
-├── session-state.db        # SQLite (messages, triplets, health, rate limits)
-├── dag-config.yaml         # Swarm configurations
-├── mcp-servers.json        # MCP server definitions
-├── lsp-servers.json        # LSP server mappings
-├── assets/                 # Generated images
+├── SOUL.md                         # Identity definition
+├── SYSTEM.md                       # Core programming rules
+├── settings.json                   # Model profiles
+├── models.json                     # API keys and providers
+├── session-state.db                # SQLite (messages, triplets, health, rate limits)
+├── state-graph.db                  # Property graph database (Phase 0)
+├── dag-config.yaml                 # Swarm configurations
+├── mcp-servers.json                # MCP server definitions
+├── lsp-servers.json                # LSP server mappings
+├── assets/                         # Generated images
 │   ├── asset_171234_0.png
 │   ├── asset_171234_1.png
 │   └── asset_171234_2.png
 ├── .vault/
-│   ├── master.key          # 32-byte hex key
-│   └── vault.json          # Encrypted key-value store
-├── plugins/                # Dynamic script extensions
-├── checkpoints/            # Session snapshots
-├── costs/                  # Token usage logs
-├── work-products/          # Created/modified files ledger
-├── webhooks/               # Incoming event storage
-└── web/                    # Vite client distribution
+│   ├── master.key                  # 32-byte hex key
+│   └── vault.json                  # Encrypted key-value store
+├── extensions/subagents/src/       # Ascension engine modules
+│   ├── event-bus/                  # Phase 0 — typed pub/sub mesh
+│   ├── state-graph/                # Phase 0 — property graph
+│   ├── daemon/                     # Phase 0 — background daemon
+│   ├── cognition/                  # Phase 1 — goal decomposer, episodic memory, ToM, metacognition
+│   ├── perception/                 # Phase 2 — environment sensor, web sentience
+│   ├── autonomy/                   # Phase 3 — initiative, financial, self-healer, security
+│   ├── swarm/                      # Phase 4 — hive mind, MCP ecosystem
+│   ├── execution/                  # Phase 5 — full-stack generator, database intelligence
+│   ├── evolution/                  # Phase 6 — self-modifier, continuous learning
+│   ├── omega/                      # Phase 7 — long-term planner, causal reasoner, tool creator
+│   ├── plugin-system/              # Phase 8 — plugin marketplace
+│   └── ascension-bootstrap.ts      # Integration wiring for all subsystems
+├── plugins/                        # Dynamic script extensions + marketplace installs
+├── checkpoints/                    # Session snapshots
+├── costs/                          # Token usage logs
+├── work-products/                  # Created/modified files ledger
+├── webhooks/                       # Incoming event storage
+└── web/                            # Vite client distribution
 ```
 
 ---

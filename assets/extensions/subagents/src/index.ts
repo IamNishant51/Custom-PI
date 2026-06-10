@@ -43,6 +43,7 @@ import { harvestContext, suggestWorkflows, formatSuggestionsForPrompt } from "./
 import { discoverAgents, spawnAgentSession, closeSession, listSessions, getAgentLabel, saveCustomAgent, removeCustomAgent } from "./agent-manager";
 import { loadMcpServers, saveMcpServers, toggleMcpServer, addMcpServer, removeMcpServer, getEnabledMcpServers, buildMcpContextForPrompt } from "./mcp-catalog";
 import { createTeam, getTeams, getTeam, updateTeam, deleteTeam, addAgentToTeam, removeAgentFromTeam, updateAgentStatus, getTeamContext, type Team, type TeamAgent } from "./team-manager";
+import { initializeAscension, shutdownAscension } from "./ascension-bootstrap";
 
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 let appMode: "agent" | "plan" = "agent";
@@ -2680,6 +2681,19 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Initialize Ascension Subsystems (Phase 0–8)
+  // ─────────────────────────────────────────────────────────────────────────
+  try {
+    initializeAscension({
+      daemonEnabled: true,
+      autoDiscoverMcp: true,
+      healthCheckInterval: 300000,
+    });
+  } catch (e: any) {
+    logger.error(`[Ascension] Initialization failed: ${e.message}`);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Tool 1: List all subagents — with beautiful table rendering
   // ─────────────────────────────────────────────────────────────────────────
   pi.registerTool({
@@ -5105,6 +5119,8 @@ If nothing to report, return: {}`;
   // ─────────────────────────────────────────────────────────────────────────
   pi.on("session_shutdown", async (_event, ctx) => {
     logger.info("session_shutdown");
+    // Shutdown ascension subsystems (daemon, event bus, state graph, etc.)
+    try { shutdownAscension(); } catch (e: any) { logger.error(`[Ascension] shutdown error: ${e.message}`); }
     // Flush auto-learn triplets before shutdown
     try {
       const stored = await contextMonitor.flushAutoLearn();

@@ -131,6 +131,40 @@ const filesToCopy = [
   { src: 'extensions/subagents/src/tui/components/question-modal.ts', dest: 'extensions/subagents/src/tui/components/question-modal.ts' },
   { src: 'extensions/subagents/src/tui/components/toast.ts', dest: 'extensions/subagents/src/tui/components/toast.ts' },
   { src: 'extensions/subagents/src/tui/app/pulse-controller.ts', dest: 'extensions/subagents/src/tui/app/pulse-controller.ts' },
+  // ── Phase 0: Foundation ──────────────────────────────────
+  { src: 'extensions/subagents/src/event-bus/event-bus.ts', dest: 'extensions/subagents/src/event-bus/event-bus.ts' },
+  { src: 'extensions/subagents/src/state-graph/property-graph.ts', dest: 'extensions/subagents/src/state-graph/property-graph.ts' },
+  { src: 'extensions/subagents/src/state-graph/hybrid-search.ts', dest: 'extensions/subagents/src/state-graph/hybrid-search.ts' },
+  { src: 'extensions/subagents/src/daemon/daemon.ts', dest: 'extensions/subagents/src/daemon/daemon.ts' },
+  { src: 'extensions/subagents/src/ascension-bootstrap.ts', dest: 'extensions/subagents/src/ascension-bootstrap.ts' },
+  // ── Phase 1: Cognition ────────────────────────────────────
+  { src: 'extensions/subagents/src/cognition/goal-decomposer.ts', dest: 'extensions/subagents/src/cognition/goal-decomposer.ts' },
+  { src: 'extensions/subagents/src/cognition/episodic-memory.ts', dest: 'extensions/subagents/src/cognition/episodic-memory.ts' },
+  { src: 'extensions/subagents/src/cognition/theory-of-mind.ts', dest: 'extensions/subagents/src/cognition/theory-of-mind.ts' },
+  { src: 'extensions/subagents/src/cognition/metacognition.ts', dest: 'extensions/subagents/src/cognition/metacognition.ts' },
+  // ── Phase 2: Perception ───────────────────────────────────
+  { src: 'extensions/subagents/src/perception/environment-sensor.ts', dest: 'extensions/subagents/src/perception/environment-sensor.ts' },
+  { src: 'extensions/subagents/src/perception/web-sentience.ts', dest: 'extensions/subagents/src/perception/web-sentience.ts' },
+  // ── Phase 3: Autonomy ─────────────────────────────────────
+  { src: 'extensions/subagents/src/autonomy/initiative-engine.ts', dest: 'extensions/subagents/src/autonomy/initiative-engine.ts' },
+  { src: 'extensions/subagents/src/autonomy/financial-autonomy.ts', dest: 'extensions/subagents/src/autonomy/financial-autonomy.ts' },
+  { src: 'extensions/subagents/src/autonomy/self-healer.ts', dest: 'extensions/subagents/src/autonomy/self-healer.ts' },
+  { src: 'extensions/subagents/src/autonomy/security-autopilot.ts', dest: 'extensions/subagents/src/autonomy/security-autopilot.ts' },
+  // ── Phase 4: Swarm ────────────────────────────────────────
+  { src: 'extensions/subagents/src/swarm/hive-mind.ts', dest: 'extensions/subagents/src/swarm/hive-mind.ts' },
+  { src: 'extensions/subagents/src/swarm/mcp-ecosystem.ts', dest: 'extensions/subagents/src/swarm/mcp-ecosystem.ts' },
+  // ── Phase 5: Execution ────────────────────────────────────
+  { src: 'extensions/subagents/src/execution/fullstack-generator.ts', dest: 'extensions/subagents/src/execution/fullstack-generator.ts' },
+  { src: 'extensions/subagents/src/execution/database-intelligence.ts', dest: 'extensions/subagents/src/execution/database-intelligence.ts' },
+  // ── Phase 6: Evolution ────────────────────────────────────
+  { src: 'extensions/subagents/src/evolution/self-modifier.ts', dest: 'extensions/subagents/src/evolution/self-modifier.ts' },
+  { src: 'extensions/subagents/src/evolution/continuous-learning.ts', dest: 'extensions/subagents/src/evolution/continuous-learning.ts' },
+  // ── Phase 7: Omega ────────────────────────────────────────
+  { src: 'extensions/subagents/src/omega/long-term-planner.ts', dest: 'extensions/subagents/src/omega/long-term-planner.ts' },
+  { src: 'extensions/subagents/src/omega/causal-reasoner.ts', dest: 'extensions/subagents/src/omega/causal-reasoner.ts' },
+  { src: 'extensions/subagents/src/omega/universal-tool-creator.ts', dest: 'extensions/subagents/src/omega/universal-tool-creator.ts' },
+  // ── Phase 8: Plugin System ────────────────────────────────
+  { src: 'extensions/subagents/src/plugin-system/plugin-marketplace.ts', dest: 'extensions/subagents/src/plugin-system/plugin-marketplace.ts' },
 ];
 
 for (const f of filesToCopy) {
