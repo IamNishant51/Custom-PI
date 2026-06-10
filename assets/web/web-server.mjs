@@ -669,6 +669,7 @@ function trackCost(sessionId, agent, provider, modelId, inputTokens, outputToken
     timestamp: new Date().toISOString(),
   };
   fs.appendFileSync(COST_FILE, JSON.stringify(event) + "\n");
+  try { broadcast({ type: "cost", ...event }); } catch {}
   return event;
 }
 
@@ -691,6 +692,48 @@ function getCostSummary() {
   };
 }
 
+function getCostDetails() {
+  ensureCostDir();
+  if (!fs.existsSync(COST_FILE)) {
+    return { models: [], sessions: [], dailyTrend: [], totalCostUsd: 0, totalTokens: 0 };
+  }
+  const lines = fs.readFileSync(COST_FILE, "utf8").trim().split("\n").filter(Boolean);
+  const all = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const today = new Date().toISOString().slice(0, 10);
+  const days = [...new Set(all.map(e => e.timestamp.slice(0, 10)))].sort().slice(-30);
+
+  // Per-model aggregation
+  const modelMap = {};
+  for (const e of all) {
+    const key = e.modelId || "unknown";
+    if (!modelMap[key]) modelMap[key] = { modelId: key, provider: e.provider || "unknown", tokens: 0, costUsd: 0, calls: 0 };
+    modelMap[key].tokens += e.totalTokens || 0;
+    modelMap[key].costUsd += e.costUsd || 0;
+    modelMap[key].calls++;
+  }
+
+  // Daily trend
+  const dailyTrend = days.map(d => {
+    const dayEvents = all.filter(e => e.timestamp.startsWith(d));
+    return { date: d, tokens: dayEvents.reduce((s, e) => s + e.totalTokens, 0), costUsd: dayEvents.reduce((s, e) => s + e.costUsd, 0) };
+  });
+
+  // Recent sessions
+  const sessionIds = [...new Set(all.map(e => e.sessionId))].slice(-10).reverse();
+  const sessions = sessionIds.map(sid => {
+    const se = all.filter(e => e.sessionId === sid);
+    return { sessionId: sid, tokens: se.reduce((s, e) => s + e.totalTokens, 0), costUsd: se.reduce((s, e) => s + e.costUsd, 0), calls: se.length, lastActive: se[se.length - 1]?.timestamp || "" };
+  });
+
+  return {
+    models: Object.values(modelMap).sort((a, b) => b.costUsd - a.costUsd),
+    sessions,
+    dailyTrend,
+    totalCostUsd: all.reduce((s, e) => s + e.costUsd, 0),
+    totalTokens: all.reduce((s, e) => s + e.totalTokens, 0),
+  };
+}
+
 function getBudgetConfig() {
   try { return JSON.parse(fs.readFileSync(BUDGET_FILE, "utf8")); }
   catch {
@@ -702,6 +745,7 @@ function setBudgetConfig(config) {
   ensureCostDir();
   const current = getBudgetConfig();
   fs.writeFileSync(BUDGET_FILE, JSON.stringify({ ...current, ...config }, null, 2));
+  try { broadcast({ type: "budget", action: "config_updated", config: { ...current, ...config } }); } catch {}
 }
 
 // ── Work Products ──────────────────────────────────────────────────────────
@@ -5769,6 +5813,7 @@ async function main() {
   app.get("/api/budget/config", async () => getBudgetConfig());
   app.post("/api/budget/config", async (req) => { setBudgetConfig(req.body); return { ok: true }; });
   app.get("/api/budget/stats", async () => getCostSummary());
+  app.get("/api/budget/details", async () => getCostDetails());
 
   // Telemetry
   app.get("/api/telemetry", async () => {
