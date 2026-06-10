@@ -74,8 +74,11 @@ function parseReviewOutput(output: string): ReviewResult {
   return result;
 }
 
+// Minimal type for completeSimple model parameter
+type ReviewModel = Parameters<typeof completeSimple>[0];
+
 async function callSimple(
-  model: any,
+  model: ReviewModel,
   auth: AuthInfo,
   prompt: string,
   systemPrompt: string,
@@ -86,16 +89,15 @@ async function callSimple(
   }, {
     apiKey: auth.apiKey,
     headers: auth.headers,
-    reasoning: "off" as any,
   });
   return response.content
-    .filter((c: any) => c.type === "text")
-    .map((c: any) => c.text)
+    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+    .map(c => c.text)
     .join("\n");
 }
 
 export async function runMemoryReview(
-  model: any,
+  model: ReviewModel,
   auth: AuthInfo,
   conversation: string,
 ): Promise<ReviewResult> {
@@ -131,7 +133,7 @@ export async function runMemoryReview(
 }
 
 export async function runSkillReview(
-  model: any,
+  model: ReviewModel,
   auth: AuthInfo,
   conversation: string,
 ): Promise<ReviewResult> {
@@ -158,7 +160,7 @@ If no skills needed: NO_UPDATE`;
 }
 
 export async function runPreCompressionFlush(
-  model: any,
+  model: ReviewModel,
   auth: AuthInfo,
   conversation: string,
 ): Promise<void> {

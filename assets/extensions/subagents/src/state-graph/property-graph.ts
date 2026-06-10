@@ -107,18 +107,20 @@ export class PropertyGraph {
 
       CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
         label, properties,
+        content='nodes',
+        content_rowid='rowid',
         tokenize='trigram'
       );
 
       CREATE TRIGGER IF NOT EXISTS nodes_fts_ai AFTER INSERT ON nodes BEGIN
-        INSERT INTO nodes_fts(rowid, label, properties) VALUES (new.id, new.label, new.properties);
+        INSERT INTO nodes_fts(rowid, label, properties) VALUES (new.rowid, new.label, new.properties);
       END;
       CREATE TRIGGER IF NOT EXISTS nodes_fts_ad AFTER DELETE ON nodes BEGIN
-        INSERT INTO nodes_fts(nodes_fts, rowid) VALUES('delete', old.id);
+        INSERT INTO nodes_fts(nodes_fts, rowid) VALUES('delete', old.rowid);
       END;
       CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE ON nodes BEGIN
-        INSERT INTO nodes_fts(nodes_fts, rowid) VALUES('delete', old.id);
-        INSERT INTO nodes_fts(rowid, label, properties) VALUES (new.id, new.label, new.properties);
+        INSERT INTO nodes_fts(nodes_fts, rowid) VALUES('delete', old.rowid);
+        INSERT INTO nodes_fts(rowid, label, properties) VALUES (new.rowid, new.label, new.properties);
       END;
     `);
   }
@@ -262,7 +264,7 @@ export class PropertyGraph {
     if (!q) return [];
     const sql = `
       SELECT n.* FROM nodes_fts
-      JOIN nodes n ON nodes_fts.rowid = n.id
+      JOIN nodes n ON nodes_fts.rowid = n.rowid
       WHERE nodes_fts MATCH ?
       ORDER BY rank LIMIT ?
     `;

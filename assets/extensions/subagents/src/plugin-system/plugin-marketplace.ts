@@ -19,7 +19,7 @@ export interface PluginManifest {
 interface PluginTool {
   name: string;
   description: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
 }
 
 interface InstalledPlugin {
@@ -31,10 +31,13 @@ interface InstalledPlugin {
   loadErrors?: string[];
 }
 
+type SandboxContext = Record<string, unknown>;
+type HookFunction = (context: SandboxContext) => unknown;
+
 export class PluginMarketplace {
   private pluginsDir: string;
   private plugins: Map<string, InstalledPlugin> = new Map();
-  private sandboxVMs: Map<string, any> = new Map();
+  private sandboxVMs: Map<string, SandboxContext> = new Map();
 
   constructor() {
     this.pluginsDir = path.join(os.homedir(), ".pi", "agent", "plugins");
@@ -61,7 +64,12 @@ export class PluginMarketplace {
       if (fs.existsSync(plugin.path)) {
         fs.rmSync(plugin.path, { recursive: true, force: true });
       }
-    } catch {}
+    } catch (err) {
+      bus.emit(Topics.SYSTEM_WARNING, {
+        source: "plugin-marketplace",
+        message: `Failed to remove plugin path ${plugin.path}: ${err instanceof Error ? err.message : String(err)}`,
+      }, { source: "plugin-marketplace" });
+    }
     this.plugins.delete(name);
     this.sandboxVMs.delete(name);
     this.persistPlugins();
@@ -89,7 +97,7 @@ export class PluginMarketplace {
     return Array.from(this.plugins.values()).filter(p => p.enabled);
   }
 
-  callPluginHook(pluginName: string, hook: string, context: any): any {
+  callPluginHook(pluginName: string, hook: string, context: SandboxContext): unknown {
     const plugin = this.plugins.get(pluginName);
     if (!plugin || !plugin.enabled) return null;
     if (!plugin.manifest.hooks.includes(hook)) return null;
@@ -97,15 +105,15 @@ export class PluginMarketplace {
     try {
       const hookFn = this.loadPluginHook(plugin, hook);
       if (hookFn) return hookFn(context);
-    } catch (err: any) {
+    } catch (err) {
       plugin.loadErrors = plugin.loadErrors || [];
-      plugin.loadErrors.push(`Hook ${hook}: ${err.message}`);
+      plugin.loadErrors.push(`Hook ${hook}: ${err instanceof Error ? err.message : String(err)}`);
     }
     return null;
   }
 
-  callHookOnAll(hook: string, context: any): any[] {
-    const results: any[] = [];
+  callHookOnAll(hook: string, context: SandboxContext): unknown[] {
+    const results: unknown[] = [];
     for (const [, plugin] of this.plugins) {
       if (plugin.enabled) {
         const result = this.callPluginHook(plugin.manifest.name, hook, context);
@@ -166,7 +174,7 @@ export class PluginMarketplace {
     return plugin;
   }
 
-  private loadPluginHook(plugin: InstalledPlugin, hook: string): ((context: any) => any) | null {
+  private loadPluginHook(plugin: InstalledPlugin, hook: string): HookFunction | null {
     try {
       const entryPath = path.join(plugin.path, plugin.manifest.entry);
       if (!fs.existsSync(entryPath)) return null;
@@ -176,7 +184,7 @@ export class PluginMarketplace {
 
       const code = fs.readFileSync(entryPath, "utf8");
       const fn = new Function("context", `"use strict";\n${code}\nreturn exports["${hook}"](context);`);
-      return (context: any) => fn(context);
+      return (context: SandboxContext) => fn(context);
     } catch {
       return null;
     }
@@ -216,7 +224,12 @@ export class PluginMarketplace {
           this.plugins.set(plugin.manifest.name, plugin);
         }
       }
-    } catch {}
+    } catch (err) {
+      bus.emit(Topics.SYSTEM_WARNING, {
+        source: "plugin-marketplace",
+        message: `Failed to load installed plugins: ${err instanceof Error ? err.message : String(err)}`,
+      }, { source: "plugin-marketplace" });
+    }
   }
 }
 

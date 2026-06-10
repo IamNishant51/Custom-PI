@@ -58,11 +58,11 @@ export async function probeMcpServer(serverId: string): Promise<HealthEntry> {
     };
     healthCache.set(serverId, entry);
     return entry;
-  } catch (e: any) {
+  } catch (e) {
     const entry: HealthEntry = {
       id: serverId, label, type: "mcp",
       healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
-      error: e.message?.slice(0, 200) || String(e),
+      error: e instanceof Error ? e.message.slice(0, 200) : String(e),
     };
     healthCache.set(serverId, entry);
     return entry;
@@ -128,11 +128,11 @@ export async function probeProvider(provider: string, apiKey?: string): Promise<
     };
     healthCache.set(`provider:${provider}`, entry);
     return entry;
-  } catch (e: any) {
+  } catch (e) {
     const entry: HealthEntry = {
       id: `provider:${provider}`, label, type: "provider",
       healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
-      error: e.message?.slice(0, 200) || String(e),
+      error: e instanceof Error ? e.message.slice(0, 200) : String(e),
     };
     healthCache.set(`provider:${provider}`, entry);
     return entry;
@@ -228,7 +228,7 @@ export function loadMcpServers(): McpServerConfig[] {
     }
   }
     }
-  } catch { logger.warn("Failed to load MCP server config"); }
+  } catch (err) { logger.warn("Failed to load MCP server config", { error: String(err) }); }
   const servers = Array.from(serverMap.values());
   cachedServers = servers;
   return servers;
@@ -282,16 +282,16 @@ export function discoverMcpTools(serverId: string): McpToolDefinition[] {
         try {
           const parsed = JSON.parse(result.stdout);
           if (Array.isArray(parsed)) {
-            return parsed.map((t: any) => ({
+            return parsed.map((t: Record<string, unknown>) => ({
               serverId,
-              name: t.name || t,
-              description: t.description || "",
-              inputSchema: t.inputSchema || {},
+              name: (t.name as string) || String(t),
+              description: (t.description as string) || "",
+              inputSchema: (t.inputSchema as Record<string, unknown>) ?? ({} as Record<string, unknown>),
             }));
           }
-        } catch { logger.warn("Failed to parse MCP tool discovery output"); }
+        } catch (err) { logger.warn("Failed to parse MCP tool discovery output", { error: String(err) }); }
       }
-    } catch { logger.warn("Failed to discover MCP tools", { serverId }); }
+    } catch (err) { logger.warn("Failed to discover MCP tools", { serverId, error: String(err) }); }
   }
   return [];
 }

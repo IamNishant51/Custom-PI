@@ -208,12 +208,12 @@ export class SelfHealer {
             bus.emit(Topics.HEALTH_RECOVER, { component: check.name }, { source: "self-healer" });
           }
         }
-      } catch (err: any) {
+      } catch (err) {
         reports.push({
           name: check.name,
           status: "unknown",
           severity: check.severity,
-          details: `Check failed: ${err.message}`,
+          details: `Check failed: ${err instanceof Error ? err.message : String(err)}`,
           lastOK: 0, lastFail: Date.now(), failureCount: 1,
         });
       }
@@ -269,10 +269,10 @@ export class SelfHealer {
           error: `Failed to auto-recover ${component}. Manual intervention required.`,
         }, { source: "self-healer" });
       }
-    } catch (err: any) {
+    } catch (err) {
       bus.emit(Topics.SYSTEM_ERROR, {
         source: "self-healer",
-        error: `Auto-recovery of ${component} threw: ${err.message}`,
+        error: `Auto-recovery of ${component} threw: ${err instanceof Error ? err.message : String(err)}`,
       }, { source: "self-healer" });
     }
 

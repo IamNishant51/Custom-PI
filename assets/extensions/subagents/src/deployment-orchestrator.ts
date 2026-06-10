@@ -66,21 +66,21 @@ function saveDeployment(state: DeploymentState): void {
 function loadDeployments(): Map<string, DeploymentState> {
   const map = new Map<string, DeploymentState>();
   try {
-    const rows = getDb().prepare(`SELECT * FROM deployments ORDER BY created_at DESC`).all() as any[];
+    const rows = getDb().prepare(`SELECT * FROM deployments ORDER BY created_at DESC`).all() as Record<string, unknown>[];
     for (const row of rows) {
-      map.set(row.id, {
-        id: row.id,
-        prUrl: row.pr_url || undefined,
-        branch: row.branch,
-        target: row.target,
-        stages: JSON.parse(row.stages),
-        currentStage: row.current_stage,
-        rollbackSha: row.rollback_sha || undefined,
-        stableSha: row.stable_sha || undefined,
-        createdAt: row.created_at,
+      map.set(row.id as string, {
+        id: row.id as string,
+        prUrl: (row.pr_url as string) || undefined,
+        branch: row.branch as string,
+        target: row.target as string,
+        stages: JSON.parse(row.stages as string),
+        currentStage: row.current_stage as number,
+        rollbackSha: (row.rollback_sha as string) || undefined,
+        stableSha: (row.stable_sha as string) || undefined,
+        createdAt: row.created_at as number,
       });
     }
-  } catch { /* ignore */ }
+  } catch { /* Database read failed — non-critical */ }
   return map;
 }
 
@@ -161,8 +161,8 @@ export function executeRollback(deploymentId: string, workDir: string): { ok: bo
     const checkoutOut = execFileSync("git", ["checkout", safeSha], { cwd: workDir, encoding: "utf8", timeout: 15000 });
     state.stages.forEach(s => { if (s.status === "running") s.status = "pending"; });
     return { ok: true, output: `${stashOut.trim()}\n${checkoutOut.trim()}` };
-  } catch (e: any) {
-    return { ok: false, output: e.message || String(e) };
+  } catch (e) {
+    return { ok: false, output: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -172,7 +172,7 @@ export function runVerificationScript(scriptPath: string): { passed: boolean; ou
   try {
     const output = execFileSync("bash", [resolvedPath], { encoding: "utf8", timeout: 60000 });
     return { passed: true, output: output.trim() };
-  } catch (e: any) {
-    return { passed: false, output: e.message || String(e) };
+  } catch (e) {
+    return { passed: false, output: e instanceof Error ? e.message : String(e) };
   }
 }
