@@ -6028,17 +6028,18 @@ export async function createApp() {
       prefix: "/",
       wildcard: false,
     });
-    // SPA fallback
-    app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith("/api") || req.url.startsWith("/ws")) return reply.callNotFound();
-      const indexPath = path.join(CLIENT_DIR, "index.html");
-      if (fs.existsSync(indexPath)) {
-        reply.type("text/html").send(fs.readFileSync(indexPath, "utf8"));
-      } else {
-        reply.status(404).send("Not found");
-      }
-    });
   }
+
+  // SPA fallback — always registered so API 404s are not swallowed
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith("/api") || req.url.startsWith("/ws")) return reply.callNotFound();
+    const indexPath = path.join(CLIENT_DIR, "index.html");
+    if (fs.existsSync(indexPath)) {
+      reply.type("text/html").send(fs.readFileSync(indexPath, "utf8"));
+    } else {
+      reply.status(404).send("Not found");
+    }
+  });
 
   // ── API Routes ─────────────────────────────────────────────────────────
 
