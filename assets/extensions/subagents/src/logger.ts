@@ -9,9 +9,10 @@ const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 type LogLevel = keyof typeof LEVELS;
 const currentLevel: LogLevel = (process.env.PI_LOG_LEVEL as LogLevel) || "info";
 
-// Async write queue — non-blocking, flushed in order
+// Async write queue — non-blocking, flushed in order, capped at 1000 entries
 const writeQueue: string[] = [];
 let flushing = false;
+const MAX_QUEUE_SIZE = 1000;
 
 function ensureLogDir(): void {
   if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -34,6 +35,9 @@ async function flushQueue(): Promise<void> {
 }
 
 function enqueue(line: string): void {
+  if (writeQueue.length >= MAX_QUEUE_SIZE) {
+    writeQueue.shift();
+  }
   writeQueue.push(line + "\n");
   if (writeQueue.length === 1) {
     setImmediate(() => { flushQueue().catch(() => {}); });

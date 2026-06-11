@@ -12,6 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 
 const PORT = parseInt(process.env.SOCIAL_BRIDGE_PORT || "9877", 10);
 const PI_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -593,9 +594,18 @@ function parseBody(req) {
 function json(res, s, d) { res.writeHead(s, { "Content-Type": "application/json" }); res.end(JSON.stringify(d)); }
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const BRIDGE_KEY = process.env.BRIDGE_AUTH_KEY || process.env.WEB_API_KEY;
+  if (BRIDGE_KEY) {
+    const key = req.headers["x-api-key"];
+    if (!key || key.length !== BRIDGE_KEY.length || !crypto.timingSafeEqual(Buffer.from(key), Buffer.from(BRIDGE_KEY))) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized" }));
+      return;
+    }
+  }
+  res.setHeader("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "http://localhost:4322");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
   const url = new URL(req.url, `http://localhost:${PORT}`);

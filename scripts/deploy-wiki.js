@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
 
 const COLORS = {
@@ -47,11 +48,16 @@ if (fs.existsSync(WIKI_DIR)) {
   fs.rmSync(WIKI_DIR, { recursive: true, force: true });
 }
 
-// 2. Clone the Wiki Repository
-const wikiRepoUrl = `https://x-token-auth:${token}@github.com/IamNishant51/Custom-PI.wiki.git`;
+// 2. Clone the Wiki Repository using GIT_ASKPASS to avoid token in URL
+const gitAskpassPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'git-askpass-')), 'askpass.sh');
+const gitAskpassScript = `#!/bin/sh\necho "${token}"`;
+fs.writeFileSync(gitAskpassPath, gitAskpassScript, { mode: 0o500 });
 log('cyan', '📦 Cloning the GitHub Wiki repository...');
 try {
-  execSync(`git clone ${wikiRepoUrl} "${WIKI_DIR}"`, { stdio: 'pipe' });
+  execSync(`git clone https://github.com/IamNishant51/Custom-PI.wiki.git "${WIKI_DIR}"`, {
+    stdio: 'pipe',
+    env: { ...process.env, GIT_ASKPASS: gitAskpassPath, GIT_USERNAME: 'x-token-auth', GIT_PASSWORD: token }
+  });
   log('green', '✅ Wiki repository cloned successfully.');
 } catch (e) {
   log('red', '❌ Error: Failed to clone Wiki repository.');

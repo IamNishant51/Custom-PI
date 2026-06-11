@@ -35,10 +35,13 @@ interface InstalledPlugin {
 type SandboxContext = Record<string, unknown>;
 type HookFunction = (context: SandboxContext) => unknown;
 
+const ALLOWED_HOOK_NAMES = new Set(["onLoad", "onUnload", "onMessage", "onToolCall", "onStartup", "onShutdown"]);
+const NPM_PACKAGE_RE = /^(?:@[a-z0-9][a-z0-9_-]*\/)?[a-z0-9][a-z0-9_-]*$/;
+const GIT_URL_RE = /^(?:https?:\/\/|git@)[a-zA-Z0-9][a-zA-Z0-9._~:/%-]+\.git$/;
+
 export class PluginMarketplace {
   private pluginsDir: string;
   private plugins: Map<string, InstalledPlugin> = new Map();
-  private sandboxVMs: Map<string, SandboxContext> = new Map();
 
   constructor() {
     this.pluginsDir = path.join(os.homedir(), ".pi", "agent", "plugins");
@@ -72,7 +75,6 @@ export class PluginMarketplace {
       }, { source: "plugin-marketplace" });
     }
     this.plugins.delete(name);
-    this.sandboxVMs.delete(name);
     this.persistPlugins();
   }
 
@@ -140,10 +142,20 @@ export class PluginMarketplace {
     const pluginDir = path.join(this.pluginsDir, pluginName);
 
     if (type === "npm") {
-      await this.execCommand(`npm install ${source} --prefix ${this.pluginsDir} --no-audit --no-fund`);
+      if (!NPM_PACKAGE_RE.test(source)) {
+        throw new Error(`Invalid npm package name: ${source}`);
+      }
+      await this.execSpawn("npm", ["install", source, "--prefix", this.pluginsDir, "--no-audit", "--no-fund"]);
     } else if (type === "git") {
-      await this.execCommand(`git clone ${source} "${pluginDir}"`);
+      if (!GIT_URL_RE.test(source)) {
+        throw new Error(`Invalid git URL: ${source}`);
+      }
+      await this.execSpawn("git", ["clone", source, pluginDir]);
     } else if (type === "local") {
+      const resolved = path.resolve(source);
+      if (!resolved.startsWith(this.pluginsDir) && !resolved.startsWith(os.homedir())) {
+        throw new Error(`Local plugin path must be within home directory: ${source}`);
+      }
       if (fs.existsSync(source)) {
         fs.cpSync(source, pluginDir, { recursive: true });
       }
@@ -177,38 +189,39 @@ export class PluginMarketplace {
 
   private loadPluginHook(plugin: InstalledPlugin, hook: string): HookFunction | null {
     try {
+      if (!ALLOWED_HOOK_NAMES.has(hook)) {
+        bus.emit(Topics.SYSTEM_WARNING, {
+          source: "plugin-marketplace",
+          message: `Blocked disallowed hook name: ${hook}`,
+        }, { source: "plugin-marketplace" });
+        return null;
+      }
+
       const entryPath = path.join(plugin.path, plugin.manifest.entry);
       if (!fs.existsSync(entryPath)) return null;
 
-      const pluginName = plugin.manifest.name;
-      let sandbox = this.sandboxVMs.get(pluginName);
-      if (!sandbox) {
-        sandbox = vm.createContext({
-          exports: {},
-          console: { log: console.log, warn: console.warn, error: console.error },
-          setTimeout,
-          clearTimeout,
-        });
-        this.sandboxVMs.set(pluginName, sandbox);
-      }
-
       const code = fs.readFileSync(entryPath, "utf8");
-      const script = new vm.Script(
-        `"use strict";\n${code}\n;exports["${hook}"](context);`,
-        { filename: entryPath }
-      );
 
       return (context: SandboxContext) => {
-        sandbox.exports = {};
-        sandbox.context = context;
         try {
+          const sandbox = vm.createContext(Object.create(null));
+          sandbox.exports = {};
+          sandbox.console = { log: console.log, warn: console.warn, error: console.error };
+          sandbox.setTimeout = setTimeout;
+          sandbox.clearTimeout = clearTimeout;
+          sandbox.context = context;
+
+          const script = new vm.Script(
+            `"use strict";\n${code}\n;exports["${hook}"](context);`,
+            { filename: entryPath }
+          );
           script.runInContext(sandbox, { timeout: 5000, breakOnSigint: true });
+          return sandbox.exports;
         } catch (e) {
           plugin.loadErrors = plugin.loadErrors || [];
           plugin.loadErrors.push(`Hook ${hook} execution: ${e instanceof Error ? e.message : String(e)}`);
           return null;
         }
-        return sandbox.exports;
       };
     } catch (err) {
       bus.emit(Topics.SYSTEM_WARNING, {
@@ -219,13 +232,19 @@ export class PluginMarketplace {
     }
   }
 
-  private execCommand(cmd: string): Promise<void> {
+  private execSpawn(command: string, args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn("sh", ["-c", cmd], {
+      const child = spawn(command, args, {
         stdio: "pipe",
         timeout: 60000,
+        shell: false,
       });
-      child.on("close", (code) => code === 0 ? resolve() : reject(new Error(`Command exited with ${code}`)));
+      let stderr = "";
+      child.stderr?.on("data", (d) => { stderr += d.toString(); });
+      child.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Command exited with ${code}: ${stderr.slice(0, 200)}`));
+      });
       child.on("error", reject);
     });
   }

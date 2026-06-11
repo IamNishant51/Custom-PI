@@ -12,6 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -103,10 +104,19 @@ async function sendEmail(to, subject, body, isHtml, attachments) {
   }
 
   if (attachments && attachments.length > 0) {
-    mailOptions.attachments = attachments.map(a => ({
-      filename: a.filename || path.basename(a.path),
-      path: a.path,
-    }));
+    const allowedDirs = [os.homedir(), process.cwd()];
+    mailOptions.attachments = attachments.map(a => {
+      if (a.path) {
+        const resolved = path.resolve(a.path);
+        const isAllowed = allowedDirs.some(dir => resolved.startsWith(dir));
+        if (!isAllowed) throw new Error(`Attachment path must be within home or working directory: ${a.filename || a.path}`);
+      }
+      return {
+        filename: a.filename || (a.path ? path.basename(a.path) : "attachment"),
+        path: a.path,
+        content: a.content,
+      };
+    });
   }
 
   try {
@@ -184,9 +194,18 @@ function jsonResponse(res, status, data) {
 }
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const BRIDGE_KEY = process.env.BRIDGE_AUTH_KEY || process.env.WEB_API_KEY;
+  if (BRIDGE_KEY) {
+    const key = req.headers["x-api-key"];
+    if (!key || key.length !== BRIDGE_KEY.length || !crypto.timingSafeEqual(Buffer.from(key), Buffer.from(BRIDGE_KEY))) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized — provide x-api-key header" }));
+      return;
+    }
+  }
+  res.setHeader("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "http://localhost:4322");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
   await loadDeps();

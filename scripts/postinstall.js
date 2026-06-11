@@ -7,11 +7,5 @@ if (fs.existsSync(DIST)) {
   process.exit(0);
 }
 
-console.log('\x1b[36mBuilding web client...\x1b[0m');
-const CLIENT_DIR = path.join(__dirname, '..', 'assets', 'web', 'client');
-try {
-  execSync('npm install', { cwd: CLIENT_DIR, stdio: 'inherit' });
-  execSync('npm run build', { cwd: CLIENT_DIR, stdio: 'inherit' });
-} catch {
-  console.log('\x1b[33mWeb client build skipped (not critical).\x1b[0m');
-}
+console.log('\x1b[36mWeb client dist not found. To build it, run:\x1b[0m');
+console.log('\x1b[36m  cd assets/web/client && npm install && npm run build\x1b[0m');

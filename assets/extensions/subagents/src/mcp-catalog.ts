@@ -9,6 +9,13 @@ const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
 const MCP_CONFIG_PATH = path.join(CONFIG_DIR, "mcp-servers.json");
 const HEALTH_CACHE_TTL = 300_000; // 5 min
 
+const ALLOWED_MCP_COMMANDS = new Set(["npx", "node", "uvx", "python3", "python", "deno", "bun"]);
+
+function isMcpCommandAllowed(command: string): boolean {
+  const cmdName = command.trim().split(/\s+/)[0];
+  return ALLOWED_MCP_COMMANDS.has(cmdName) || command.startsWith("/") || command.startsWith(".");
+}
+
 let cachedServers: McpServerConfig[] | null = null;
 
 // ── Health Registry ─────────────────────────────────────────────────────────
@@ -24,6 +31,15 @@ export interface HealthEntry {
 }
 
 const healthCache = new Map<string, HealthEntry>();
+const HEALTH_CACHE_MAX = 100;
+
+function setHealthEntry(id: string, entry: HealthEntry): void {
+  if (healthCache.size >= HEALTH_CACHE_MAX) {
+    const oldest = healthCache.keys().next().value;
+    if (oldest) healthCache.delete(oldest);
+  }
+  setHealthEntry(id, entry);
+}
 
 export async function probeMcpServer(serverId: string): Promise<HealthEntry> {
   const servers = loadMcpServers();
@@ -37,11 +53,20 @@ export async function probeMcpServer(serverId: string): Promise<HealthEntry> {
       healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
       error: server ? "Server disabled or invalid transport" : "Server not found",
     };
-    healthCache.set(serverId, entry);
+    setHealthEntry(serverId, entry);
     return entry;
   }
 
   try {
+    if (!isMcpCommandAllowed(server.command)) {
+      const entry: HealthEntry = {
+        id: serverId, label, type: "mcp",
+        healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
+        error: "Command not allowed",
+      };
+      setHealthEntry(serverId, entry);
+      return entry;
+    }
     const result = spawnSync(server.command, [...(server.args || []), "--list-tools"], {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 10_000,
@@ -56,7 +81,7 @@ export async function probeMcpServer(serverId: string): Promise<HealthEntry> {
       latencyMs: Date.now() - start,
       error: ok ? undefined : `exit ${result.status}: ${(result.stderr || "").slice(0, 200)}`,
     };
-    healthCache.set(serverId, entry);
+    setHealthEntry(serverId, entry);
     return entry;
   } catch (e) {
     const entry: HealthEntry = {
@@ -64,7 +89,7 @@ export async function probeMcpServer(serverId: string): Promise<HealthEntry> {
       healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
       error: e instanceof Error ? e.message.slice(0, 200) : String(e),
     };
-    healthCache.set(serverId, entry);
+    setHealthEntry(serverId, entry);
     return entry;
   }
 }
@@ -79,7 +104,7 @@ export async function probeProvider(provider: string, apiKey?: string): Promise<
       healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
       error: "No API key configured",
     };
-    healthCache.set(`provider:${provider}`, entry);
+    setHealthEntry(`provider:${provider}`, entry);
     return entry;
   }
 
@@ -126,7 +151,7 @@ export async function probeProvider(provider: string, apiKey?: string): Promise<
       healthy, lastChecked: Date.now(), latencyMs: Date.now() - start,
       error,
     };
-    healthCache.set(`provider:${provider}`, entry);
+    setHealthEntry(`provider:${provider}`, entry);
     return entry;
   } catch (e) {
     const entry: HealthEntry = {
@@ -134,7 +159,7 @@ export async function probeProvider(provider: string, apiKey?: string): Promise<
       healthy: false, lastChecked: Date.now(), latencyMs: Date.now() - start,
       error: e instanceof Error ? e.message.slice(0, 200) : String(e),
     };
-    healthCache.set(`provider:${provider}`, entry);
+    setHealthEntry(`provider:${provider}`, entry);
     return entry;
   }
 }
@@ -285,6 +310,10 @@ export function discoverMcpTools(serverId: string): McpToolDefinition[] {
   if (!server || !server.enabled) return [];
 
   if (server.transport === "stdio" && server.command) {
+    if (!isMcpCommandAllowed(server.command)) {
+      logger.warn("MCP command not allowed", { serverId, command: server.command });
+      return [];
+    }
     try {
       const result = spawnSync(server.command, [...(server.args || []), "--list-tools"], {
         stdio: ["pipe", "pipe", "pipe"],

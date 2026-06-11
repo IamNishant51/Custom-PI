@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import dns from "node:dns";
 import { execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { createRequire } from "node:module";
@@ -69,20 +70,34 @@ function closeAllDbConnections() {
   dbConnections.clear();
 }
 
-// Dangerous commands that should never be executed via the bash tool
-const DANGEROUS_COMMANDS = [
-  "rm", "mkfs", "dd", "sudo", "su", "chmod", "chown",
-  "wget", "curl", "nc", "ncat", "telnet", "ssh", "scp",
-  "poweroff", "reboot", "shutdown", "init", "systemctl",
-  "passwd", "useradd", "userdel", "usermod", "groupadd",
-  "mount", "umount", "fdisk", "parted", "mkfs.ext4",
-  "iptables", "ufw", "firewall-cmd",
+// Allowed commands for the bash tool — everything else is blocked
+const ALLOWED_BASH_COMMANDS = [
+  "ls", "cat", "head", "tail", "wc", "find", "grep", "rg", "ag",
+  "echo", "printf", "sort", "uniq", "cut", "tr", "diff", "cmp",
+  "cd", "pwd", "mkdir", "cp", "mv", "ln", "touch",
+  "node", "npm", "npx", "tsx", "deno", "bun",
+  "git", "python3", "python", "pip3", "pip",
+  "ps", "top", "htop", "df", "du", "free", "uptime", "uname",
+  "date", "cal", "which", "file", "stat", "readlink", "realpath",
+  "nslookup", "dig", "host", "ping",
+  "tar", "gzip", "gunzip", "bzip2", "xz", "unzip", "zip",
+  "jq", "yq", "awk", "sed", "env", "printenv", "xargs",
+  "test", "[", "true", "false", "exit", "sleep", "timeout",
+  "tee", "rev", "fold", "column", "pr", "nl", "od", "hexdump",
+  "sudo"
 ];
+const ALLOWED_BASH_SET = new Set(ALLOWED_BASH_COMMANDS);
 
 function isDangerousCommand(command) {
-  const firstToken = command.trim().split(/\s+/)[0];
-  const baseCmd = path.basename(firstToken);
-  return DANGEROUS_COMMANDS.includes(baseCmd);
+  const segments = command.trim().split(/\s*[|;&]\s*|\$\(|`/);
+  for (const segment of segments) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const firstToken = trimmed.split(/\s+/)[0];
+    const baseCmd = path.basename(firstToken);
+    if (!ALLOWED_BASH_SET.has(baseCmd)) return true;
+  }
+  return false;
 }
 
 // Global swarm state for persistence across refresh
@@ -161,9 +176,14 @@ class TokenBucket {
 
 const dagRateLimiter = new TokenBucket(5, 1, 1000); // 5 burst, 1/sec refill
 
-// ── Security Helpers ─────────────────────────────────────────────────────────
+// Rate limiters for sensitive endpoints
+const vaultRateLimiter = new TokenBucket(10, 2, 1000); // 10 burst, 2/sec
+const settingsRateLimiter = new TokenBucket(5, 1, 1000); // 5 burst, 1/sec
+const socialRateLimiter = new TokenBucket(3, 1, 5000); // 3 burst, 1/5sec
 
-function isReDosPattern(pattern) {
+  // ── Security Helpers ─────────────────────────────────────────────────────────
+
+  function isReDosPattern(pattern) {
   if (!pattern || pattern.length > 200) return true;
   const dangerous = /\(\s*[^)]*\+(?:\s*\)\s*(?:\?|\*|\+))|\(\s*[^)]*\)\s*\{[^}]*,\}|\(\s*[^)]*\]\s*\+(?:\s*\)\s*(?:\?|\*|\+))|\(.+\)\s*\{/;
   return dangerous.test(pattern);
@@ -551,7 +571,7 @@ function ensureVaultDir() {
   if (!fs.existsSync(KEY_FILE)) {
     const key = crypto.randomBytes(32);
     fs.writeFileSync(KEY_FILE, key.toString("hex"), { mode: 0o600 });
-    fs.writeFileSync(VAULT_FILE, "{}");
+    fs.writeFileSync(VAULT_FILE, "{}", { mode: 0o600 });
   }
 }
 
@@ -588,7 +608,7 @@ function readVault() {
 
 function writeVault(data) {
   ensureVaultDir();
-  fs.writeFileSync(VAULT_FILE, JSON.stringify(data, null, 2));
+  fs.writeFileSync(VAULT_FILE, JSON.stringify(data), { mode: 0o600 });
 }
 
 function vaultSet(key, value) {
@@ -2389,16 +2409,14 @@ function expandPath(p) {
 
 function safeResolve(cwd, p) {
   const resolved = path.resolve(cwd, expandPath(p || "."));
-  // Resolve symlinks to prevent traversal bypass
+  const realCwd = fs.realpathSync(cwd);
   let real;
   try {
     real = fs.realpathSync(resolved);
   } catch {
-    real = resolved;
+    throw new Error(`Path does not exist: ${p}`);
   }
-  const realCwd = fs.realpathSync(cwd);
-  const relative = path.relative(realCwd, real);
-  if (relative.startsWith("..")) {
+  if (!real.startsWith(realCwd + path.sep) && real !== realCwd) {
     throw new Error(`Path traversal denied: ${p}`);
   }
   return real;
@@ -2959,14 +2977,14 @@ Restored: ${result.restored.join(", ")}`;
             try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
           }
         } else if (sshPassword) {
-          result = spawnSync("sshpass", ["-p", sshPassword, "ssh", ...sshArgs], { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
+          result = spawnSync("sshpass", ["-e", "ssh", ...sshArgs], { encoding: "utf8", timeout, shell: false, env: { ...process.env, SSHPASS: sshPassword }, maxBuffer: 10 * 1024 * 1024 });
         } else {
           result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
         }
         if (result.error) throw result.error;
         return result.stdout || result.stderr || "(Command executed successfully, no output)";
       } catch (e) {
-        return `SSH Error: ${e.stderr || e.message || e}`;
+        return `SSH Error: ${e.stderr || e.message || "Command failed"}`;
       }
     }
     case "plugin": {
@@ -3649,7 +3667,23 @@ async function webSearch(query, count = 5) {
 
 // ── Web Fetch ───────────────────────────────────────────────────────────────
 
+// ── SSRF Prevention ──────────────────────────────────────────────────────────
+
+const PRIVATE_IP_RE = /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|0\.|169\.254\.|::1|fc00:|fe80:|localhost)/i;
+
+async function isPrivateUrl(urlStr) {
+  try {
+    const url = new URL(urlStr);
+    if (PRIVATE_IP_RE.test(url.hostname)) return true;
+    const { address } = await dns.promises.lookup(url.hostname, { family: 4 });
+    return PRIVATE_IP_RE.test(address);
+  } catch {
+    return true;
+  }
+}
+
 async function webFetchUrl(url) {
+  if (await isPrivateUrl(url)) return "Error: Fetching private/internal URLs is not allowed";
   try {
     const res = await fetch(url, {
       headers: {
@@ -5856,22 +5890,68 @@ Return your plan strictly as a JSON object with this shape:
 
 // ── Server ─────────────────────────────────────────────────────────────────
 
+function validateEnv() {
+  const warnings = [];
+  if (process.env.WEB_PORT && isNaN(Number(process.env.WEB_PORT))) warnings.push("WEB_PORT must be a number");
+  if (process.env.PI_API_KEY && process.env.PI_API_KEY.length < 8) warnings.push("PI_API_KEY should be at least 8 characters");
+  if (process.env.CORS_ORIGIN && process.env.CORS_ORIGIN === "*") warnings.push("CORS_ORIGIN set to wildcard — this is insecure");
+  const [major] = process.versions.node.split(".").map(Number);
+  if (major < 18) warnings.push("Node.js >=18 required, found " + process.version);
+  if (warnings.length > 0) {
+    console.warn("[Startup] Configuration warnings:");
+    for (const w of warnings) console.warn("  ⚠ " + w);
+  }
+}
+
 export async function createApp() {
   const app = Fastify({ logger: { level: "warn" } });
+
+  // Security headers applied to all HTTP responses
+  const SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  };
+  app.addHook("onRequest", async (_req, reply) => {
+    for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+      reply.header(key, value);
+    }
+  });
+
+  // Rate limiting for sensitive endpoints
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url.startsWith("/api/vault/") && req.method === "POST") {
+      if (!(await vaultRateLimiter.consume())) {
+        return reply.status(429).send({ error: "Too many requests — vault rate limit exceeded" });
+      }
+    }
+    if (req.url.startsWith("/api/settings") && req.method === "POST") {
+      if (!(await settingsRateLimiter.consume())) {
+        return reply.status(429).send({ error: "Too many requests — settings rate limit exceeded" });
+      }
+    }
+    if (req.url.startsWith("/api/social/") && req.method === "POST") {
+      if (!(await socialRateLimiter.consume())) {
+        return reply.status(429).send({ error: "Too many requests — social rate limit exceeded" });
+      }
+    }
+  });
 
   // Auth middleware — optional bearer token via PI_API_KEY env var
   const apiKey = process.env.PI_API_KEY || process.env.API_KEY || "";
   app.addHook("onRequest", (req, reply, done) => {
-    reply.header("Access-Control-Allow-Origin", "*");
     reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    // Skip auth for preflight, health check, and websocket
-    if (req.method === "OPTIONS" || req.url === "/api/health" || req.url.startsWith("/ws")) return done();
-    // If API_KEY is set, require bearer token
+    if (req.method === "OPTIONS" || req.url === "/api/health") return done();
     if (apiKey) {
       const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== apiKey) {
+      if (!auth || !auth.startsWith("Bearer ")) {
         return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header or set PI_API_KEY" });
+      }
+      const token = auth.slice(7);
+      if (token.length !== apiKey.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(apiKey))) {
+        return reply.status(401).send({ error: "Unauthorized — invalid token" });
       }
     }
     done();
@@ -5895,19 +5975,17 @@ export async function createApp() {
   await app.register(fastifyWebsocket);
   await app.register(compress, { global: true, threshold: 1024 });
 
-  // CORS — restrict to configured origin
+  // CORS — restrict to configured origin, never wildcard
   const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4322";
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
     if (origin) {
-      if (origin === CORS_ORIGIN || CORS_ORIGIN === "*") {
+      if (origin === CORS_ORIGIN) {
         reply.header("Access-Control-Allow-Origin", origin);
-      } else {
-        reply.header("Access-Control-Allow-Origin", CORS_ORIGIN);
+        reply.header("Access-Control-Allow-Credentials", "true");
       }
       reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
       reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
-      reply.header("Access-Control-Allow-Credentials", "true");
     }
     if (req.method === "OPTIONS") return reply.status(204).send();
   });
@@ -5917,7 +5995,7 @@ export async function createApp() {
   app.addHook("onRequest", async (req, reply) => {
     if (AUTH_KEY) {
       const key = req.headers["x-api-key"];
-      if (!key || key !== AUTH_KEY) {
+      if (!key || key.length !== AUTH_KEY.length || !crypto.timingSafeEqual(Buffer.from(key), Buffer.from(AUTH_KEY))) {
         return reply.code(401).send({ error: "Unauthorized" });
       }
     }
@@ -6084,7 +6162,11 @@ export async function createApp() {
 
   // Budget
   app.get("/api/budget/config", async () => getBudgetConfig());
-  app.post("/api/budget/config", async (req) => { setBudgetConfig(req.body); return { ok: true }; });
+  app.post("/api/budget/config", async (req) => {
+    if (!req.body || typeof req.body !== "object") return { ok: false, error: "Request body is required" };
+    setBudgetConfig(req.body);
+    return { ok: true };
+  });
   app.get("/api/budget/stats", async () => getCostSummary());
   app.get("/api/budget/details", async () => getCostDetails());
 
@@ -6116,15 +6198,17 @@ export async function createApp() {
   });
   app.post("/api/mcp/test", async (req) => {
     const { name, command, args } = req.body;
-    // Whitelist: only allow known MCP server commands (no arbitrary shell execution)
-    const allowedPrefixes = ["./", "../", "/", "npx ", "node ", "uvx ", "python ", "deno "];
-    const isAllowed = allowedPrefixes.some(p => typeof command === "string" && command.startsWith(p));
-    if (!command || typeof command !== "string" || !isAllowed) {
-      return { ok: false, output: "Command not allowed for security. Must be a path, npx, node, uvx, python, or deno command." };
+    const ALLOWED_MCP_COMMANDS = new Set(["npx", "node", "uvx", "python3", "python", "deno", "bun"]);
+    if (!command || typeof command !== "string") {
+      return { ok: false, output: "Command is required and must be a string" };
+    }
+    const cmdName = command.trim().split(/\s+/)[0];
+    if (!ALLOWED_MCP_COMMANDS.has(cmdName)) {
+      return { ok: false, output: "Command not allowed. Must be one of: " + [...ALLOWED_MCP_COMMANDS].join(", ") };
     }
     try {
       const testArgs = [...(args || []), '--version'];
-      const result = spawnSync(command, testArgs, { timeout: 5000, encoding: "utf8", shell: false });
+      const result = spawnSync(cmdName, testArgs, { timeout: 5000, encoding: "utf8", shell: false });
       const output = (result.stdout || "").trim() || (result.stderr || "").trim() || "no version";
       return { ok: result.status === 0, output };
     } catch (e) {
@@ -6411,16 +6495,28 @@ export async function createApp() {
   app.post("/api/webhooks/:source", async (req) => {
     try {
       const source = req.params.source;
-      const { normalizeEvent } = await import("./listener.js");
+      if (!source || typeof source !== "string" || source.length > 64) {
+        return { error: "Invalid webhook source" };
+      }
+      const PAYLOAD_MAX_BYTES = 1024 * 1024;
+      const raw = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+      if (Buffer.byteLength(raw, "utf8") > PAYLOAD_MAX_BYTES) {
+        return { error: "Payload exceeds 1MB limit" };
+      }
+      const { normalizeEvent, validateSignature } = await import("./listener.js");
+      const secret = process.env.WEBHOOK_SECRET;
+      const sig = req.headers["x-webhook-signature"] || req.headers["x-hub-signature-256"] || "";
+      if (secret && !validateSignature(req.body, sig, secret)) {
+        return { error: "Invalid webhook signature" };
+      }
       const event = normalizeEvent(source, req.body);
-      // Store webhook event to JSON file for processing
       const webhookDir = path.join(PI_DIR, "webhooks");
       fs.mkdirSync(webhookDir, { recursive: true });
       const filePath = path.join(webhookDir, `event_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.json`);
       fs.writeFileSync(filePath, JSON.stringify(event));
       return { ok: true, eventId: path.basename(filePath, ".json") };
     } catch (e) {
-      return { error: e.message };
+      return { error: "Failed to process webhook" };
     }
   });
 
@@ -7149,12 +7245,21 @@ Return a JSON array. Each item:
   // ── WebSocket ──────────────────────────────────────────────────────────
 
   app.get("/ws", { websocket: true }, (socket, req) => {
+    // Authenticate WebSocket connections — require token from query param
+    if (apiKey) {
+      const wsToken = req.query?.token || "";
+      if (!wsToken || wsToken.length !== apiKey.length || !crypto.timingSafeEqual(Buffer.from(wsToken), Buffer.from(apiKey))) {
+        try { socket.send(JSON.stringify({ type: "error", message: "Unauthorized — provide token query parameter" })); } catch {}
+        setTimeout(() => socket.close(), 500);
+        return;
+      }
+    }
     console.log("WebSocket connected from", req.ip);
 
     let session;
     try { session = getOrCreateSession(); }
     catch (e) {
-      try { socket.send(JSON.stringify({ type: "error", message: `Server init error: ${e.message}` })); } catch {}
+      try { socket.send(JSON.stringify({ type: "error", message: "Server init error" })); } catch {}
       setTimeout(() => socket.close(), 500);
       return;
     }
@@ -7293,7 +7398,7 @@ Return a JSON array. Each item:
       if (data.type === "swarm_goal") {
         const { goal } = data;
         try { await handleSwarmGoal(socket, goal); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
+        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
       }
 
       if (data.type === "run_dag") {
@@ -7304,7 +7409,7 @@ Return a JSON array. Each item:
             return;
           }
           await handleDagGoal(socket, data.goal || "DAG Swarm Goal", dagConfig);
-        } catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
+        } catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
       }
 
       if (data.type === "swarm_saved_team") {
@@ -7365,7 +7470,7 @@ Return a JSON array. Each item:
           bcast({ type: "swarm_start", goal });
           await executeSwarmCampaign(socket, goal, normalized);
         }
-        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: e.message })); } catch {} }
+        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
       }
     });
   });
