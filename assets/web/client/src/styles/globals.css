@@ -1268,6 +1268,49 @@ select {
 .agent-card:hover { border-color: var(--hairline-strong); background: var(--surface-soft); }
 .agent-card.active { border-color: var(--ink); background: var(--surface-soft); }
 
+.theme-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--body);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: all 0.12s ease;
+}
+.theme-option:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.theme-option.active {
+  border-color: var(--accent);
+  background: var(--surface-card);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.theme-preview {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.theme-label {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .text-ink { color: var(--ink); }
 .text-body { color: var(--body); }
 .text-mute { color: var(--mute); }

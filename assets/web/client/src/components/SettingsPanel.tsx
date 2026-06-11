@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "./Toast";
+import ThemeSwitcher from "./ThemeSwitcher";
 
 export default function SettingsPanel() {
   const [settings, setSettings] = useState<any>({});
@@ -69,6 +70,11 @@ export default function SettingsPanel() {
 
   return (
     <div>
+      <div className="card">
+        <div className="card-header">Theme</div>
+        <ThemeSwitcher />
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
         <div className="stat-card">
           <div className="stat-label">Default Model</div>

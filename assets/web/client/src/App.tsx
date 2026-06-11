@@ -5,6 +5,7 @@ import { ToasterProvider } from "./components/Toast";
 import { AsciiMenu } from "./components/Icons";
 import { ChatProvider, useChat } from "./context/ChatContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ThemeProvider } from "./context/ThemeContext";
 
 const Dashboard = lazy(() => import("./components/Dashboard"));
 const VaultPanel = lazy(() => import("./components/VaultPanel"));
@@ -40,11 +41,13 @@ const PANELFallback = <div style={{ padding: 40, textAlign: "center" }}><div cla
 
 export default function App() {
   return (
-    <ChatProvider>
-      <ToasterProvider>
-        <AppContent />
-      </ToasterProvider>
-    </ChatProvider>
+    <ThemeProvider>
+      <ChatProvider>
+        <ToasterProvider>
+          <AppContent />
+        </ToasterProvider>
+      </ChatProvider>
+    </ThemeProvider>
   );
 }
 
