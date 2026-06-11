@@ -1,196 +1,233 @@
-# custom-pi: Developer & AI Agent Guide (AGENT.md)
+# Custom-PI: Developer & AI Agent Guide
 
-Welcome, AI Coding Agent. This document outlines the custom-pi architecture, development rules, interface customisations, and security mechanisms. Read this document carefully before making any edits to the codebase.
-
----
-
-## 📋 Git Workflow & Policy (CRITICAL)
-
-When you make changes to this repository, you **MUST** follow this git policy strictly:
-1. **Commit your changes locally** after completing any phase or requested feature.
-2. **DO NOT run `git push` automatically.** 
-3. **Wait for the user's explicit confirmation** in the chat before pushing any commits to GitHub.
-4. **Exception**: If the user's current request explicitly says to "commit and push", you may push. Otherwise, default to "commit only".
+This document defines the architecture, workflow rules, CI/CD requirements, and code conventions for the custom-pi project. Read it before making any edits.
 
 ---
 
-## 📂 Codebase Architecture & Directory Map
+## 🚨 CI/CD Pipeline — Must Pass Before Any Commit
 
-The wrapper hooks into the standard globally-installed `@earendil-works/pi-coding-agent` via file synchronisation. Below is the file mapping:
+Every commit **MUST** pass both checks locally before staging:
+
+```bash
+npx tsc --noEmit          # Zero type errors
+npx vitest run            # All 348 tests, 40 files, 0 failures
+```
+
+### Critical Test Behaviors (CI vs Local)
+
+| Test | Behavior | Why |
+|------|----------|-----|
+| `api.test.ts > serves static files from client dist` | Expects `GET /` → 200 + `<!DOCTYPE html>` | The SPA fallback (`setNotFoundHandler`) is registered unconditionally. If `client/dist/index.html` exists, it's served; otherwise returns clean 404. **Never gate the not-found handler behind `fs.existsSync(CLIENT_DIR)`** — that breaks CI. |
+| `api.test.ts > responds with 200 on health endpoint` | `GET /api/health` → 200 + `{ status: "ok" }` | Always works; no deps. |
+| All other tests | Pure unit/integration tests with no network or filesystem deps | Mock everything. |
+
+### Golden Rules
+1. **Never remove `@ts-nocheck` from `index.ts`** — ~74 implicit `any` errors from Pi API callback params. Phase 1.1 will decompose it.
+2. **Never change `skipLibCheck` to `false` in `tsconfig.json`** — vendor `.d.ts` files from `@earendil-works/*` have incompatible declarations.
+3. **Never gate the SPA fallback handler** — `app.setNotFoundHandler()` must always be registered, regardless of `client/dist` existence.
+4. **Never add unused root `devDependencies`** — the last cleanup removed `@testing-library/jest-dom`, `@testing-library/react`, `jsdom`.
+
+---
+
+## 📋 Git Workflow & Policy
+
+1. **Commit locally** after completing any task.
+2. **Do NOT push automatically** — wait for the user's explicit `commit and push` command.
+3. **Exception**: If the user says "commit and push" in the current request, you may push.
+4. **Commit message style**: Short, prefixed by area, e.g. `Fix CI: move setNotFoundHandler outside client-dist guard`.
+5. `package-lock.json` changes are expected after dep changes — commit them.
+
+---
+
+## 📂 Codebase Architecture
 
 ```
 .
-├── AGENT.md                       # This file (AI Agent Developer Guide)
-├── package.json                   # Root package settings & run scripts
-├── tsconfig.json                  # TS compilation options
+├── AGENT.md                       # This file
+├── package.json                   # Root scripts & deps
+├── tsconfig.json                  # TS compilation (skipLibCheck: true, noUnusedLocals/Parameters: false)
 ├── bin/
 │   ├── cli.js                     # Syncs assets to ~/.pi/agent/ & spawns TUI
-│   └── web.js                     # Syncs web client/server assets & spawns web UI
-├── assets/                        # Active source templates copied to ~/.pi/agent/
-│   ├── SYSTEM.md                  # Custom agent instructions injected on launch
-│   ├── models.json                # Model endpoint routing config
-│   ├── settings.json              # Custom agent UI settings
-│   ├── mcp-servers.json           # Active MCP server registry
-│   ├── agents/                    # Swarm node definitions (builder, researcher, etc.)
-│   ├── themes/                    # Visual themes (e.g. custom-pi-quantum.json)
-│   ├── extensions/
-│   │   └── subagents/
-│   │       ├── package.json       # Subagent extension dependencies
-│   │       └── src/
-│   │           ├── index.ts       # Extension entry, TUI patching, mouse click handler
-│   │           ├── gateguard.ts   # Command validation & safety gatekeeper
-│   │           ├── secret-vault.ts# AES-256-GCM credential vault manager
-│   │           ├── state-db.ts    # SQLite state and telemetry store
-│   │           ├── memory-*       # TF-IDF semantic vector memory & retreival
-│   │           ├── skill-*        # Procedural skill embedding store
-│   │           └── tui/           # Low-level visual terminal widgets & managers
+│   └── web.js                     # Syncs web assets & spawns web UI
+├── assets/
+│   ├── SYSTEM.md                  # Custom agent system prompt
+│   ├── models.json                # Model endpoint routing (contextWindow per model)
+│   ├── settings.json              # Agent settings (compaction: { enabled: true } only)
+│   ├── mcp-servers.json           # MCP server registry
+│   ├── agents/                    # Swarm node definitions
+│   ├── themes/                    # Visual themes
+│   ├── extensions/subagents/src/  # Extension source (TS)
+│   │   ├── index.ts               # Entry point, tools, commands, hooks (~3000 lines)
+│   │   ├── daemon/daemon.ts       # Background task scheduler (SQLite-only persistence)
+│   │   ├── secret-vault.ts        # AES-256-GCM vault manager
+│   │   ├── state-db.ts            # SQLite state & telemetry
+│   │   ├── context-monitor.ts     # Context usage tracking & auto-learn
+│   │   └── ... (memory, skill, tui, runtime, swarm, cognition)
 │   └── web/
-│       ├── web-server.mjs         # Fastify backend (REST api & WebSockets)
-│       └── client/                # React + Vite frontend dashboard
+│       ├── web-server.mjs         # Fastify backend (REST + WebSocket, 7500+ lines)
+│       ├── social-bridge.mjs      # Twitter/Reddit bridge (requires x-api-key)
+│       ├── email-bridge.mjs       # Email bridge (requires x-api-key, path validation)
+│       └── client/                # React + Vite frontend (build to client/dist)
 ```
 
 ---
 
-## ⌨️ TUI Customisation & The Input Box
+## 🔧 Compaction & Context Management
 
-The terminal user interface is dynamically patched on runtime by intercepting prototype methods of the host Pi coding agent.
+### Dynamic Compaction (DO NOT HARDCODE)
 
-### 1. Prototype Monkey-Patching Pattern
-In `assets/extensions/subagents/src/index.ts`, the extension hooks the parent TUI rendering process inside `applyLivePatches()`.
-It intercepts the `Container.prototype.render` method to identify component constructors by name:
-```typescript
-ContainerPrototype.render = function (this: any, width: number) {
-  if (this.children) {
-    for (const child of this.children) {
-      if (!child) continue;
-      const className = child.constructor?.name;
-      if (className === "CustomEditor") {
-        patchCustomEditor(Object.getPrototypeOf(child));
-      } else if (className === "DynamicBorder") {
-        patchDynamicBorder(Object.getPrototypeOf(child));
-      } else if (className === "FooterComponent") {
-        patchFooterComponent(child);
-      }
-      // ... UserMessageComponent, AssistantMessageComponent, ToolExecutionComponent
-    }
-  }
-  // ...
-}
+Compaction settings are calculated **dynamically** from the model's `contextWindow` on every `session_start`:
+
+```
+assets/extensions/subagents/src/index.ts :2180 (session_start handler)
 ```
 
-### 2. Modifying the Input Box (`CustomEditor`)
-The input box styling is defined in `patchCustomEditor(proto: any)` inside `assets/extensions/subagents/src/index.ts`. 
+Logic:
+1. Reads `contextWindow` from `ctx.model` (set in `models.json` per-provider)
+2. `reserveTokens = max(4096, contextWindow * 0.12)` — 12% headroom prevents overflow
+3. `keepRecentTokens = max(8192, contextWindow * 0.40)` — 40% recent conversation preserved
+4. Writes to `~/.pi/agent/settings.json` only if values changed
 
-Key control variables and hooks:
-* **Prompt Symbol**: The prefix character and color are defined by:
-  ```typescript
-  const prefixStr = pointerColor("❯ ");
-  ```
-  Change `"❯ "` or the `pointerColor` callback to modify the prompt icon.
-* **Top/Bottom Boundaries & Dividers**:
-  * The input area separates itself from the conversation scrollback via a sleek horizontal line:
-    ```typescript
-    const horizontalStr = "─".repeat(width);
-    const horizontal = dimFn(horizontalStr);
-    ```
-  * Scrolled-up indicator:
-    ```typescript
-    const indicator = `─── ↑ ${this.scrollOffset} more `;
-    ```
-  * Scrolled-down indicator:
-    ```typescript
-    const indicator = `─── ↓ ${linesBelow} more `;
-    ```
-* **Height & Wrap Boundaries**:
-  * Wrap width calculation is performed via `this.layoutText(layoutWidth)`.
-  * The visible rows are calculated with respect to total terminal rows:
-    ```typescript
-    const maxVisibleLines = Math.max(5, Math.floor(terminalRows * 0.3));
-    ```
-* **Autocomplete & Dropdown**:
-  * When autocomplete suggestions are active, they are appended to the return buffer:
-    ```typescript
-    const autocompleteResult = this.autocompleteList.render(contentWidthForText);
-    ```
+**Rules:**
+- Never hardcode `reserveTokens` or `keepRecentTokens` in `settings.json`
+- `settings.json` compaction section must only contain `"enabled": true`
+- If adding a new provider/model, ensure its `contextWindow` in `models.json` is correct
 
-### 3. Removing surrounding borders (`DynamicBorder`)
-To keep the input layout flat, clean, and minimal, `patchDynamicBorder` is used:
-```typescript
-function patchDynamicBorder(proto: any) {
-  if (dynamicBorderPatched) return;
-  dynamicBorderPatched = true;
-  proto.render = function (this: any, width: number) {
-    return []; // Return empty array to eliminate outer box lines
-  };
-}
-```
-If you need to restore or custom-style the surrounding border box, modify this function.
+### Context Monitor
 
-### 4. Tool Execution Status Dot Blinking
-The status dot in the `ToolExecutionComponent` indicates execution state:
-* When running (`isRunning` is true), the dot blinks by toggling between a hollow circle `○` (`\u25cb`) and a solid circle `●` (`\u25cf`) using the global animation tick `getGlobalFrame()`:
-  ```typescript
-  const dotChar = isRunning && (getGlobalFrame() % 6) < 3 ? "\u25cb" : "\u25cf";
-  ```
-* On completion (or if not running), it remains solid `●`.
-* The color maps to state: orange for running, red for error, green for success.
-
-### 5. Abort Signal Propagation (`ESC` key aborts)
-To prevent hanging loops when a user presses the escape/abort key (`ESC`):
-* The sub-agent runner and parallel swarm handlers track the `signal: AbortSignal`.
-* Sub-agent parallel runners listen to `"abort"` on this signal to terminate global animations and clear the active indicators:
-  ```typescript
-  signal.addEventListener("abort", () => {
-    stopGlobalAnimation();
-    context.ui.setWorkingIndicator();
-    context.ui.setWorkingMessage();
-    context.ui.setStatus("subagents", undefined);
-  }, { once: true });
-  ```
-* In `execute()` loops, early returns are triggered if `this.signal?.aborted` is detected to break out of retries.
+- `turn_end` hook tracks usage %, warns at thresholds, auto-compacts at >90%
+- Auto-compaction uses `session.compact()` — patched in `_runAutoCompaction` for silent overflow retries
 
 ---
 
-## 🌐 Web Dashboard (React + Fastify)
+## 🔒 Security & Hardening (Implemented)
 
-The web dashboard provides a real-time visual counterpart to the TUI.
+All items below are **already implemented**. Do not regress them:
 
-1. **Fastify Backend (`assets/web/web-server.mjs`)**:
-   * Listens on `process.env.WEB_PORT` (default: `4321`).
-   * Uses `@fastify/websocket` to broadcast real-time tool logs, reasoning streams, and message threads to connected web browsers.
-   * Leverages `@fastify/static` to serve pre-built React production client bundles from `client/dist`.
-
-2. **React Client (`assets/web/client`)**:
-   * Initiated via Vite.
-   * Run client development mode: `cd assets/web/client && npm run dev`
-   * Build client bundle: `npm run build:web` (or `npm run build` within the folder).
-
----
-
-## 🔒 Security & Optimization Guidelines
-
-When adding tools, commands, or handling input, observe the following rules:
-
-### 1. Command Injection Prevention
-Never pass raw, unsanitized user inputs or file names to shell command strings.
-* **Bad**: `execSync("espeak " + text)`
-* **Good**: Execute commands with array arguments via `spawn` or `execFileSync` to bypass shell parsing.
-* Sanitize filenames to prevent path traversal (`../`) and dangerous characters (`;`, `&`, `|`, `$`, `` ` ``).
-
-### 2. Vault Key Protection & Secret Leak Prevention
-* All credentials, tokens, and OAuth keys must be stored in the AES-256-GCM encrypted database vault managed by `assets/extensions/subagents/src/secret-vault.ts`.
-* **Redact Secrets**: When printing telemetry logs, writing to the web WebSocket stream, or returning tool results, ensure secrets and private variables are completely redacted. (e.g. replacing token values with `[REDACTED]`).
-
-### 3. ReDoS Protection (Regular Expression Safety)
-* Avoid using complex, non-anchored regular expressions that can cause exponential backtracking (Regular Expression Denial of Service).
-* Use simple regex patterns, or enforce string length limits before applying regex checks.
-
-### 4. Fastify Authentication
-* When exposing the Fastify server, secure API endpoints and WebSocket handshakes using API keys. Ensure requests without matching keys return `401 Unauthorized` responses.
+| Area | Implementation |
+|------|---------------|
+| **WebSocket auth** | Token validated via query param with `crypto.timingSafeEqual` |
+| **Plugin sandbox** | `Object.create(null)` per invocation, `ALLOWED_HOOK_NAMES` allowlist |
+| **Plugin installer** | `spawn("npm", [...])` / `spawn("git", [...])` — no shell |
+| **Bash tool** | Allowlist of 60+ commands, segment-aware piping check |
+| **GITHUB_TOKEN** | Replaced URL-embedded token with `GIT_ASKPASS` temp script |
+| **CORS** | Strict origin match (no wildcard `*`) |
+| **Webhook** | `validateSignature()`, 1MB payload limit |
+| **API key auth** | `crypto.timingSafeEqual` for bearer token, `x-api-key`, WS token |
+| **Security headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` |
+| **MCP command filter** | Exact command name matching (`npx`, `node`, `uvx`, `python3`, `deno`, `bun`) |
+| **SSH password** | `sshpass -e` (env var, not visible in `ps`) |
+| **MCP probes** | Validated against command allowlist before spawn |
+| **SSRF prevention** | `isPrivateUrl()` resolves DNS, blocks RFC 1918 |
+| **safeResolve()** | Fails closed on `realpathSync` failure, prefix match |
+| **Vault perms** | `vault.json` written with `{ mode: 0o600 }` |
+| **Rate limiting** | Vault (10 burst, 2/sec), Settings (5 burst, 1/sec), Social (3 burst, 1/5sec) |
+| **Startup validation** | Warns on missing `PI_API_KEY`, insecure `CORS_ORIGIN=*`, Node <18 |
+| **Error messages** | Sanitized — no `e.message` leak to client |
+| **Centralized error handler** | `app.setErrorHandler()` logs full stack server-side, returns sanitized message |
 
 ---
 
-## 💡 Best Practices for Editing Code
-* **Read Before Modifying**: Always read the destination files first using `view_file` to grasp the existing styles and helpers.
-* **Keep Changes Narrow**: Focus precisely on the task. Do not make unrelated changes or cleanups.
-* **Test the Build**: After updating files in `assets/extensions/subagents/src/`, make sure they compile cleanly and run correctly.
+## ⚡ Performance Patterns (Implemented)
+
+| Pattern | Location |
+|---------|----------|
+| Logger write queue capped at 1000 | `logger.ts` |
+| MCP health cache capped at 100 | `mcp-catalog.ts` with `setHealthEntry()` |
+| setInterval cleanup | All timers have `stop()`/`clearInterval` paths (cron-scheduler, daemon, telemetry-pipeline, quantum-hud) |
+| `bcast()` wrapped in `withSwarmLock()` | `web-server.mjs:315` — prevents race on `currentSwarmState` |
+
+---
+
+## 🧹 Code Quality Conventions
+
+### Empty Catch Blocks
+- Intentional cleanup catches: add `// eslint-disable-next-line @typescript-eslint/no-empty-function`
+- Catch blocks that may hide bugs: add `logger.warn()` at minimum
+
+### Magic Numbers
+- Extract named constants with descriptive names
+- Keep as `const` at module scope
+
+### Lock Pattern
+- `withSwarmLock()` is the ONLY way to mutate `currentSwarmState`
+- Never mutate `currentSwarmState.xxx` directly outside the lock
+
+### Daemon Persistence
+- SQLite is the primary store (`store.kvSet` + `store.kvGet`)
+- JSON file writes have been removed from `saveState()`
+- JSON read fallback retained for backward compat in `loadState()`
+
+---
+
+## 🧠 TUI Customisation (Summary)
+
+The TUI is patched at runtime via prototype monkey-patching in `applyLivePatches()`:
+
+| Component | Patch | Location |
+|-----------|-------|----------|
+| `Container.prototype.render` | Identifies child components by `constructor.name` | `index.ts` |
+| `CustomEditor` (input box) | Custom prompt symbol, horizontal dividers, scroll indicators | `patchCustomEditor()` |
+| `DynamicBorder` (border) | Returns `[]` to eliminate outer box lines | `patchDynamicBorder()` |
+| `FooterComponent` | Custom status indicators | `patchFooterComponent()` |
+| `ToolExecutionComponent` | Blinking status dot via `getGlobalFrame()` | `index.ts` |
+
+---
+
+## 🧪 Test Conventions
+
+- Framework: **vitest** (v4)
+- Config: `vitest.config.ts` in root
+- Test files: `**/__tests__/*.test.ts` and `tests/integration/*.test.ts`
+- No DOM/jsdom — all tests are Node-based
+- Integration tests create a real Fastify app instance via `createApp()`
+
+### Writing Tests
+1. Place unit tests near source: `src/__tests__/foo.test.ts`
+2. Place integration tests in root `tests/integration/`
+3. Use `beforeAll`/`afterAll` for setup/teardown
+4. Never depend on external network or files not in the repo
+
+---
+
+## 🌐 Web Server Conventions
+
+### `web-server.mjs` (Fastify, ~7500 lines)
+- Security headers hook → rate limiting hooks → centralized error handler → routes → static files → SPA fallback
+- `setErrorHandler` must be set BEFORE routes but AFTER security hooks
+- `setNotFoundHandler` (SPA fallback) must be registered **unconditionally** — not inside `if (fs.existsSync(CLIENT_DIR))`
+- `bcast()` wraps state mutations in `withSwarmLock()`
+
+### Critical File Paths
+- `PI_DIR = path.join(os.homedir(), ".pi", "agent")`
+- `CLIENT_DIR = path.join(__dirname, "client", "dist")`
+- `settings.json` at `~/.pi/agent/settings.json` (NOT `assets/settings.json` at runtime)
+
+### Model Config (`models.json`)
+- Each provider has `contextWindow` — this drives compaction and prompt injection budgets
+- Default model: `google/gemma-4-e4b` via `lmstudio` (contextWindow: 131072)
+- Fallback model hardcodes `contextWindow: 4096` — used only if models.json is unreadable
+
+---
+
+## 📦 Package Management
+
+- `package.json` root has minimal deps — only what the extension and web server need
+- `@types/better-sqlite3` is in `devDependencies` (not dependencies)
+- `glob` is a runtime dependency (used by sync scripts)
+- Unused deps get removed (e.g., `@testing-library/*`, `jsdom`)
+- Run `npm audit fix` after adding deps; `@fastify/static` v8→v9 deferred (breaking change)
+
+---
+
+## 🚫 What NOT To Do
+
+- **Do NOT** change `skipLibCheck` in `tsconfig.json`
+- **Do NOT** remove `@ts-nocheck` from `index.ts`
+- **Do NOT** hardcode `reserveTokens`/`keepRecentTokens` in `settings.json`
+- **Do NOT** gate `setNotFoundHandler` behind `fs.existsSync(CLIENT_DIR)`
+- **Do NOT** mutate `currentSwarmState` outside `withSwarmLock()`
+- **Do NOT** write JSON state files when SQLite is available (daemon, etc.)
+- **Do NOT** add unused devDependencies to root `package.json`
+- **Do NOT** push without user confirmation
+- **Do NOT** skip `npx tsc --noEmit` and `npx vitest run` before commit
