@@ -1,11 +1,13 @@
-node_modules/
-.pi/
-*.log
 .env
-.env.local
-.DS_Store
-*.tmp.*
-
-# Exclude dist directories, but re-include web client build output
-dist/
-!assets/web/client/dist/
+.env.*
+*.key
+*.pem
+**/node_modules
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+docs/
+tests/
+scripts/
+node_modules/

@@ -315,30 +315,30 @@ function redactToolInput(input) {
 function bcast(data) {
   broadcast(data);
   if (!currentSwarmState) return;
-  // NOTE: State mutations below are synchronous within a single event-loop tick.
-  // Full lock-based state access requires bcast to become async (Phase 1.2 refactor).
-  if (data.type === "ceo_thought" && data.message) {
-    currentSwarmState.ceoLogs.push(data.message);
-  } else if (data.type === "agent_status" && data.agentId) {
-    const a = currentSwarmState.agents.find(x => x.id === data.agentId);
-    if (a) {
-      if (data.status) a.status = data.status;
-      if (data.currentTool !== undefined) a.currentTool = data.currentTool;
-      if (data.currentTask !== undefined) a.currentTask = data.currentTask;
+  withSwarmLock(async () => {
+    if (data.type === "ceo_thought" && data.message) {
+      currentSwarmState.ceoLogs.push(data.message);
+    } else if (data.type === "agent_status" && data.agentId) {
+      const a = currentSwarmState.agents.find(x => x.id === data.agentId);
+      if (a) {
+        if (data.status) a.status = data.status;
+        if (data.currentTool !== undefined) a.currentTool = data.currentTool;
+        if (data.currentTask !== undefined) a.currentTask = data.currentTask;
+      }
+    } else if (data.type === "agent_log" && data.agentId && data.message) {
+      const a = currentSwarmState.agents.find(x => x.id === data.agentId);
+      if (a) {
+        a.logs.push(data.message);
+        if (a.logs.length > 1000) a.logs.splice(0, a.logs.length - 1000);
+      }
+    } else if (data.type === "tool_request" && data.agentId) {
+      currentSwarmState.ceoLogs.push(`⚠ Agent '${data.agentId}' requested tool: ${data.toolName}`);
+    } else if (data.type === "tool_provisioned" && data.agentId) {
+      currentSwarmState.ceoLogs.push(`✓ Custom tool '${data.toolName}' provisioned to '${data.agentId}'.`);
+    } else if (data.type === "swarm_start") {
+      currentSwarmState.ceoLogs.push(`Swarm initialized for: "${data.goal}"`);
     }
-  } else if (data.type === "agent_log" && data.agentId && data.message) {
-    const a = currentSwarmState.agents.find(x => x.id === data.agentId);
-    if (a) {
-      a.logs.push(data.message);
-      if (a.logs.length > 1000) a.logs.splice(0, a.logs.length - 1000);
-    }
-  } else if (data.type === "tool_request" && data.agentId) {
-    currentSwarmState.ceoLogs.push(`⚠ Agent '${data.agentId}' requested tool: ${data.toolName}`);
-  } else if (data.type === "tool_provisioned" && data.agentId) {
-    currentSwarmState.ceoLogs.push(`✓ Custom tool '${data.toolName}' provisioned to '${data.agentId}'.`);
-  } else if (data.type === "swarm_start") {
-    currentSwarmState.ceoLogs.push(`Swarm initialized for: "${data.goal}"`);
-  }
+  }).catch(() => {});
 }
 
 // Module-level session so chat survives WS reconnect
@@ -5917,6 +5917,14 @@ export async function createApp() {
     for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
       reply.header(key, value);
     }
+  });
+
+  // Centralized error handler — logs full error server-side, returns sanitized message
+  app.setErrorHandler((error, _req, reply) => {
+    console.error("[Server Error]", error.stack || error.message);
+    reply.status(error.statusCode || 500).send({
+      error: process.env.NODE_ENV === "production" ? "Internal server error" : error.message,
+    });
   });
 
   // Rate limiting for sensitive endpoints

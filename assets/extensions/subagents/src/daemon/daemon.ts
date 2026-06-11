@@ -293,19 +293,6 @@ export class Daemon extends EventEmitter {
       store.kvSet("daemon", "stats", JSON.stringify(this.stats));
       store.kvSet("daemon", "lastUserActivity", String(this.lastUserActivity));
       store.kvSet("daemon", "startTime", String(this.startTime));
-      try {
-        const dir = path.dirname(this.config.stateFile);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        const state = {
-          tasks: tasksData,
-          stats: this.stats,
-          lastUserActivity: this.lastUserActivity,
-          startTime: this.startTime,
-        };
-        const tmp = this.config.stateFile + ".tmp";
-        fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-        fs.renameSync(tmp, this.config.stateFile);
-      } catch {}
     } catch (err) {
       console.error("[Daemon] Failed to save state:", err);
     }

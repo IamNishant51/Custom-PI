@@ -20,8 +20,6 @@
     "custom-pi-quantum": "./assets/themes/custom-pi-quantum.json"
   },
   "compaction": {
-    "enabled": true,
-    "reserveTokens": 1024,
-    "keepRecentTokens": 4096
+    "enabled": true
   }
 }

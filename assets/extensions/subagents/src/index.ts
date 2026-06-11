@@ -2180,6 +2180,25 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
   pi.on("session_start", async (_event, ctx) => {
     logger.info("session_start", { cwd: ctx.cwd });
 
+    // ── Dynamic compaction: calculate from model contextWindow ────────────
+    try {
+      const contextWindow = (ctx as any).model?.contextWindow
+        ?? (ctx as any).sessionManager?.model?.contextWindow
+        ?? 131072;
+      const reserveTokens = Math.max(4096, Math.floor(contextWindow * 0.12));
+      const keepRecentTokens = Math.max(8192, Math.floor(contextWindow * 0.40));
+      const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+      if (fs.existsSync(settingsPath)) {
+        const curr = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+        const c = curr.compaction || {};
+        if (c.reserveTokens !== reserveTokens || c.keepRecentTokens !== keepRecentTokens) {
+          curr.compaction = { enabled: true, reserveTokens, keepRecentTokens };
+          fs.writeFileSync(settingsPath, JSON.stringify(curr, null, 2));
+          logger.info(`[Compaction] Updated: reserve=${reserveTokens} keepRecent=${keepRecentTokens} (contextWindow=${contextWindow})`);
+        }
+      }
+    } catch {} // must never crash session_start
+
     // Tab key listener to toggle between Agent mode and Plan mode
     try {
       unsubTabHandler = ctx.ui.onTerminalInput((data: string) => {
