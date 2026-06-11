@@ -328,6 +328,113 @@ h4, h5, h6 { font-size: 16px; line-height: 20px; letter-spacing: 0; margin: 10px
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes dominoIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes springUp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.995);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 4px var(--accent); }
+  50% { box-shadow: 0 0 12px var(--accent), 0 0 24px rgba(255, 122, 23, 0.2); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ── Section Domino Reveal ── */
+.section-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.section-reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+.domino-item {
+  opacity: 0;
+  transform: translateY(16px);
+}
+.domino-item.in {
+  animation: dominoIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.domino-item.in:nth-child(1) { animation-delay: 0.04s; }
+.domino-item.in:nth-child(2) { animation-delay: 0.09s; }
+.domino-item.in:nth-child(3) { animation-delay: 0.14s; }
+.domino-item.in:nth-child(4) { animation-delay: 0.19s; }
+.domino-item.in:nth-child(5) { animation-delay: 0.24s; }
+.domino-item.in:nth-child(6) { animation-delay: 0.29s; }
+.domino-item.in:nth-child(7) { animation-delay: 0.34s; }
+.domino-item.in:nth-child(8) { animation-delay: 0.39s; }
+.domino-item.in:nth-child(9) { animation-delay: 0.44s; }
+.domino-item.in:nth-child(10) { animation-delay: 0.49s; }
+.domino-item.in:nth-child(11) { animation-delay: 0.54s; }
+.domino-item.in:nth-child(12) { animation-delay: 0.59s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .section-reveal { opacity: 1 !important; transform: none !important; transition: none; }
+  .domino-item { opacity: 1 !important; transform: none !important; animation: none; }
+}
+
+/* ── Canvas Container for background effects ── */
+.canvas-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.7;
+}
+.canvas-bg + * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Loading wave animation ── */
+.loading-wave {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+}
+.loading-wave span {
+  animation: wave-bounce 1.4s infinite ease-in-out;
+}
+.loading-wave span:nth-child(1) { animation-delay: 0s; }
+.loading-wave span:nth-child(2) { animation-delay: 0.2s; }
+.loading-wave span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes wave-bounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-4px); }
+}
+
 /* ── Sections ───────────────────────────────────────── */
 
 .section {
@@ -1602,16 +1709,6 @@ select {
 }
 
 /* Stagger / Spring Entry Animation */
-@keyframes springUp {
-  0% {
-    opacity: 0;
-    transform: translateY(12px) scale(0.995);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
 
 /* ── omp-style spinner (geometric dots) ── */
 @keyframes spin-dot {
