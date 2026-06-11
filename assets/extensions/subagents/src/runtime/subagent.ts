@@ -1,4 +1,3 @@
-// @ts-nocheck — extracted from god-module; retains loose types for dynamic runtime API
 import fs from "node:fs";
 import path from "node:path";
 import { execSync, spawnSync } from "node:child_process";
@@ -17,6 +16,24 @@ import { TuiManager, SPACING as TUI_SPACING } from "../tui";
 import { localGrep } from "../tools/grep";
 import { AGENTS_DIR_GLOBAL, loadAgents, parseMarkdownAgent } from "./agent-config";
 import { resolveModel, resolveFastModel, SUBAGENT_TOOLS } from "./tool-registry";
+
+interface SubAgentProgress {
+  id: string;
+  name: string;
+  task: string;
+  status: string;
+  turn: number;
+  maxTurns: number;
+  toolCallCount: number;
+  startTime: number;
+  endTime?: number;
+  currentTool?: string;
+  currentToolArgs?: string;
+  outputLines: string[];
+  result?: string;
+  error?: string;
+  ceoRequest?: { status: string; toolName: string; startedAt: number; ceoName?: string };
+}
 
 export class SubAgentRuntime {
   private tracker: SubAgentProgress;
@@ -54,7 +71,7 @@ export class SubAgentRuntime {
       const { queryTriplets } = require("../state-db");
       const knowledge = queryTriplets({ minConfidence: 0.6 });
       if (knowledge.length > 0) {
-        const lines = knowledge.slice(0, 10).map(t =>
+        const lines = knowledge.slice(0, 10).map((t: { confidenceScore: number; subjectLabel: string; predicateLabel: string; objectLabel: string }) =>
           `  - [CONTEXT_SOURCE: Triplet_KG | Confidence=${(t.confidenceScore * 100).toFixed(0)}%] ${t.subjectLabel} \u2192 ${t.predicateLabel} \u2192 ${t.objectLabel}`
         );
         tripletContext = `\n## KNOWLEDGE GRAPH\nRelevant facts from memory (prioritize these over assumptions):\n${lines.join("\n")}\n`;
@@ -452,7 +469,7 @@ export class SubAgentRuntime {
         }, {
           apiKey: auth.apiKey,
           headers: auth.headers,
-          reasoning: this.config.thinking as any || undefined,
+          reasoning: typeof this.config.thinking === "string" ? this.config.thinking : undefined,
         });
       });
 
@@ -514,7 +531,7 @@ export class SubAgentRuntime {
         this.tracker.result = textContent || JSON.stringify(response.content);
         this.ctx.ui.setStatus("subagents", undefined);
         this.maybeStopAnimation();
-        return this.tracker.result;
+        return this.tracker.result || "";
       }
     }
 

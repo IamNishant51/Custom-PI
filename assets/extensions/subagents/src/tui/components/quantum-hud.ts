@@ -1,22 +1,42 @@
-// @ts-nocheck — extracted from god-module; retains loose types for dynamic runtime API
 import chalk from "chalk";
 import os from "node:os";
 import { stripAnsi, truncateToWidth, elapsed } from "../render/format";
 import { getPulseColor, getSpinner, activeTrackers } from "../../animations";
-import { memoryStats } from "../../memory-store";
+import { stats as memoryStats } from "../../memory-store";
 import type { Component } from "@earendil-works/pi-tui";
+
+interface ThemeAccessor {
+  fg(color: string, text: string): string;
+  bg(color: string, text: string): string;
+  bold(text: string): string;
+}
+
+interface HudContext {
+  invalidate(): void;
+  [key: string]: unknown;
+}
+
+interface SubAgentTracker {
+  id: string;
+  name: string;
+  status: string;
+  turn: number;
+  maxTurns: number;
+  currentTool?: string;
+  startTime: number;
+}
 
 export class QuantumHUDWidget implements Component {
   private timer: ReturnType<typeof setInterval> | null = null;
-  private theme: any = null;
+  private theme: ThemeAccessor | null = null;
 
-  constructor(private ctx: any) {
+  constructor(private ctx: HudContext) {
     this.timer = setInterval(() => {
       try { this.ctx.invalidate(); } catch {}
     }, 2000);
   }
 
-  setTheme(t: any) { this.theme = t; }
+  setTheme(t: ThemeAccessor) { this.theme = t; }
 
   dispose() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -43,7 +63,7 @@ export class QuantumHUDWidget implements Component {
     const memTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
     const cpuLoad = os.loadavg()[0].toFixed(1);
 
-    const trackers = Array.from(activeTrackers.values());
+    const trackers = Array.from(activeTrackers.values()) as SubAgentTracker[];
     const running = trackers.filter(
       t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
     );

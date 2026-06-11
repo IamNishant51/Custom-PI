@@ -10,6 +10,16 @@ function escapeHtml(text: string) {
     .replace(/'/g, "&#039;");
 }
 
+function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed[\s\S]*?<\/embed>/gi, "")
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/href\s*=\s*["']?\s*javascript\s*:/gi, 'href="#"');
+}
+
 const renderer = new marked.Renderer();
 
 renderer.code = function (tokenOrCode: any, langOrInfostring?: string) {
@@ -98,5 +108,6 @@ export default function Markdown({ content, className }: { content?: string; cla
     }
   }, [content]);
 
-  return <div className={`markdown-content ${className || ""}`} dangerouslySetInnerHTML={{ __html: html }} />;
+  const sanitized = useMemo(() => sanitizeHtml(html), [html]);
+  return <div className={`markdown-content ${className || ""}`} dangerouslySetInnerHTML={{ __html: sanitized }} />;
 }

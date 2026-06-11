@@ -139,6 +139,17 @@ export class MCPEcosystem {
     if (!server) throw new Error(`Server ${name} not found`);
     if (server.status === "running") return true;
 
+    if (server.command === "npx" && (server.name === "sequential-thinking" || server.args?.includes("@modelcontextprotocol/server-sequential-thinking"))) {
+      try {
+        const nvmBinDir = path.dirname(process.execPath);
+        const globalMcpPath = path.join(nvmBinDir, "mcp-server-sequential-thinking");
+        if (fs.existsSync(globalMcpPath)) {
+          server.command = globalMcpPath;
+          server.args = [];
+        }
+      } catch {}
+    }
+
     server.status = "starting";
     try {
       const child = spawn(server.command, server.args, {

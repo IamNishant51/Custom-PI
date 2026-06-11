@@ -215,20 +215,34 @@ export function loadMcpServers(): McpServerConfig[] {
     if (fs.existsSync(MCP_CONFIG_PATH)) {
       const raw = fs.readFileSync(MCP_CONFIG_PATH, "utf8");
       const persisted: McpServerConfig[] = JSON.parse(raw);
-  for (const p of persisted) {
-    const existing = serverMap.get(p.id);
-    if (existing && existing.isBuiltin) {
-      existing.enabled = p.enabled;
-      if (p.name) existing.name = p.name;
-      if (p.command) existing.command = p.command;
-      if (p.args) existing.args = p.args;
-    } else if (!existing) {
-      p.isBuiltin = false;
-      serverMap.set(p.id, p);
-    }
-  }
+      for (const p of persisted) {
+        const existing = serverMap.get(p.id);
+        if (existing && existing.isBuiltin) {
+          existing.enabled = p.enabled;
+          if (p.name) existing.name = p.name;
+          if (p.command) existing.command = p.command;
+          if (p.args) existing.args = p.args;
+        } else if (!existing) {
+          p.isBuiltin = false;
+          serverMap.set(p.id, p);
+        }
+      }
     }
   } catch (err) { logger.warn("Failed to load MCP server config", { error: String(err) }); }
+
+  try {
+    const nvmBinDir = path.dirname(process.execPath);
+    const globalMcpPath = path.join(nvmBinDir, "mcp-server-sequential-thinking");
+    if (fs.existsSync(globalMcpPath)) {
+      for (const s of serverMap.values()) {
+        if (s.id === "builtin-sequential-thinking" || s.name === "sequential-thinking" || (s.command === "npx" && s.args?.includes("@modelcontextprotocol/server-sequential-thinking"))) {
+          s.command = globalMcpPath;
+          s.args = [];
+        }
+      }
+    }
+  } catch {}
+
   const servers = Array.from(serverMap.values());
   cachedServers = servers;
   return servers;

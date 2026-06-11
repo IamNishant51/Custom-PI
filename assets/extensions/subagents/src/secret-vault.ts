@@ -54,7 +54,10 @@ function readVault(): VaultData {
     return { entries: {}, version: 1 };
   }
   try {
-    return JSON.parse(fs.readFileSync(VAULT_FILE, "utf8"));
+    const data = JSON.parse(fs.readFileSync(VAULT_FILE, "utf8"));
+    data.entries = data.entries || {};
+    data.version = data.version || 1;
+    return data;
   } catch {
     return { entries: {}, version: 1 };
   }

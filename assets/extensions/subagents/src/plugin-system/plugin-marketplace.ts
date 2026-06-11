@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import vm from "node:vm";
 import { spawn } from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
 
@@ -179,13 +180,41 @@ export class PluginMarketplace {
       const entryPath = path.join(plugin.path, plugin.manifest.entry);
       if (!fs.existsSync(entryPath)) return null;
 
-      const vm = this.sandboxVMs.get(plugin.manifest.name);
-      if (!vm) return null;
+      const pluginName = plugin.manifest.name;
+      let sandbox = this.sandboxVMs.get(pluginName);
+      if (!sandbox) {
+        sandbox = vm.createContext({
+          exports: {},
+          console: { log: console.log, warn: console.warn, error: console.error },
+          setTimeout,
+          clearTimeout,
+        });
+        this.sandboxVMs.set(pluginName, sandbox);
+      }
 
       const code = fs.readFileSync(entryPath, "utf8");
-      const fn = new Function("context", `"use strict";\n${code}\nreturn exports["${hook}"](context);`);
-      return (context: SandboxContext) => fn(context);
-    } catch {
+      const script = new vm.Script(
+        `"use strict";\n${code}\n;exports["${hook}"](context);`,
+        { filename: entryPath }
+      );
+
+      return (context: SandboxContext) => {
+        sandbox.exports = {};
+        sandbox.context = context;
+        try {
+          script.runInContext(sandbox, { timeout: 5000, breakOnSigint: true });
+        } catch (e) {
+          plugin.loadErrors = plugin.loadErrors || [];
+          plugin.loadErrors.push(`Hook ${hook} execution: ${e instanceof Error ? e.message : String(e)}`);
+          return null;
+        }
+        return sandbox.exports;
+      };
+    } catch (err) {
+      bus.emit(Topics.SYSTEM_WARNING, {
+        source: "plugin-marketplace",
+        message: `Failed to load hook ${hook} for ${plugin.manifest.name}: ${err instanceof Error ? err.message : String(err)}`,
+      }, { source: "plugin-marketplace" });
       return null;
     }
   }

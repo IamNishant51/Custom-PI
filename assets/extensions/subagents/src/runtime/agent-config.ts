@@ -6,7 +6,7 @@ import yaml from "yaml";
 export const AGENTS_DIR_GLOBAL = path.join(os.homedir(), ".pi/agent/agents");
 export const AGENTS_DIR_LOCAL = path.join(process.cwd(), ".pi/agents");
 
-const REQUIRED_AGENT_FIELDS = ["name", "role"] as const;
+const REQUIRED_AGENT_FIELDS = ["name"] as const;
 
 export function validateAgentConfig(raw: Record<string, unknown>): AgentConfig | null {
   for (const field of REQUIRED_AGENT_FIELDS) {
@@ -23,7 +23,7 @@ export function validateAgentConfig(raw: Record<string, unknown>): AgentConfig |
   }
   return {
     name: String(raw.name),
-    role: String(raw.role),
+    role: typeof raw.role === "string" ? raw.role : "teammate",
     systemPrompt: typeof raw.systemPrompt === "string" ? raw.systemPrompt : "",
     tools: Array.isArray(raw.tools) ? raw.tools.map(String) : undefined,
     model: typeof raw.model === "string" ? raw.model : undefined,
@@ -50,7 +50,7 @@ export function parseMarkdownAgent(content: string): { config: AgentConfig; body
 }
 
 let agentsCache: { data: Map<string, AgentConfig>; timestamp: number } | null = null;
-const AGENTS_CACHE_TTL = 30_000;
+const AGENTS_CACHE_TTL = 24 * 3600 * 1000; // 24 hours cache
 
 export function loadAgents(): Map<string, AgentConfig> {
   const now = Date.now();

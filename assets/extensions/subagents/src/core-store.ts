@@ -50,18 +50,20 @@ function migrateEntry(e: any): MemoryEntry {
   };
 }
 
-async function safeWriteFileAsync(filePath: string, data: string): Promise<void> {
+function safeWriteFileSync(filePath: string, data: string): void {
   const tmpPath = filePath + ".tmp." + Date.now();
-  await fsp.writeFile(tmpPath, data, "utf8");
-  await fsp.rename(tmpPath, filePath);
+  fs.writeFileSync(tmpPath, data, "utf8");
+  fs.renameSync(tmpPath, filePath);
 }
 
 export async function loadEntries(): Promise<MemoryEntry[]> {
   ensureDirs();
   const now = Date.now();
-  if (cache && now - cacheTs < CACHE_TTL) return cache;
+  if (cache && now - cacheTs < CACHE_TTL) {
+    return cache;
+  }
   try {
-    const raw = await fsp.readFile(SEMANTIC_FILE, "utf8");
+    const raw = fs.readFileSync(SEMANTIC_FILE, "utf8");
     const decrypted = decryptMemory(raw) || raw;
     const rawEntries: any[] = JSON.parse(decrypted);
     const entries = rawEntries.map(migrateEntry);
@@ -85,7 +87,7 @@ export async function saveAllEntries(entries: MemoryEntry[]): Promise<void> {
   cacheTs = Date.now();
   const plaintext = JSON.stringify(entries, null, 2);
   const encrypted = await encryptMemory(plaintext);
-  await safeWriteFileAsync(SEMANTIC_FILE, encrypted);
+  safeWriteFileSync(SEMANTIC_FILE, encrypted);
 }
 
 export function loadSync(): MemoryEntry[] {
@@ -182,7 +184,7 @@ export async function flushWrite(): Promise<void> {
     debounceTimer = null;
     const plaintext = JSON.stringify(pendingEntries, null, 2);
     const encrypted = await encryptMemory(plaintext);
-    await safeWriteFileAsync(SEMANTIC_FILE, encrypted);
+    safeWriteFileSync(SEMANTIC_FILE, encrypted);
     pendingEntries = null;
   }
   if (debounceResolve) {

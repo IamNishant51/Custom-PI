@@ -216,7 +216,7 @@ interface AgentConfig {
   maxTurns?: number;
   temperature?: number;
   description?: string;
-  thinking?: boolean;
+  thinking?: string | boolean;
 }
 
 interface SkillMeta {

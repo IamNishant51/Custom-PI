@@ -47,6 +47,32 @@ export class EnvironmentSensor {
   private watchPaths: string[] = [];
   private environmentState: EnvironmentState | null = null;
 
+  // Cached static info that doesn't change during the session
+  private staticInfo: {
+    hostname: string;
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+    cpuModel: string;
+    cpuCores: number;
+    memoryTotalGb: number;
+    networkInterfaces: string[];
+    isLinux: boolean;
+    isWSL: boolean;
+    hasDocker: boolean;
+    hasGit: boolean;
+    hasNpm: boolean;
+    homeDir: string;
+    tempDir: string;
+    shell: string;
+    timezone: string;
+    locale: string;
+  } | null = null;
+
+  // Cached disk usage to avoid running df -BG continuously
+  private lastDiskUsage: { totalGb: number; freeGb: number; usedPercent: number } | null = null;
+  private lastDiskCheck = 0;
+
   constructor() {
     this.captureEnvironment();
     bus.emit(Topics.ENVIRONMENT_CHANGE, {
@@ -86,11 +112,13 @@ export class EnvironmentSensor {
           default:
             type = "modified";
         }
+        let size: number | undefined;
+        try { size = fs.statSync(fullPath).size; } catch { size = undefined; }
         const change: FileChange = {
           type,
           path: fullPath,
           timestamp: Date.now(),
-          size: fs.existsSync(fullPath) ? fs.statSync(fullPath).size : undefined,
+          size,
         };
         this.recentChanges.push(change);
         if (this.recentChanges.length > this.maxRecentChanges) {
@@ -134,6 +162,11 @@ export class EnvironmentSensor {
   }
 
   getDiskUsage(path: string = "/"): { totalGb: number; freeGb: number; usedPercent: number } {
+    const now = Date.now();
+    // Cache disk usage for 5 minutes
+    if (this.lastDiskUsage && (now - this.lastDiskCheck < 300_000)) {
+      return this.lastDiskUsage;
+    }
     try {
       if (os.platform() === "linux") {
         const result = require("child_process").execSync(`df -BG ${path} | tail -1`, { encoding: "utf8", timeout: 3000 });
@@ -141,20 +174,24 @@ export class EnvironmentSensor {
         const total = parseInt(parts[1]?.replace("G", "") || "0");
         const used = parseInt(parts[2]?.replace("G", "") || "0");
         const free = parseInt(parts[3]?.replace("G", "") || "0");
-        return { totalGb: total, freeGb: free, usedPercent: total > 0 ? Math.round((used / total) * 100) : 0 };
+        this.lastDiskUsage = { totalGb: total, freeGb: free, usedPercent: total > 0 ? Math.round((used / total) * 100) : 0 };
+        this.lastDiskCheck = now;
+        return this.lastDiskUsage;
       }
     } catch {}
-    return { totalGb: 0, freeGb: 0, usedPercent: 0 };
+    return this.lastDiskUsage || { totalGb: 0, freeGb: 0, usedPercent: 0 };
   }
 
   detectEnvironmentChanges(): Partial<EnvironmentState> {
+    const previous = this.environmentState;
     const current = this.captureEnvironment();
-    const previous = this.environmentState || current;
     const changes: Partial<EnvironmentState> = {};
 
-    if (current.cpuUsage !== previous.cpuUsage) changes.cpuUsage = current.cpuUsage;
-    if (current.memoryUsagePercent !== previous.memoryUsagePercent) changes.memoryUsagePercent = current.memoryUsagePercent;
-    if (current.diskUsagePercent !== previous.diskUsagePercent) changes.diskUsagePercent = current.diskUsagePercent;
+    if (previous) {
+      if (current.cpuUsage !== previous.cpuUsage) changes.cpuUsage = current.cpuUsage;
+      if (current.memoryUsagePercent !== previous.memoryUsagePercent) changes.memoryUsagePercent = current.memoryUsagePercent;
+      if (current.diskUsagePercent !== previous.diskUsagePercent) changes.diskUsagePercent = current.diskUsagePercent;
+    }
 
     if (Object.keys(changes).length > 0) {
       bus.emit(Topics.ENVIRONMENT_CHANGE, changes, { source: "environment-sensor" });
@@ -162,6 +199,15 @@ export class EnvironmentSensor {
 
     this.environmentState = current;
     return changes;
+  }
+
+  private hasCommand(cmd: string, args: string[] = ["--version"]): boolean {
+    try {
+      const res = require("child_process").spawnSync(cmd, args, { stdio: "ignore", timeout: 2000 });
+      return res.status === 0;
+    } catch {
+      return false;
+    }
   }
 
   private captureEnvironment(): EnvironmentState {
@@ -178,19 +224,62 @@ export class EnvironmentSensor {
       cpuUsage = total > 0 ? Math.round((1 - idle / total) * 100) : 0;
     }
 
-    const hasDocker = (() => { try { require("child_process").execSync("docker --version", { encoding: "utf8", timeout: 2000 }); return true; } catch { return false; } })();
-    const hasGit = (() => { try { require("child_process").execSync("git --version", { encoding: "utf8", timeout: 2000 }); return true; } catch { return false; } })();
+    // Lazy load and cache static environment info
+    if (!this.staticInfo) {
+      const hasDocker = this.hasCommand("docker");
+      const hasGit = this.hasCommand("git");
+      const hasNpm = this.hasCommand("npm");
+      const disk = this.getDiskUsage();
+
+      this.staticInfo = {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        arch: os.arch(),
+        nodeVersion: process.version,
+        cpuModel: cpus[0]?.model || "unknown",
+        cpuCores: cpus.length,
+        memoryTotalGb: +(totalMem / (1024 ** 3)).toFixed(1),
+        networkInterfaces: Object.keys(os.networkInterfaces()).filter(k => k !== "lo"),
+        isLinux: os.platform() === "linux",
+        isWSL: os.platform() === "linux" && os.release().toLowerCase().includes("microsoft"),
+        hasDocker,
+        hasGit,
+        hasNpm,
+        homeDir: os.homedir(),
+        tempDir: os.tmpdir(),
+        shell: process.env.SHELL || os.userInfo().shell || "/bin/bash",
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        locale: Intl.DateTimeFormat().resolvedOptions().locale,
+      };
+    }
+
     const disk = this.getDiskUsage();
 
+    // Fast process count on Linux by reading /proc directly, bypassing execSync
+    const processCount = (() => {
+      try {
+        if (os.platform() === "linux") {
+          const files = fs.readdirSync("/proc");
+          let count = 0;
+          for (let i = 0; i < files.length; i++) {
+            const name = files[i];
+            if (name[0] >= "0" && name[0] <= "9") {
+              count++;
+            }
+          }
+          return count;
+        }
+      } catch {}
+      try {
+        return parseInt(require("child_process").execSync("ps aux --no-headers | wc -l", { encoding: "utf8", timeout: 3000 }).trim());
+      } catch {
+        return 0;
+      }
+    })();
+
     this.environmentState = {
-      hostname: os.hostname(),
-      platform: os.platform(),
-      arch: os.arch(),
-      nodeVersion: process.version,
-      cpuModel: cpus[0]?.model || "unknown",
-      cpuCores: cpus.length,
+      ...this.staticInfo,
       cpuUsage,
-      memoryTotalGb: +(totalMem / (1024 ** 3)).toFixed(1),
       memoryFreeGb: +(freeMem / (1024 ** 3)).toFixed(1),
       memoryUsagePercent: totalMem > 0 ? Math.round(((totalMem - freeMem) / totalMem) * 100) : 0,
       diskTotalGb: disk.totalGb,
@@ -198,19 +287,8 @@ export class EnvironmentSensor {
       diskUsagePercent: disk.usedPercent,
       uptime: os.uptime(),
       loadAvg,
-      processes: (() => { try { return parseInt(require("child_process").execSync("ps aux --no-headers | wc -l", { encoding: "utf8", timeout: 3000 }).trim()); } catch { return 0; } })(),
-      networkInterfaces: Object.keys(os.networkInterfaces()).filter(k => k !== "lo"),
-      isLinux: os.platform() === "linux",
-      isWSL: os.platform() === "linux" && os.release().toLowerCase().includes("microsoft"),
-      hasDocker,
-      hasGit,
+      processes: processCount,
       hasNode: true,
-      hasNpm: (() => { try { require("child_process").execSync("npm --version", { encoding: "utf8", timeout: 2000 }); return true; } catch { return false; } })(),
-      homeDir: os.homedir(),
-      tempDir: os.tmpdir(),
-      shell: process.env.SHELL || os.userInfo().shell || "/bin/bash",
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      locale: Intl.DateTimeFormat().resolvedOptions().locale,
     };
 
     return this.environmentState;

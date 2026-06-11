@@ -78,7 +78,9 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
     }
 
     await reclusterCentroids(entries);
-    if (merged > 0 || pruned > 0 || refreshed > 0) await saveAllEntries(entries);
+    if (merged > 0 || pruned > 0 || refreshed > 0) {
+      await saveAllEntries(entries);
+    }
     return { merged, pruned, refreshed };
   });
 }

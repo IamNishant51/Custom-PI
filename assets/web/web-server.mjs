@@ -102,7 +102,7 @@ async function withSwarmLock(fn) {
   swarmLock = new Promise(resolve => { release = resolve; });
   await prev;
   try {
-    return await fn();
+    return await Promise.resolve().then(() => fn());
   } finally {
     release();
   }
@@ -295,6 +295,8 @@ function redactToolInput(input) {
 function bcast(data) {
   broadcast(data);
   if (!currentSwarmState) return;
+  // NOTE: State mutations below are synchronous within a single event-loop tick.
+  // Full lock-based state access requires bcast to become async (Phase 1.2 refactor).
   if (data.type === "ceo_thought" && data.message) {
     currentSwarmState.ceoLogs.push(data.message);
   } else if (data.type === "agent_status" && data.agentId) {
@@ -306,7 +308,10 @@ function bcast(data) {
     }
   } else if (data.type === "agent_log" && data.agentId && data.message) {
     const a = currentSwarmState.agents.find(x => x.id === data.agentId);
-    if (a) a.logs.push(data.message);
+    if (a) {
+      a.logs.push(data.message);
+      if (a.logs.length > 1000) a.logs.splice(0, a.logs.length - 1000);
+    }
   } else if (data.type === "tool_request" && data.agentId) {
     currentSwarmState.ceoLogs.push(`⚠ Agent '${data.agentId}' requested tool: ${data.toolName}`);
   } else if (data.type === "tool_provisioned" && data.agentId) {
@@ -1783,19 +1788,34 @@ function loadMcpConfig() {
 
   const seqThinkingName = "sequential-thinking";
   let seqThinking = config.find(s => s.name === seqThinkingName);
+
+  const nvmBinDir = path.dirname(process.execPath);
+  const globalMcpPath = path.join(nvmBinDir, "mcp-server-sequential-thinking");
+  const mcpCommand = fs.existsSync(globalMcpPath) ? globalMcpPath : "npx";
+  const mcpArgs = mcpCommand === "npx" ? ["-y", "@modelcontextprotocol/server-sequential-thinking"] : [];
+
   if (!seqThinking) {
     seqThinking = {
       name: seqThinkingName,
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      command: mcpCommand,
+      args: mcpArgs,
       enabled: true,
       description: "Sequential Thinking MCP Server for step-by-step reasoning"
     };
     config.push(seqThinking);
     saveMcpConfig(config);
   } else {
+    let changed = false;
     if (!seqThinking.enabled) {
       seqThinking.enabled = true;
+      changed = true;
+    }
+    if (seqThinking.command === "npx" && mcpCommand !== "npx") {
+      seqThinking.command = mcpCommand;
+      seqThinking.args = mcpArgs;
+      changed = true;
+    }
+    if (changed) {
       saveMcpConfig(config);
     }
   }
@@ -2929,13 +2949,14 @@ Restored: ${result.restored.join(", ")}`;
         const sshArgs = ["-p", String(validPort), "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", host, cmd];
         let result;
         if (sshKey) {
-          const keyFile = path.join(PI_DIR, `.ssh_temp_key_${Date.now()}`);
+          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-key-"));
+          const keyFile = path.join(tmpDir, "id_rsa");
           try {
             fs.writeFileSync(keyFile, sshKey, { mode: 0o600 });
             sshArgs.unshift("-i", keyFile);
             result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
           } finally {
-            try { if (fs.existsSync(keyFile)) fs.unlinkSync(keyFile); } catch {}
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
           }
         } else if (sshPassword) {
           result = spawnSync("sshpass", ["-p", sshPassword, "ssh", ...sshArgs], { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
@@ -5593,7 +5614,6 @@ Perform your task using your tools, think step-by-step, and report back with a c
       try {
         fs.writeFileSync(scriptPath, `// CEO created custom tool parser
 console.log("Parsing logs successfully.");
-process.exit(0);
 `, "utf8");
       } catch {}
 
@@ -7381,7 +7401,6 @@ async function main() {
     await stopMcpServers();
     await stopLspServers();
     closeAllDbConnections();
-    process.exit(0);
   };
   process.on("SIGINT", handleExit);
   process.on("SIGTERM", handleExit);
@@ -7419,7 +7438,8 @@ async function main() {
     console.log(`  ✦ API endpoint: ${model.baseUrl || "default"}\n`);
   } catch (e) {
     console.error(`Failed to start server: ${e.message}`);
-    process.exit(1);
+    closeAllDbConnections();
+    throw e;
   }
 }
 

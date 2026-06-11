@@ -125,6 +125,10 @@ export class SecurityAutopilot {
   }
 
   private shouldScan(filePath: string): boolean {
+    const resolvedPath = path.resolve(filePath);
+    const homePi = path.resolve(os.homedir(), ".pi");
+    if (resolvedPath.startsWith(homePi)) return false;
+
     const skipDirs = ["node_modules", ".git", "dist", "build", ".next", "coverage", ".vault", "venv", "__pycache__"];
     const skipExts = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".pdf", ".mp4", ".mp3"];
     const skipFiles = [".env.example", "package-lock.json", "yarn.lock"];
@@ -135,7 +139,7 @@ export class SecurityAutopilot {
     if (skipFiles.includes(base)) return false;
     if (skipExts.includes(ext)) return false;
     if (skipDirs.some(d => filePath.includes(`/${d}/`) || filePath.includes(`\\${d}\\`))) return false;
-    if (filePath.endsWith(".tmp")) return false;
+    if (/\.tmp(\.\d+)?$/.test(base) || /\.bak(\.\d+)?$/.test(base) || base.includes(".tmp.") || base.includes(".bak.")) return false;
     try {
       if (fs.statSync(filePath).size > 1 * 1024 * 1024) return false;
     } catch { return false; }

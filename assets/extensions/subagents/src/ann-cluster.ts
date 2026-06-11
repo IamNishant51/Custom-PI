@@ -156,7 +156,7 @@ export async function reclusterCentroids(entries: MemoryEntry[]): Promise<void> 
     }
   }
 
-  await saveClustersAsync({ centroids, assignments });
+  saveClusters({ centroids, assignments });
 }
 
 export function getClusterSearchCandidates(queryVector: number[], candidateIds: Set<string>): void {

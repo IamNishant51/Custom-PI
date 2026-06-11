@@ -104,12 +104,12 @@ export function secureSpawn(
   args: string[],
   options?: SpawnOptions & { timeout?: number; maxOutput?: number },
 ): Promise<SecureExecResult> {
-  checkAllowlist(binary);
   const timeout = Math.min(options?.timeout ?? DEFAULT_TIMEOUT, MAX_TIMEOUT);
   const maxOutput = options?.maxOutput ?? MAX_OUTPUT_BYTES;
   const start = Date.now();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    try { checkAllowlist(binary); } catch (e) { reject(e); return; }
     const child = spawn(binary, args, {
       ...options,
       shell: false,
