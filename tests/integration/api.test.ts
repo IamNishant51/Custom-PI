@@ -1,4 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const CLIENT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../assets/web/client/dist");
+const hasClientBuild = fs.existsSync(path.join(CLIENT_DIR, "index.html"));
 
 describe("Web API Integration", () => {
   let app: Awaited<ReturnType<typeof import("../../assets/web/web-server.mjs")["createApp"]>>;
@@ -19,7 +25,7 @@ describe("Web API Integration", () => {
     expect(body).toHaveProperty("status", "ok");
   });
 
-  it("serves static files from client dist", async () => {
+  (hasClientBuild ? it : it.skip)("serves static files from client dist", async () => {
     const res = await app.inject({ method: "GET", url: "/" });
     expect(res.statusCode).toBe(200);
     expect(res.payload).toContain("<!DOCTYPE html>");
