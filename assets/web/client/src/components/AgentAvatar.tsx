@@ -1,4 +1,5 @@
 import { useEffect, useRef, memo, useState } from "react";
+import animeGirlSvg from "../assets/anime_girl.svg";
 
 interface AgentAvatarProps {
   state: "idle" | "listening" | "thinking" | "speaking";
@@ -7,7 +8,7 @@ interface AgentAvatarProps {
   gender?: "male" | "female";
 }
 
-function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: AgentAvatarProps) {
+function AgentAvatar({ state, analyserNode, size = 200, gender }: AgentAvatarProps) {
   const s = size;
   const mouthRef = useRef<SVGPathElement>(null);
   const animRef = useRef(0);
@@ -15,18 +16,25 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
   const [eyelid, setEyelid] = useState(0);
 
   const c = s / 2;
-  const headY = s * 0.44;
-  const faceR = s * 0.21;
-  const faceRy = gender === "male" ? s * 0.27 : s * 0.26;
-  const eyeOff = faceR * 0.42;
-  const eyeY = headY - faceRy * 0.02;
-  const mouthY = headY + faceRy * 0.34;
-  const noseY = headY + faceRy * 0.08;
 
-  const isMale = gender === "male";
-  const hairColor1 = isMale ? "#2a1f5e" : "#3d2a8a";
-  const hairColor2 = isMale ? "#1a1245" : "#2d1b69";
-  const hairColor3 = isMale ? "#0f0a2e" : "#1a0f3d";
+  // Map SVG viewBox (338x190) to container pixel coords.
+  // Image is rendered with object-fit:cover in a square, so it fills height
+  // and is horizontally centered.
+  const scale = s / 190;
+  const leftOff = (s - 338 * scale) / 2;
+  const toX = (vx: number) => leftOff + vx * scale;
+  const toY = (vy: number) => vy * scale;
+
+  // Face landmark positions in viewBox coords (estimated from SVG structure)
+  const mouthX = toX(169), mouthY = toY(102);
+  const eyeLX = toX(123), eyeRX = toX(215), eyeY = toY(65);
+  const eyeRx = (eyeRX - eyeLX) * 0.08;
+  const eyeRy = (eyeRX - eyeLX) * 0.12;
+
+  // Face center and radius for glow ring
+  const fcx = c;
+  const fcy = toY(62);
+  const fr = toX(169) - toX(120);
 
   const id = `ag-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -65,11 +73,11 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
         }
       }
 
-      const mw = 14 + open * 8;
+      const mw = 14 + open * 10;
       const mh = 3 + open * 14;
       const hl = mw / 2;
       const vm = mh;
-      const mx = c;
+      const mx = mouthX;
       const my = mouthY;
 
       if (open > 0.1) {
@@ -93,18 +101,7 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
     };
     animRef.current = requestAnimationFrame(animate);
     return () => { stopped = true; cancelAnimationFrame(animRef.current); };
-  }, [state, analyserNode, s, c, mouthY]);
-
-  const backHairRx = P(faceR + 16);
-  const backHairRy = P(faceRy + 18);
-  const neckX = P(c - 10);
-  const neckW = P(20);
-  const neckH = P(14);
-
-  const sL = c - faceR - 20;
-  const sR = c + faceR + 20;
-  const sB = headY + faceRy + 50;
-  const sMid = headY + faceRy + 4;
+  }, [state, analyserNode, s, mouthX, mouthY]);
 
   const stateScale = state === "listening" ? 1.03 : state === "thinking" ? 0.97 : 1;
   const stateRotate = state === "listening" ? -4 : state === "thinking" ? 6 : 0;
@@ -113,27 +110,22 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
     <div
       className="agent-avatar-root"
       style={{
-        width: s, height: s, position: "relative",
+        width: s, height: s, position: "relative", overflow: "hidden", borderRadius: "50%",
         transition: "transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
         transform: `scale(${stateScale}) rotate(${stateRotate}deg)`,
       }}
     >
-      <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`}>
+      <img
+        src={animeGirlSvg} alt=""
+        style={{
+          position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+          objectFit: "cover", objectPosition: "50% 30%",
+        }}
+        draggable={false}
+      />
+
+      <svg width={s} height={s} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
         <defs>
-          <linearGradient id={`${id}h`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={hairColor1} /><stop offset="40%" stopColor={hairColor2} /><stop offset="100%" stopColor={hairColor3} />
-          </linearGradient>
-          <linearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#fff0e8" /><stop offset="60%" stopColor="#fde0d0" /><stop offset="100%" stopColor="#f5c8b5" />
-          </linearGradient>
-          <radialGradient id={`${id}i`} cx="35%" cy="30%">
-            <stop offset="0%" stopColor="#7dd8ff" /><stop offset="45%" stopColor="#4a9ecf" /><stop offset="85%" stopColor="#2a6e9f" /><stop offset="100%" stopColor="#1a4e7f" />
-          </radialGradient>
-          {!isMale && (
-            <radialGradient id={`${id}b`}>
-              <stop offset="0%" stopColor="#ff9a9a" stopOpacity="0.35" /><stop offset="100%" stopColor="#ff9a9a" stopOpacity="0" />
-            </radialGradient>
-          )}
           <filter id={`${id}g`} x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation={state === "speaking" ? 6 : state === "listening" ? 10 : 3} result="blur" />
             <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
@@ -141,125 +133,34 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
         </defs>
 
         <g filter={`url(#${id}g)`}>
-          <ellipse cx={c} cy={headY - 6} rx={backHairRx} ry={backHairRy} fill={`url(#${id}h)`} />
-          <rect x={neckX} y={headY + faceRy - 4} width={neckW} height={neckH} rx="5" fill={`url(#${id}s)`} />
-          <path d={[
-            `M${p(sL, sMid)}`,
-            `Q${p(c - 38, sMid + 36)} ${p(c - 22, sB)}`,
-            `L${p(c + 22, sB)}`,
-            `Q${p(c + 38, sMid + 36)} ${p(sR, sMid)}Z`,
-          ].join(" ")} fill="#1a1a2e" opacity="0.92" />
-
-          {!isMale && (
-            <path d={`M${p(c - 18, headY + faceRy + 2)} L${p(c - 6, headY + faceRy + 18)} L${p(c, headY + faceRy + 8)} L${p(c + 6, headY + faceRy + 18)} L${p(c + 18, headY + faceRy + 2)}`}
-              fill="none" stroke="#8a7fc0" strokeWidth="1.8" opacity="0.6" />
-          )}
-          {isMale && (
-            <path d={`M${p(c - 16, headY + faceRy + 4)} L${p(c + 16, headY + faceRy + 4)}`}
-              fill="none" stroke="#4a4a6a" strokeWidth="1.5" opacity="0.7" />
-          )}
-
-          <ellipse cx={c} cy={headY} rx={P(faceR)} ry={P(faceRy)} fill={`url(#${id}s)`} />
-
-          {!isMale && (
-            <>
-              <ellipse cx={P(c - faceR * 0.55)} cy={P(headY + faceRy * 0.18)} rx={P(faceR * 0.28)} ry={P(faceRy * 0.12)} fill={`url(#${id}b)`} />
-              <ellipse cx={P(c + faceR * 0.55)} cy={P(headY + faceRy * 0.18)} rx={P(faceR * 0.28)} ry={P(faceRy * 0.12)} fill={`url(#${id}b)`} />
-            </>
-          )}
-
-          <ellipse cx={P(c - eyeOff)} cy={P(eyeY)} rx={P(faceR * 0.1)} ry={P(faceR * 0.12)} fill="#fff" />
-          <ellipse cx={P(c - eyeOff)} cy={P(eyeY)} rx={P(faceR * 0.075)} ry={P(faceR * 0.095)} fill={`url(#${id}i)`} />
-          <circle cx={P(c - eyeOff)} cy={P(eyeY)} r={P(faceR * 0.04)} fill="#111" />
-          <ellipse cx={P(c - eyeOff - faceR * 0.03)} cy={P(eyeY - faceR * 0.05)} rx={P(faceR * 0.04)} ry={P(faceR * 0.055)} fill="#fff" opacity="0.9" />
-          <circle cx={P(c - eyeOff + faceR * 0.03)} cy={P(eyeY + faceR * 0.02)} r={P(faceR * 0.018)} fill="#fff" opacity="0.5" />
-          <path d={`M${p(c - eyeOff - faceR * 0.18, eyeY - faceR * 0.18)} Q${p(c - eyeOff, eyeY - faceR * 0.26)} ${p(c - eyeOff + faceR * 0.18, eyeY - faceR * 0.18)}`}
-            fill="none" stroke="#222" strokeWidth={isMale ? 2.6 : 2.2} strokeLinecap="round" />
-
-          <ellipse cx={P(c + eyeOff)} cy={P(eyeY)} rx={P(faceR * 0.1)} ry={P(faceR * 0.12)} fill="#fff" />
-          <ellipse cx={P(c + eyeOff)} cy={P(eyeY)} rx={P(faceR * 0.075)} ry={P(faceR * 0.095)} fill={`url(#${id}i)`} />
-          <circle cx={P(c + eyeOff)} cy={P(eyeY)} r={P(faceR * 0.04)} fill="#111" />
-          <ellipse cx={P(c + eyeOff - faceR * 0.03)} cy={P(eyeY - faceR * 0.05)} rx={P(faceR * 0.04)} ry={P(faceR * 0.055)} fill="#fff" opacity="0.9" />
-          <circle cx={P(c + eyeOff + faceR * 0.03)} cy={P(eyeY + faceR * 0.02)} r={P(faceR * 0.018)} fill="#fff" opacity="0.5" />
-          <path d={`M${p(c + eyeOff - faceR * 0.18, eyeY - faceR * 0.18)} Q${p(c + eyeOff, eyeY - faceR * 0.26)} ${p(c + eyeOff + faceR * 0.18, eyeY - faceR * 0.18)}`}
-            fill="none" stroke="#222" strokeWidth={isMale ? 2.6 : 2.2} strokeLinecap="round" />
-
           {eyelid > 0 && (
             <>
-              <ellipse cx={P(c - eyeOff)} cy={P(eyeY)} rx={P(faceR * 0.1)} ry={P(faceR * 0.12)} fill={`url(#${id}s)`} opacity={eyelid} />
-              <ellipse cx={P(c + eyeOff)} cy={P(eyeY)} rx={P(faceR * 0.1)} ry={P(faceR * 0.12)} fill={`url(#${id}s)`} opacity={eyelid} />
+              <ellipse cx={P(eyeLX)} cy={P(eyeY)} rx={P(eyeRx)} ry={P(eyeRy)} fill="#F9D7D2" opacity={eyelid * 0.9} />
+              <ellipse cx={P(eyeRX)} cy={P(eyeY)} rx={P(eyeRx)} ry={P(eyeRy)} fill="#F9D7D2" opacity={eyelid * 0.9} />
             </>
           )}
 
-          <path d={`M${p(c - eyeOff - faceR * 0.2, eyeY - faceR * 0.38)} Q${p(c - eyeOff, eyeY - faceR * 0.46)} ${p(c - eyeOff + faceR * 0.2, eyeY - faceR * 0.38)}`}
-            fill="none" stroke="#3d2a1c" strokeWidth="2.8" strokeLinecap="round" opacity={state === "thinking" ? 0.65 : 0.85} />
-          <path d={`M${p(c + eyeOff - faceR * 0.2, eyeY - faceR * 0.38)} Q${p(c + eyeOff, eyeY - faceR * 0.46)} ${p(c + eyeOff + faceR * 0.2, eyeY - faceR * 0.38)}`}
-            fill="none" stroke="#3d2a1c" strokeWidth="2.8" strokeLinecap="round" opacity={state === "thinking" ? 0.65 : 0.85} />
-
-          <path d={`M${p(c, noseY)} Q${p(c + 3, noseY + faceRy * 0.1)} ${p(c, noseY + faceRy * 0.14)}`}
-            fill="none" stroke="#d4a090" strokeWidth="1.5" strokeLinecap="round" />
-
-          <path ref={mouthRef} d={`M${p(c - 12, mouthY)} Q${p(c, mouthY + 2)} ${p(c + 12, mouthY)}`}
-            fill="none" stroke="#cc6666" strokeWidth="2" strokeLinecap="round" />
-          <path d={`M${p(c - 10, mouthY + 4)} Q${p(c, mouthY + 6)} ${p(c + 10, mouthY + 4)}`}
-            fill="none" stroke="#dda0a0" strokeWidth="0.8" strokeLinecap="round" opacity="0.3" />
-
-          {(() => {
-            const cx2 = c;
-            const cy2 = headY - faceRy;
-            const r = faceR;
-            const ry = faceRy;
-            const hd = isMale ? [
-              `M${p(cx2 - r - 6, cy2 + 4)}`,
-              `C${p(cx2 - r * 0.6, cy2 - 14)} ${p(cx2 - r * 0.3, cy2 + 2)} ${p(cx2 - r * 0.05, cy2 - 8)}`,
-              `C${p(cx2 + r * 0.05, cy2 - 8)} ${p(cx2 + r * 0.3, cy2 + 2)} ${p(cx2 + r * 0.6, cy2 - 14)}`,
-              `C${p(cx2 + r + 6, cy2 + 4)} ${p(cx2 + r + 10, cy2 - 2)} ${p(cx2 + r + 12, cy2 + 2)}`,
-              `L${p(cx2 + r + 14, cy2 + ry * 0.06)}`,
-              `C${p(cx2 + r + 7, cy2)} ${p(cx2 + r + 3, cy2 + ry * 0.04)} ${p(cx2 + r, cy2 + ry * 0.02)}`,
-              `C${p(cx2 + r * 0.8, cy2 + ry * 0.12)} ${p(cx2 + r * 0.6, cy2 + ry * 0.1)} ${p(cx2 + r * 0.4, cy2 + ry * 0.06)}`,
-              `C${p(cx2, cy2 + ry * 0.1)} ${p(cx2 - r * 0.4, cy2 + ry * 0.06)} ${p(cx2 - r * 0.6, cy2 + ry * 0.1)}`,
-              `C${p(cx2 - r * 0.8, cy2 + ry * 0.12)} ${p(cx2 - r - 3, cy2 + ry * 0.04)} ${p(cx2 - r - 7, cy2)}`,
-              `L${p(cx2 - r - 14, cy2 + ry * 0.06)}`,
-              `C${p(cx2 - r - 12, cy2 + 2)} ${p(cx2 - r - 10, cy2 - 2)} ${p(cx2 - r - 6, cy2 + 4)}Z`,
-            ].join(" ") : [
-              `M${p(cx2 - r - 8, cy2 + 6)}`,
-              `C${p(cx2 - r * 0.7, cy2 - 16)} ${p(cx2 - r * 0.35, cy2 + 4)} ${p(cx2 - r * 0.1, cy2 - 10)}`,
-              `C${p(cx2 + r * 0.1, cy2 - 10)} ${p(cx2 + r * 0.35, cy2 + 4)} ${p(cx2 + r * 0.7, cy2 - 16)}`,
-              `C${p(cx2 + r + 8, cy2 + 6)} ${p(cx2 + r + 12, cy2 - 3)} ${p(cx2 + r + 14, cy2 + 1)}`,
-              `L${p(cx2 + r + 16, cy2 + ry * 0.08)}`,
-              `C${p(cx2 + r + 9, cy2 + ry * 0.02)} ${p(cx2 + r + 4, cy2 + ry * 0.06)} ${p(cx2 + r, cy2 + ry * 0.04)}`,
-              `C${p(cx2 + r * 0.85, cy2 + ry * 0.15)} ${p(cx2 + r * 0.7, cy2 + ry * 0.12)} ${p(cx2 + r * 0.5, cy2 + ry * 0.08)}`,
-              `C${p(cx2, cy2 + ry * 0.14)} ${p(cx2 - r * 0.5, cy2 + ry * 0.08)} ${p(cx2 - r * 0.7, cy2 + ry * 0.12)}`,
-              `C${p(cx2 - r * 0.85, cy2 + ry * 0.15)} ${p(cx2 - r - 4, cy2 + ry * 0.06)} ${p(cx2 - r - 9, cy2 + ry * 0.02)}`,
-              `L${p(cx2 - r - 16, cy2 + ry * 0.08)}`,
-              `C${p(cx2 - r - 14, cy2 + 1)} ${p(cx2 - r - 12, cy2 - 3)} ${p(cx2 - r - 8, cy2 + 6)}Z`,
-            ].join(" ");
-            return <path d={hd} fill={`url(#${id}h)`} />;
-          })()}
-
-          {!isMale && (
-            <ellipse cx={P(c - faceR * 0.15)} cy={P(headY - faceRy - 6)} rx={P(faceR * 0.3)} ry={P(faceR * 0.07)}
-              fill="#fff" opacity="0.08" transform={`rotate(-20, ${P(c - faceR * 0.15)}, ${P(headY - faceRy - 6)})`} />
-          )}
+          <path ref={mouthRef} d={`M${p(mouthX - 12, mouthY)} Q${p(mouthX, mouthY + 2)} ${p(mouthX + 12, mouthY)}`}
+            fill="none" stroke="rgba(200,80,80,0.7)" strokeWidth="2.5" strokeLinecap="round" />
 
           {state === "speaking" && (
-            <ellipse cx={c} cy={headY} rx={P(faceR + 14)} ry={P(faceRy + 16)} fill="none" stroke="#6bcf" strokeWidth="1.5" opacity="0.4">
-              <animate attributeName="rx" values={`${P(faceR + 14)};${P(faceR + 22)};${P(faceR + 14)}`} dur="0.8s" repeatCount="indefinite" />
-              <animate attributeName="ry" values={`${P(faceRy + 16)};${P(faceRy + 24)};${P(faceRy + 16)}`} dur="0.8s" repeatCount="indefinite" />
+            <ellipse cx={fcx} cy={fcy} rx={P(fr + 14)} ry={P(fr + 16)} fill="none" stroke="#6bcf" strokeWidth="1.5" opacity="0.4">
+              <animate attributeName="rx" values={`${P(fr + 14)};${P(fr + 24)};${P(fr + 14)}`} dur="0.8s" repeatCount="indefinite" />
+              <animate attributeName="ry" values={`${P(fr + 16)};${P(fr + 26)};${P(fr + 16)}`} dur="0.8s" repeatCount="indefinite" />
               <animate attributeName="opacity" values="0.4;0.1;0.4" dur="0.8s" repeatCount="indefinite" />
             </ellipse>
           )}
 
           {state === "listening" && (
             <>
-              <ellipse cx={c} cy={headY} rx={P(faceR + 10)} ry={P(faceRy + 12)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.5">
-                <animate attributeName="rx" values={`${P(faceR + 10)};${P(faceR + 28)};${P(faceR + 10)}`} dur="1.5s" repeatCount="indefinite" />
-                <animate attributeName="ry" values={`${P(faceRy + 12)};${P(faceRy + 30)};${P(faceRy + 12)}`} dur="1.5s" repeatCount="indefinite" />
+              <ellipse cx={fcx} cy={fcy} rx={P(fr + 10)} ry={P(fr + 12)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.5">
+                <animate attributeName="rx" values={`${P(fr + 10)};${P(fr + 30)};${P(fr + 10)}`} dur="1.5s" repeatCount="indefinite" />
+                <animate attributeName="ry" values={`${P(fr + 12)};${P(fr + 32)};${P(fr + 12)}`} dur="1.5s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.5;0;0.5" dur="1.5s" repeatCount="indefinite" />
               </ellipse>
-              <ellipse cx={c} cy={headY} rx={P(faceR + 10)} ry={P(faceRy + 12)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.3">
-                <animate attributeName="rx" values={`${P(faceR + 10)};${P(faceR + 34)};${P(faceR + 10)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
-                <animate attributeName="ry" values={`${P(faceRy + 12)};${P(faceRy + 36)};${P(faceRy + 12)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
+              <ellipse cx={fcx} cy={fcy} rx={P(fr + 10)} ry={P(fr + 12)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.3">
+                <animate attributeName="rx" values={`${P(fr + 10)};${P(fr + 36)};${P(fr + 10)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
+                <animate attributeName="ry" values={`${P(fr + 12)};${P(fr + 38)};${P(fr + 12)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" begin="0.5s" repeatCount="indefinite" />
               </ellipse>
             </>
@@ -267,7 +168,7 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
 
           {state === "thinking" && (
             <g opacity="0.8">
-              <text x={P(c + faceR + 6)} y={P(headY - faceRy - 20)} fontSize="14" fill="#6bcf" textAnchor="middle" fontFamily="sans-serif">
+              <text x={P(fcx + fr + 6)} y={P(fcy - fr - 10)} fontSize="14" fill="#6bcf" textAnchor="middle" fontFamily="sans-serif">
                 ✦<animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" />
                 <animateTransform attributeName="transform" type="translate" values="0,0;0,-10;0,0" dur="1.2s" repeatCount="indefinite" />
               </text>
@@ -277,7 +178,7 @@ function AgentAvatar({ state, analyserNode, size = 200, gender = "female" }: Age
       </svg>
 
       <div style={{
-        position: "absolute", bottom: -2, left: "50%", transform: "translateX(-50%)",
+        position: "absolute", bottom: 2, left: "50%", transform: "translateX(-50%)",
         fontSize: 10, color: "var(--mute)", background: "var(--surface)", padding: "1px 10px", borderRadius: 8,
         whiteSpace: "nowrap", border: "1px solid var(--hairline)", lineHeight: 1.5, zIndex: 1,
       }}>
