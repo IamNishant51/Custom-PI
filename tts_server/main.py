@@ -56,12 +56,37 @@ VOICE_PRESETS = {
     "bm_george":   {"name": "George",   "gender": "male",   "desc": "British male"},
 }
 
-# ── Piper voices (Indian English + high-quality extras) ───────────
+# ── Piper voices (Indian accent + high-quality English + Hindi) ────
 PIPER_VOICES = {
     "piper_indian": {
         "name": "Priya", "gender": "female",
         "desc": "Indian English female (Piper)",
         "model": "en_IN-spicor-medium",
+        "config": {"length_scale": 1.02, "noise_scale": 0.7, "noise_w": 0.9},
+    },
+    "piper_ryan": {
+        "name": "Ryan", "gender": "male",
+        "desc": "American male (Piper)",
+        "model": "en_US-ryan-medium",
+        "config": {"length_scale": 0.92, "noise_scale": 0.667, "noise_w": 0.8},
+    },
+    "piper_alba": {
+        "name": "Alba", "gender": "female",
+        "desc": "British female (Piper)",
+        "model": "en_GB-alba-medium",
+        "config": {"length_scale": 0.95, "noise_scale": 0.7, "noise_w": 0.85},
+    },
+    "piper_northern_male": {
+        "name": "James", "gender": "male",
+        "desc": "British male (Piper)",
+        "model": "en_GB-northern_english_male-medium",
+        "config": {"length_scale": 0.9, "noise_scale": 0.667, "noise_w": 0.8},
+    },
+    "piper_hindi_male": {
+        "name": "Pratham", "gender": "male",
+        "desc": "Hindi male (Piper, speaks Hindi)",
+        "model": "hi_IN-pratham-medium",
+        "config": {"length_scale": 1.0, "noise_scale": 0.667, "noise_w": 0.8},
     },
 }
 
@@ -121,11 +146,12 @@ def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int]:
     voice = PiperVoice.load(vi["model_path"], config_path=vi["config_path"])
     sample_rate = voice.config.sample_rate or 22050
 
-    # Synthesize with more expressive parameters
+    # Use natural synthesis parameters
+    syn_voice = vi.get("config", {})
     config = SynthesisConfig(
-        length_scale=1.05,
-        noise_scale=0.75,
-        noise_w_scale=0.85,
+        length_scale=syn_voice.get("length_scale", 0.95),
+        noise_scale=syn_voice.get("noise_scale", 0.667),
+        noise_w_scale=syn_voice.get("noise_w", 0.8),
         volume=1.0,
     )
     audio = voice.synthesize(text.strip(), syn_config=config)
@@ -274,12 +300,13 @@ async def select_voice(req: SelectVoiceRequest):
 
 
 def _wav_from_pcm(pcm: np.ndarray, sr: int) -> bytes:
+    int16 = np.clip(pcm, -1.0, 1.0) * 32767
     buf = io.BytesIO()
     with wave.open(buf, 'wb') as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(sr)
-        wf.writeframes(pcm.astype(np.int16).tobytes())
+        wf.writeframes(int16.astype(np.int16).tobytes())
     return buf.getvalue()
 
 

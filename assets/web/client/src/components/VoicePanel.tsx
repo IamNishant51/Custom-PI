@@ -273,7 +273,6 @@ export default function VoicePanel() {
     // Initialize audio engine inside user gesture (required for browser autoplay policy)
     const engine = getEngine();
     await engine.resume().catch(() => {});
-    engine.playTestTone();
 
     if (state === "listening") {
       await stopRecording();
