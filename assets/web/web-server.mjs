@@ -6235,18 +6235,28 @@ export async function createApp() {
     return withRequestContext(contextStore, () => {});
   });
 
-  // Serve static client
+  // Serve static client — exact matches only (wildcard: false prevents
+  // fastify-static from intercepting API routes before they can be handled)
   if (fs.existsSync(CLIENT_DIR)) {
     await app.register(fastifyStatic, {
       root: CLIENT_DIR,
       prefix: "/",
-      wildcard: true,
+      wildcard: false,
     });
   }
 
-  // SPA fallback — always registered so API 404s are not swallowed
+  // SPA fallback — serves index.html for non-API routes, and handles
+  // subdirectory assets (e.g., assets/index-xxx.js) that wildcard: false misses
   app.setNotFoundHandler((req, reply) => {
     if (req.url.startsWith("/api") || req.url.startsWith("/ws")) return reply.callNotFound();
+
+    // Try to serve the file from dist/ (handles assets/*.js, *.css, etc.)
+    const filePath = path.join(CLIENT_DIR, req.url.replace(/^\//, ""));
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      return reply.sendFile(req.url.replace(/^\//, ""));
+    }
+
+    // SPA fallback — serve index.html
     const indexPath = path.join(CLIENT_DIR, "index.html");
     if (fs.existsSync(indexPath)) {
       reply.type("text/html").send(fs.readFileSync(indexPath, "utf8"));
