@@ -6,6 +6,9 @@ export class AudioEngine {
   private gain: GainNode | null = null;
   private onStateChange: AudioStateCallback | null = null;
   private _resumed = false;
+  private _volume = 1.0;
+  private _currentSource: AudioBufferSourceNode | null = null;
+  private _currentResolve: (() => void) | null = null;
 
   setStateCallback(fn: AudioStateCallback) {
     this.onStateChange = fn;
@@ -22,8 +25,6 @@ export class AudioEngine {
   get resumed() {
     return this._resumed;
   }
-
-  private _volume = 1.0;
 
   setVolume(v: number) {
     this._volume = Math.max(0, v);
@@ -65,8 +66,19 @@ export class AudioEngine {
     console.log(`[audio] Test tone playing at 440Hz`);
   }
 
+  stop() {
+    if (this._currentSource) {
+      try { this._currentSource.stop(); } catch {}
+      try { this._currentSource.disconnect(); } catch {}
+      this._currentSource = null;
+    }
+    const r = this._currentResolve;
+    this._currentResolve = null;
+    this.onStateChange?.("idle");
+    r?.();
+  }
+
   async playBase64Audio(base64: string, sampleRate: number): Promise<void> {
-    // Try AudioContext path first
     if (this.ctx && this.analyser && this.gain) {
       try {
         const binary = atob(base64);
@@ -78,7 +90,6 @@ export class AudioEngine {
         }
         console.log(`[audio] decodeAudioData, size=${len} bytes, ctx.state=${this.ctx.state}`);
         const audioBuffer = await this.ctx.decodeAudioData(arrayBuf);
-        // Check audio levels
         const ch = audioBuffer.getChannelData(0);
         let maxVal = 0;
         for (let i = 0; i < ch.length; i++) {
@@ -90,10 +101,16 @@ export class AudioEngine {
         const source = this.ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(this.analyser);
+        this._currentSource = source;
         return new Promise((resolve) => {
+          this._currentResolve = resolve;
           this.onStateChange?.("speaking");
           source.start();
           source.onended = () => {
+            if (this._currentSource === source) {
+              this._currentSource = null;
+              this._currentResolve = null;
+            }
             this.onStateChange?.("idle");
             resolve();
           };
@@ -105,15 +122,18 @@ export class AudioEngine {
 
     // Fallback: use HTML Audio element (bypasses AudioContext issues)
     return new Promise((resolve) => {
+      this._currentResolve = resolve;
       this.onStateChange?.("speaking");
       const audio = new Audio(`data:audio/wav;base64,${base64}`);
       audio.volume = 1.0;
       audio.onended = () => {
+        this._currentResolve = null;
         this.onStateChange?.("idle");
         resolve();
       };
       audio.play().catch((e) => {
         console.error("[audio] Audio element playback failed:", e);
+        this._currentResolve = null;
         this.onStateChange?.("idle");
         resolve();
       });
@@ -157,6 +177,7 @@ export class AudioEngine {
   }
 
   destroy() {
+    this.stop();
     if (this.ctx && this.ctx.state !== "closed") {
       this.ctx.close();
     }

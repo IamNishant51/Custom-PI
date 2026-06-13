@@ -118,24 +118,69 @@ def get_tts():
 # ── Piper engine ──────────────────────────────────────────────────
 _piper_installed = False
 _piper_voices: dict[str, dict] = {}
+PIPER_REPO = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+
+def _piper_download_url(model_name: str) -> tuple[str, str]:
+    """Build download URLs for a Piper voice model."""
+    parts = model_name.split("-")
+    lang_code = parts[0]
+    quality = parts[-1]
+    voice_id = "-".join(parts[1:-1])
+    lang = lang_code.split("_")[0]
+    base = f"{PIPER_REPO}/{lang}/{lang_code}/{voice_id}/{quality}"
+    onnx_url = f"{base}/{model_name}.onnx"
+    json_url = f"{base}/{model_name}.onnx.json"
+    return onnx_url, json_url
+
+def ensure_piper_voice(vid: str) -> None:
+    """Download Piper voice model if not already present."""
+    if vid in _piper_voices and os.path.exists(_piper_voices[vid]["model_path"]):
+        return
+    vinfo = PIPER_VOICES[vid]
+    model_name = vinfo["model"]
+    model_path = os.path.join(PIPER_DIR, f"{model_name}.onnx")
+    config_path = os.path.join(PIPER_DIR, f"{model_name}.onnx.json")
+    os.makedirs(PIPER_DIR, exist_ok=True)
+
+    if os.path.exists(model_path) and os.path.exists(config_path):
+        _piper_voices[vid] = {**vinfo, "model_path": model_path, "config_path": config_path}
+        VOICES[vid] = {**vinfo, "type": "piper", "id": vid, "available": True}
+        return
+
+    import httpx
+    onnx_url, json_url = _piper_download_url(model_name)
+    for url, dest in [(onnx_url, model_path), (json_url, config_path)]:
+        logger.info(f"Downloading Piper voice: {url}")
+        try:
+            resp = httpx.get(url, follow_redirects=True, timeout=300)
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                f.write(resp.content)
+            logger.info(f"Downloaded {dest}")
+        except Exception as e:
+            logger.error(f"Failed to download {url}: {e}")
+            raise RuntimeError(f"Failed to download Piper voice '{vinfo['name']}': {e}")
+
+    _piper_voices[vid] = {**vinfo, "model_path": model_path, "config_path": config_path}
+    VOICES[vid] = {**vinfo, "type": "piper", "id": vid, "available": True}
 
 def init_piper_voices():
     global _piper_installed
-    # Check if piper-tts is available
     if importlib.util.find_spec("piper") is None:
         logger.info("piper-tts not installed, skipping Piper voices")
         return
-    # Check if model files exist
+    # Register all Piper voices (mark available if already downloaded)
     for vid, vinfo in PIPER_VOICES.items():
         model_name = vinfo["model"]
         model_path = os.path.join(PIPER_DIR, f"{model_name}.onnx")
         config_path = os.path.join(PIPER_DIR, f"{model_name}.onnx.json")
         if os.path.exists(model_path) and os.path.exists(config_path):
-            VOICES[vid] = {**vinfo, "type": "piper", "id": vid}
-            _piper_voices[vid] = {"model_path": model_path, "config_path": config_path}
+            _piper_voices[vid] = {"model_path": model_path, "config_path": config_path, **vinfo}
+            VOICES[vid] = {**vinfo, "type": "piper", "id": vid, "available": True}
             logger.info(f"Piper voice loaded: {vinfo['name']} ({model_name})")
         else:
-            logger.warning(f"Piper voice {vid} model not found at {model_path}")
+            VOICES[vid] = {**vinfo, "type": "piper", "id": vid, "available": False}
+            logger.info(f"Piper voice registered (needs download): {vinfo['name']} ({model_name})")
     _piper_installed = True
 
 def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int]:
@@ -226,7 +271,7 @@ def apply_gain(pcm: np.ndarray, gain: float = VOLUME_GAIN) -> np.ndarray:
         return pcm
     peak = np.max(np.abs(pcm))
     if peak > 0:
-        safe_gain = min(gain, 0.99 / peak)
+        safe_gain = min(gain, 1.0 / peak)
         pcm = pcm * safe_gain
     return pcm
 
@@ -320,9 +365,10 @@ async def synthesize(req: TTSRequest):
 
     # ── Piper engine path ──
     if vinfo["type"] == "piper":
-        if not _piper_installed or voice not in _piper_voices:
-            raise HTTPException(503, f"Piper voice '{voice}' not available")
+        if not _piper_installed:
+            raise HTTPException(503, "Piper TTS engine not available")
         try:
+            ensure_piper_voice(voice)
             wav_bytes, sr, peak = synthesize_piper(req.text, voice)
             logger.info(f"Piper TTS: peak={peak}, {len(wav_bytes)} bytes, {sr}Hz")
             return {
