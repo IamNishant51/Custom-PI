@@ -6240,7 +6240,7 @@ export async function createApp() {
     await app.register(fastifyStatic, {
       root: CLIENT_DIR,
       prefix: "/",
-      wildcard: false,
+      wildcard: true,
     });
   }
 
@@ -6517,8 +6517,30 @@ export async function createApp() {
         }
       }
     } catch {}
-    return loadModels();
+    const models = loadModels();
+    return { models: Array.isArray(models) ? models : [] };
   });
+  app.get("/api/model-providers", async () => {
+    const online = [];
+    const checks = [
+      { provider: "lmstudio", url: "http://127.0.0.1:1234/v1/models", baseUrl: "http://127.0.0.1:1234/v1" },
+      { provider: "ollama", url: "http://127.0.0.1:11434/api/tags", baseUrl: "http://127.0.0.1:11434/v1" },
+    ];
+    for (const c of checks) {
+      try {
+        const res = await fetch(c.url, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          const body = await res.json();
+          let models = [];
+          if (c.provider === "lmstudio") models = (body.data || []).map(m => ({ id: m.id, provider: c.provider }));
+          if (c.provider === "ollama") models = (body.models || []).map(m => ({ id: m.name, provider: c.provider }));
+          online.push({ provider: c.provider, reachable: true, baseUrl: c.baseUrl, models });
+        }
+      } catch {}
+    }
+    return { providers: online };
+  });
+
   app.post("/api/models/check", async () => {
     const online = [];
     // Check common local providers
