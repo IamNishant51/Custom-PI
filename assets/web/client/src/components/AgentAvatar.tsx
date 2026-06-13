@@ -1,5 +1,5 @@
 import { useEffect, useRef, memo, useState } from "react";
-import animeGirlSvg from "../assets/anime_girl.svg";
+import rawSvg from "../assets/anime_girl.svg?raw";
 
 interface AgentAvatarProps {
   state: "idle" | "listening" | "thinking" | "speaking";
@@ -8,57 +8,91 @@ interface AgentAvatarProps {
   gender?: "male" | "female";
 }
 
+// Fix SVG dimensions so it stretches to fill the container
+const inlineSvg = rawSvg
+  .replace('width="338"', 'width="100%"')
+  .replace('height="190"', 'height="100%"');
+
 function AgentAvatar({ state, analyserNode, size = 200, gender }: AgentAvatarProps) {
   const s = size;
-  const mouthRef = useRef<SVGPathElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const animRef = useRef(0);
   const blinkRef = useRef(0);
-  const [eyelid, setEyelid] = useState(0);
+
+  const leftEyePaths = useRef<SVGPathElement[]>([]);
+  const rightEyePaths = useRef<SVGPathElement[]>([]);
+  const mouthPaths = useRef<SVGPathElement[]>([]);
+  const ready = useRef(false);
 
   const c = s / 2;
 
-  // Map SVG viewBox (338x190) to container pixel coords.
-  // Image is rendered with object-fit:cover in a square, so it fills height
-  // and is horizontally centered.
-  const scale = s / 190;
-  const leftOff = (s - 338 * scale) / 2;
-  const toX = (vx: number) => leftOff + vx * scale;
-  const toY = (vy: number) => vy * scale;
-
-  // Face landmark positions in viewBox coords (estimated from SVG structure)
-  const mouthX = toX(169), mouthY = toY(102);
-  const eyeLX = toX(123), eyeRX = toX(215), eyeY = toY(65);
-  const eyeRx = (eyeRX - eyeLX) * 0.08;
-  const eyeRy = (eyeRX - eyeLX) * 0.12;
-
-  // Face center and radius for glow ring
+  // Face center in SVG viewBox (338×190). With xMidYMid meet in a square container,
+  // the SVG height = s, SVG width = s*338/190, centered horizontally.
+  // viewBox(169, 65) → container center.
   const fcx = c;
-  const fcy = toY(62);
-  const fr = toX(169) - toX(120);
+  const fcy = (65 / 190) * s;
+  const fr = ((169 - 120) / 190) * s;
 
   const id = `ag-${Math.random().toString(36).slice(2, 6)}`;
 
-  const p = (x: number, y: number) => `${x.toFixed(2)},${y.toFixed(2)}`;
   const P = (x: number) => x.toFixed(2);
 
+  // --- initialise: classify paths by bounding box ---
   useEffect(() => {
+    if (!containerRef.current) return;
+    const svg = containerRef.current.querySelector("svg");
+    if (!svg) return;
+    svgRef.current = svg;
+
+    const left: SVGPathElement[] = [];
+    const right: SVGPathElement[] = [];
+    const mouth: SVGPathElement[] = [];
+
+    svg.querySelectorAll("path").forEach((p) => {
+      try {
+        const bb = p.getBBox();
+        const cx = bb.x + bb.width / 2;
+        const cy = bb.y + bb.height / 2;
+        if (cx > 105 && cx < 150 && cy > 50 && cy < 85) left.push(p);
+        else if (cx > 185 && cx < 230 && cy > 50 && cy < 85) right.push(p);
+        else if (cx > 140 && cx < 200 && cy > 85 && cy < 120) mouth.push(p);
+      } catch {}
+    });
+
+    leftEyePaths.current = left;
+    rightEyePaths.current = right;
+    mouthPaths.current = mouth;
+    ready.current = true;
+
+    // --- blink animation ---
+    const allEyes = [...left, ...right];
     const nextBlink = () => {
       blinkRef.current = window.setTimeout(() => {
-        setEyelid(1);
-        setTimeout(() => setEyelid(0), 120);
-        nextBlink();
+        allEyes.forEach((el) => {
+          el.style.transition = "transform 0.06s";
+          el.style.transformOrigin = `${el.getBBox().x + el.getBBox().width / 2}px ${el.getBBox().y + el.getBBox().height / 2}px`;
+          el.style.transform = "scaleY(0.01)";
+        });
+        setTimeout(() => {
+          allEyes.forEach((el) => {
+            el.style.transition = "transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1)";
+            el.style.transform = "scaleY(1)";
+          });
+          nextBlink();
+        }, 80);
       }, 2000 + Math.random() * 3000);
     };
     nextBlink();
+
     return () => clearTimeout(blinkRef.current);
   }, []);
 
+  // --- mouth animation (speaking) ---
   useEffect(() => {
     let stopped = false;
     const animate = () => {
       if (stopped) return;
-      const el = mouthRef.current;
-      if (!el) { animRef.current = requestAnimationFrame(animate); return; }
 
       let open = 0;
       if (state === "speaking") {
@@ -73,94 +107,82 @@ function AgentAvatar({ state, analyserNode, size = 200, gender }: AgentAvatarPro
         }
       }
 
-      const mw = 14 + open * 10;
-      const mh = 3 + open * 14;
-      const hl = mw / 2;
-      const vm = mh;
-      const mx = mouthX;
-      const my = mouthY;
-
-      if (open > 0.1) {
-        el.setAttribute("d", [
-          `M${p(mx - hl, my)}`,
-          `Q${p(mx - hl * 0.4, my + vm * 1.2)} ${p(mx, my + vm)}`,
-          `Q${p(mx + hl * 0.4, my + vm * 1.2)} ${p(mx + hl, my)}`,
-          `Q${p(mx + hl * 0.4, my + vm * 0.5)} ${p(mx, my + vm * 0.3)}`,
-          `Q${p(mx - hl * 0.4, my + vm * 0.5)} ${p(mx - hl, my)}Z`,
-        ].join(" "));
-        el.setAttribute("fill", "#b04050");
-        el.setAttribute("stroke", "none");
-      } else {
-        el.setAttribute("d", `M${p(mx - hl, my)} Q${p(mx, my - 2)} ${p(mx + hl, my)}`);
-        el.setAttribute("fill", "none");
-        el.setAttribute("stroke", "#cc6666");
+      const mp = mouthPaths.current;
+      if (mp.length > 0) {
+        const bb = mp[0].getBBox();
+        const oy = bb.y + bb.height / 2;
+        // Scale Y: close mouth (0.3) to open (1.5)
+        const sy = 1 - open * 0.4;
+        const ty = open * 0.5;
+        mp.forEach((el) => {
+          el.style.transition = "transform 0.04s";
+          el.style.transformOrigin = `${bb.x + bb.width / 2}px ${oy}px`;
+          el.style.transform = `scaleY(${sy}) translateY(${ty}px)`;
+        });
       }
-      el.setAttribute("stroke-width", "2");
 
       animRef.current = requestAnimationFrame(animate);
     };
     animRef.current = requestAnimationFrame(animate);
     return () => { stopped = true; cancelAnimationFrame(animRef.current); };
-  }, [state, analyserNode, s, mouthX, mouthY]);
+  }, [state, analyserNode]);
 
   const stateScale = state === "listening" ? 1.03 : state === "thinking" ? 0.97 : 1;
-  const stateRotate = state === "listening" ? -4 : state === "thinking" ? 6 : 0;
+  const stateRotate = state === "listening" ? -3 : state === "thinking" ? 4 : 0;
 
   return (
     <div
       className="agent-avatar-root"
       style={{
         width: s, height: s, position: "relative", overflow: "hidden", borderRadius: "50%",
+        background: "#1a0a20",
         transition: "transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
         transform: `scale(${stateScale}) rotate(${stateRotate}deg)`,
       }}
     >
-      <img
-        src={animeGirlSvg} alt=""
-        style={{
-          position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-          objectFit: "cover", objectPosition: "50% 30%",
-        }}
-        draggable={false}
+      <div
+        ref={containerRef}
+        style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}
+        dangerouslySetInnerHTML={{ __html: inlineSvg }}
       />
 
-      <svg width={s} height={s} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
+      <svg
+        width={s} height={s}
+        style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+        viewBox={`0 0 ${s} ${s}`}
+      >
         <defs>
           <filter id={`${id}g`} x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation={state === "speaking" ? 6 : state === "listening" ? 10 : 3} result="blur" />
-            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            <feGaussianBlur
+              stdDeviation={state === "speaking" ? 6 : state === "listening" ? 10 : 3}
+              result="blur"
+            />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
           </filter>
         </defs>
 
         <g filter={`url(#${id}g)`}>
-          {eyelid > 0 && (
-            <>
-              <ellipse cx={P(eyeLX)} cy={P(eyeY)} rx={P(eyeRx)} ry={P(eyeRy)} fill="#F9D7D2" opacity={eyelid * 0.9} />
-              <ellipse cx={P(eyeRX)} cy={P(eyeY)} rx={P(eyeRx)} ry={P(eyeRy)} fill="#F9D7D2" opacity={eyelid * 0.9} />
-            </>
-          )}
-
-          <path ref={mouthRef} d={`M${p(mouthX - 12, mouthY)} Q${p(mouthX, mouthY + 2)} ${p(mouthX + 12, mouthY)}`}
-            fill="none" stroke="rgba(200,80,80,0.7)" strokeWidth="2.5" strokeLinecap="round" />
-
           {state === "speaking" && (
-            <ellipse cx={fcx} cy={fcy} rx={P(fr + 14)} ry={P(fr + 16)} fill="none" stroke="#6bcf" strokeWidth="1.5" opacity="0.4">
+            <ellipse cx={fcx} cy={fcy} rx={P(fr + 14)} ry={P(fr + 18)} fill="none" stroke="#6bcf" strokeWidth="1.5" opacity="0.4">
               <animate attributeName="rx" values={`${P(fr + 14)};${P(fr + 24)};${P(fr + 14)}`} dur="0.8s" repeatCount="indefinite" />
-              <animate attributeName="ry" values={`${P(fr + 16)};${P(fr + 26)};${P(fr + 16)}`} dur="0.8s" repeatCount="indefinite" />
+              <animate attributeName="ry" values={`${P(fr + 18)};${P(fr + 28)};${P(fr + 18)}`} dur="0.8s" repeatCount="indefinite" />
               <animate attributeName="opacity" values="0.4;0.1;0.4" dur="0.8s" repeatCount="indefinite" />
             </ellipse>
           )}
 
           {state === "listening" && (
             <>
-              <ellipse cx={fcx} cy={fcy} rx={P(fr + 10)} ry={P(fr + 12)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.5">
-                <animate attributeName="rx" values={`${P(fr + 10)};${P(fr + 30)};${P(fr + 10)}`} dur="1.5s" repeatCount="indefinite" />
-                <animate attributeName="ry" values={`${P(fr + 12)};${P(fr + 32)};${P(fr + 12)}`} dur="1.5s" repeatCount="indefinite" />
+              <ellipse cx={fcx} cy={fcy} rx={P(fr + 10)} ry={P(fr + 14)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.5">
+                <animate attributeName="rx" values={`${P(fr + 10)};${P(fr + 32)};${P(fr + 10)}`} dur="1.5s" repeatCount="indefinite" />
+                <animate attributeName="ry" values={`${P(fr + 14)};${P(fr + 34)};${P(fr + 14)}`} dur="1.5s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.5;0;0.5" dur="1.5s" repeatCount="indefinite" />
               </ellipse>
-              <ellipse cx={fcx} cy={fcy} rx={P(fr + 10)} ry={P(fr + 12)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.3">
-                <animate attributeName="rx" values={`${P(fr + 10)};${P(fr + 36)};${P(fr + 10)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
-                <animate attributeName="ry" values={`${P(fr + 12)};${P(fr + 38)};${P(fr + 12)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
+              <ellipse cx={fcx} cy={fcy} rx={P(fr + 10)} ry={P(fr + 14)} fill="none" stroke="#6bcf" strokeWidth="1" opacity="0.3">
+                <animate attributeName="rx" values={`${P(fr + 10)};${P(fr + 38)};${P(fr + 10)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
+                <animate attributeName="ry" values={`${P(fr + 14)};${P(fr + 40)};${P(fr + 14)}`} dur="1.5s" begin="0.5s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" begin="0.5s" repeatCount="indefinite" />
               </ellipse>
             </>
@@ -169,7 +191,8 @@ function AgentAvatar({ state, analyserNode, size = 200, gender }: AgentAvatarPro
           {state === "thinking" && (
             <g opacity="0.8">
               <text x={P(fcx + fr + 6)} y={P(fcy - fr - 10)} fontSize="14" fill="#6bcf" textAnchor="middle" fontFamily="sans-serif">
-                ✦<animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" />
+                ✦
+                <animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" />
                 <animateTransform attributeName="transform" type="translate" values="0,0;0,-10;0,0" dur="1.2s" repeatCount="indefinite" />
               </text>
             </g>
@@ -177,11 +200,14 @@ function AgentAvatar({ state, analyserNode, size = 200, gender }: AgentAvatarPro
         </g>
       </svg>
 
-      <div style={{
-        position: "absolute", bottom: 2, left: "50%", transform: "translateX(-50%)",
-        fontSize: 10, color: "var(--mute)", background: "var(--surface)", padding: "1px 10px", borderRadius: 8,
-        whiteSpace: "nowrap", border: "1px solid var(--hairline)", lineHeight: 1.5, zIndex: 1,
-      }}>
+      <div
+        style={{
+          position: "absolute", bottom: 2, left: "50%", transform: "translateX(-50%)",
+          fontSize: 10, color: "var(--mute)", background: "var(--surface)", padding: "1px 10px",
+          borderRadius: 8, whiteSpace: "nowrap", border: "1px solid var(--hairline)",
+          lineHeight: 1.5, zIndex: 1,
+        }}
+      >
         {state === "idle" && "Tap mic to speak"}
         {state === "listening" && "Listening..."}
         {state === "thinking" && "Thinking..."}
