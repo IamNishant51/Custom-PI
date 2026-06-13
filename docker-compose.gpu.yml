@@ -1,0 +1,40 @@
+version: "3.9"
+services:
+  pi-custom-pack:
+    build: .
+    ports:
+      - "4321:4321"
+    volumes:
+      - pi_data:/app/data
+      - pi_vault:/app/vault
+    environment:
+      - NODE_ENV=production
+      - PORT=4321
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  pi_data:
+  pi_vault:
+  ollama_data:

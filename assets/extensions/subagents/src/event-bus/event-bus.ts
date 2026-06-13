@@ -341,6 +341,11 @@ export const Topics = {
   THOUGHT_RECORDED: "thought.recorded",
   STRATEGY_SELECTED: "strategy.selected",
   CONFIDENCE_ASSESSED: "confidence.assessed",
+
+  // Autonomous actions (Phase 1.1)
+  AUTONOMOUS_ACTION: "autonomous.action",
+  AUTONOMOUS_ACTION_RESULT: "autonomous.action.result",
+  OPPORTUNITY_DETECTED: "opportunity.detected",
 } as const;
 
 export type TopicKey = keyof typeof Topics;

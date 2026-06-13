@@ -6,6 +6,8 @@ import { AsciiMenu } from "./components/Icons";
 import { ChatProvider, useChat } from "./context/ChatContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ThemeProvider } from "./context/ThemeContext";
+import { ModalProvider } from "./context/ModalContext";
+import ModalContainer from "./components/ModalContainer";
 
 const Dashboard = lazy(() => import("./components/Dashboard"));
 const VaultPanel = lazy(() => import("./components/VaultPanel"));
@@ -21,10 +23,22 @@ const AgentsPanel = lazy(() => import("./components/AgentsPanel"));
 const TeamPanel = lazy(() => import("./components/TeamPanel"));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
 const SocialPanel = lazy(() => import("./components/SocialPanel"));
+const NotesPanel = lazy(() => import("./components/NotesPanel"));
+const ContactsPanel = lazy(() => import("./components/ContactsPanel"));
+const CookbookPanel = lazy(() => import("./components/CookbookPanel"));
+const DeepResearchPanel = lazy(() => import("./components/DeepResearchPanel"));
+const ModelComparisonPanel = lazy(() => import("./components/ModelComparisonPanel"));
+const ImageGalleryPanel = lazy(() => import("./components/ImageGalleryPanel"));
+const DocumentEditorPanel = lazy(() => import("./components/DocumentEditorPanel"));
+const EmailPanel = lazy(() => import("./components/EmailPanel"));
+const CanvasEditorPanel = lazy(() => import("./components/CanvasEditorPanel"));
+const ThemeEditorPanel = lazy(() => import("./components/ThemeEditorPanel"));
+const LoginPanel = lazy(() => import("./components/LoginPanel"));
+const AdminPanel = lazy(() => import("./components/AdminPanel"));
 
-export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social";
+export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social" | "notes" | "contacts" | "cookbook" | "research" | "compare" | "gallery" | "documents" | "email" | "canvas-editor" | "theme" | "login" | "admin";
 
-const ALL_VIEWS: View[] = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social"];
+const ALL_VIEWS: View[] = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin"];
 
 function hashToView(): View {
   const raw = window.location.hash.replace(/^#\/?/, "").toLowerCase();
@@ -43,9 +57,12 @@ export default function App() {
   return (
     <ThemeProvider>
       <ChatProvider>
-        <ToasterProvider>
-          <AppContent />
-        </ToasterProvider>
+        <ModalProvider>
+          <ToasterProvider>
+            <AppContent />
+          </ToasterProvider>
+          <ModalContainer />
+        </ModalProvider>
       </ChatProvider>
     </ThemeProvider>
   );
@@ -106,6 +123,18 @@ function AppContent() {
               {activeView === "mcp" && <MCPPanel />}
               {activeView === "settings" && <SettingsPanel />}
               {activeView === "social" && <SocialPanel />}
+              {activeView === "notes" && <NotesPanel />}
+              {activeView === "contacts" && <ContactsPanel />}
+              {activeView === "cookbook" && <CookbookPanel />}
+              {activeView === "research" && <DeepResearchPanel />}
+              {activeView === "compare" && <ModelComparisonPanel />}
+              {activeView === "gallery" && <ImageGalleryPanel />}
+              {activeView === "documents" && <DocumentEditorPanel />}
+              {activeView === "email" && <EmailPanel />}
+              {activeView === "canvas-editor" && <CanvasEditorPanel />}
+              {activeView === "theme" && <ThemeEditorPanel />}
+              {activeView === "login" && <LoginPanel />}
+              {activeView === "admin" && <AdminPanel />}
             </Suspense>
           </div>
         </div>
@@ -121,7 +150,8 @@ const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { 
     pipeline: "Pipeline", health: "Health & Resources",
     "work-products": "Work Products",
     agents: "Sub-Agents", "agent-discovery": "Agent Discovery", mcp: "MCP Servers",
-    teams: "Teams", settings: "Settings", social: "Social Accounts",
+    teams: "Teams", settings: "Settings", social: "Social Accounts", notes: "Notes & Tasks", contacts: "Contacts", cookbook: "Model Cookbook", research: "Deep Research", compare: "Model Comparison", gallery: "Image Gallery", documents: "Documents",
+    email: "Email", "canvas-editor": "Canvas Editor", theme: "Theme Editor", login: "Login", admin: "Admin",
   };
   return (
     <div className="topbar">

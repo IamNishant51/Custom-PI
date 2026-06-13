@@ -2,7 +2,8 @@ import {
   MessageSquare, LayoutDashboard, KeyRound, BarChart3,
   Brain, FileText, Users, Puzzle, Settings, Menu,
   Play, Check, X, Plus, Trash2,
-  Eye, RefreshCw, Share2, GitBranch, Activity,
+  Eye, RefreshCw, Share2, GitBranch, Activity, StickyNote, Calendar, BookOpen, Search,
+  Mail, Palette, Shield, Sliders, Crop, Image,
 } from "lucide-react";
 
 interface IconProps {
@@ -70,3 +71,13 @@ export function AsciiX(props?: IconProps) { return <X size={14} {...props} />; }
 export function AsciiPlay(props?: IconProps) { return <Play size={14} {...props} />; }
 export function AsciiGitBranch(props?: IconProps) { return <GitBranch size={14} {...props} />; }
 export function AsciiActivity(props?: IconProps) { return <Activity size={14} {...props} />; }
+export function AsciiNotes(props?: IconProps) { return <StickyNote size={14} {...props} />; }
+export function AsciiCalendar(props?: IconProps) { return <Calendar size={14} {...props} />; }
+export function AsciiBook(props?: IconProps) { return <BookOpen size={14} {...props} />; }
+export function AsciiSearch(props?: IconProps) { return <Search size={14} {...props} />; }
+export function AsciiMail(props?: IconProps) { return <Mail size={14} {...props} />; }
+export function AsciiPalette(props?: IconProps) { return <Palette size={14} {...props} />; }
+export function AsciiShield(props?: IconProps) { return <Shield size={14} {...props} />; }
+export function AsciiSliders(props?: IconProps) { return <Sliders size={14} {...props} />; }
+export function AsciiCrop(props?: IconProps) { return <Crop size={14} {...props} />; }
+export function AsciiImage(props?: IconProps) { return <Image size={14} {...props} />; }

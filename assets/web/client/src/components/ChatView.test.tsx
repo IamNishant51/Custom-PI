@@ -26,15 +26,16 @@ describe("ChatView", () => {
 
   it("renders action chips in empty state", () => {
     render(<ChatView />);
-    expect(screen.getByText("> What can you do?")).toBeDefined();
-    expect(screen.getByText("> Explain codebase")).toBeDefined();
-    expect(screen.getByText("> Review products")).toBeDefined();
+    const chips = document.querySelectorAll(".action-chip");
+    expect(chips.length).toBe(8);
+    expect(chips[0].textContent).toContain("What can you do?");
+    expect(chips[1].textContent).toContain("Explain the codebase structure");
   });
 
   it("renders the input area when connected", () => {
     render(<ChatView />);
     const textarea = document.querySelector(".chat-input");
     expect(textarea).toBeDefined();
-    expect(textarea?.getAttribute("placeholder")).toBe("Ask me anything...");
+    expect(textarea?.getAttribute("placeholder")).toBe("Ask me anything... (type / for commands)");
   });
 });

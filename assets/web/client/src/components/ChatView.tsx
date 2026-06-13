@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useChat, type ChatItem } from "../context/ChatContext";
 import { showToast } from "./Toast";
 import UserMessage from "./UserMessage";
@@ -14,6 +14,17 @@ const TUI_BANNER = `  ██████╗ ██╗   ██╗ ████�
  ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║
   ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝`;
 
+const QUICK_ACTIONS = [
+  "What can you do?",
+  "Explain the codebase structure",
+  "Review current work products",
+  "Run a quick scan",
+  "Help me debug an issue",
+  "Summarize my last session",
+  "Create a new agent",
+  "Analyze git history",
+];
+
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 
 export default function ChatView() {
@@ -23,9 +34,26 @@ export default function ChatView() {
   const [attachments, setAttachments] = useState<any[]>([]);
   const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<Set<string>>(new Set());
   const [socialStatus, setSocialStatus] = useState<any>(null);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState("");
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
 
   useEffect(() => {
-    fetch("/api/social/status").then(r => r.json()).then(setSocialStatus).catch(err => showToast(err.message, 'error'));
+    fetch("/api/social/status").then(r => r.json()).then(setSocialStatus).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!userScrolledUp) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [items, userScrolledUp]);
+
+  const handleScroll = useCallback(() => {
+    const el = chatMessagesRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    setUserScrolledUp(!atBottom);
   }, []);
 
   const toggleThinkingCollapse = (thinkingId: string) => {
@@ -52,10 +80,110 @@ export default function ChatView() {
     return null;
   };
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [items]);
+  const getAgentThreads = useCallback(() => {
+    const threads: { id: string; tools: ChatItem[] }[] = [];
+    let current: ChatItem[] | null = null;
+    for (const item of items) {
+      if (item.type === "tool_call") {
+        if (!current) current = [];
+        current.push(item);
+      } else if (item.type === "tool_result") {
+        if (current) {
+          current.push(item);
+        }
+      } else {
+        if (current && current.length > 0) {
+          threads.push({ id: `thread_${threads.length}`, tools: current });
+          current = null;
+        }
+      }
+    }
+    if (current && current.length > 0) {
+      threads.push({ id: `thread_${threads.length}`, tools: current });
+    }
+    return threads;
+  }, [items]);
+
+  const exportChat = useCallback(async (format: "markdown" | "json") => {
+    const lines: string[] = [];
+    for (const item of items) {
+      switch (item.type) {
+        case "user": lines.push(`## User\n\n${item.content}\n`); break;
+        case "assistant": lines.push(`## Assistant\n\n${item.content}\n`); break;
+        case "thinking": lines.push(`> **Thinking** (${item.isStreaming ? "streaming" : "done"})\n\n> ${item.content}\n`); break;
+        case "tool_call":
+          lines.push(`> **Tool: ${item.toolName}** (${item.status})\n\`\`\`\n${item.toolArgs}\n\`\`\`\n`);
+          if (item.content) lines.push(`> Result:\n\`\`\`\n${item.content}\n\`\`\`\n`);
+          break;
+        case "error": lines.push(`## Error\n\n${item.content}\n`); break;
+      }
+    }
+    const text = lines.join("\n---\n\n");
+    if (format === "json") {
+      const json = JSON.stringify(items, null, 2);
+      downloadFile(json, "chat-export.json", "application/json");
+    } else {
+      await navigator.clipboard.writeText(text);
+      showToast("Chat copied to clipboard", "success");
+    }
+  }, [items]);
+
+  const downloadFile = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === "Escape") {
+      setShowSlashMenu(false);
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      if (showSlashMenu) {
+        e.preventDefault();
+        const filtered = getSlashCommands();
+        if (filtered.length > 0) {
+          handleActionChipClick(filtered[0].action);
+          setShowSlashMenu(false);
+        }
+        return;
+      }
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    if (val === "/") {
+      setShowSlashMenu(true);
+      setSlashFilter("");
+    } else if (val.startsWith("/") && showSlashMenu) {
+      setSlashFilter(val.slice(1));
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
+
+  const getSlashCommands = () => {
+    const commands = [
+      { label: "help", action: "What can you do?", icon: "?" },
+      { label: "explain", action: "Explain the codebase structure", icon: "i" },
+      { label: "review", action: "Review current work products", icon: "r" },
+      { label: "debug", action: "Help me debug an issue", icon: "d" },
+      { label: "summarize", action: "Summarize my last session", icon: "s" },
+      { label: "scan", action: "Run a quick scan", icon: "x" },
+      { label: "git", action: "Analyze git history", icon: "g" },
+      { label: "agent", action: "Create a new agent", icon: "a" },
+    ];
+    if (!slashFilter) return commands;
+    return commands.filter(c => c.label.includes(slashFilter.toLowerCase()));
   };
 
   const handleCopyClick = (e: React.MouseEvent) => {
@@ -135,7 +263,22 @@ export default function ChatView() {
 
   return (
     <div className="chat-container" onClick={handleCopyClick}>
-      <div className="chat-messages">
+      <div className="chat-toolbar">
+        <span className="chat-toolbar-title">
+          {connected ? <span className="status-dot connected" /> : <span className="status-dot disconnected" />}
+          {connected ? "Connected" : "Disconnected"}
+        </span>
+        <div className="chat-toolbar-actions">
+          <button className="chat-toolbar-btn" onClick={() => exportChat("markdown")} title="Copy chat as Markdown">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+          <button className="chat-toolbar-btn" onClick={() => exportChat("json")} title="Download chat as JSON">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="chat-messages" ref={chatMessagesRef} onScroll={handleScroll}>
         {items.length === 0 && !loading && (
           <div className="chat-empty">
             <pre className="ascii-welcome-logo">{TUI_BANNER}</pre>
@@ -144,15 +287,14 @@ export default function ChatView() {
               Parallel Multi-Agent Coordinator & Development Sandbox.
             </div>
             <div className="empty-state-chips">
-              <button className="action-chip" onClick={() => handleActionChipClick("What can you do?")}>
-                &gt; What can you do?
-              </button>
-              <button className="action-chip" onClick={() => handleActionChipClick("Explain the codebase structure")}>
-                &gt; Explain codebase
-              </button>
-              <button className="action-chip" onClick={() => handleActionChipClick("Review current work products")}>
-                &gt; Review products
-              </button>
+              {QUICK_ACTIONS.map(action => (
+                <button key={action} className="action-chip" onClick={() => handleActionChipClick(action)}>
+                  &gt; {action}
+                </button>
+              ))}
+            </div>
+            <div className="empty-state-hint">
+              Type <kbd>/</kbd> for commands or <kbd>Enter</kbd> to send
             </div>
             {socialStatus && socialStatus.platforms && (
               <div style={{ marginTop: 24, textAlign: "center" }}>
@@ -198,6 +340,22 @@ export default function ChatView() {
         <div ref={messagesEndRef} />
       </div>
 
+      {showSlashMenu && (
+        <div className="slash-menu">
+          <div className="slash-menu-header">Commands</div>
+          {getSlashCommands().map(cmd => (
+            <button
+              key={cmd.label}
+              className="slash-menu-item"
+              onClick={() => { handleActionChipClick(cmd.action); setShowSlashMenu(false); }}
+            >
+              <span className="slash-menu-icon">{cmd.icon}</span>
+              <span className="slash-menu-label">/{cmd.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="chat-input-area">
         <input
           type="file"
@@ -207,8 +365,25 @@ export default function ChatView() {
           onChange={handleFileChange}
         />
         <label htmlFor="chat-file-upload" className="chat-upload-btn" title="Upload image or file">
-          📎
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
         </label>
+        <button className="chat-upload-btn" id="voice-btn" title="Voice input" onClick={() => {
+          const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+          if (!SpeechRecognition) { alert("Speech recognition not available in this browser"); return; }
+          const recognition = new SpeechRecognition();
+          recognition.lang = "en-US";
+          recognition.interimResults = true;
+          let finalTranscript = "";
+          recognition.onresult = (event: any) => {
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+            }
+            if (finalTranscript) setInput(input + finalTranscript);
+          };
+          recognition.start();
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+        </button>
 
         <div className="chat-input-wrapper">
           {attachments.length > 0 && (
@@ -216,7 +391,7 @@ export default function ChatView() {
               {attachments.map((att, idx) => (
                 <div key={idx} className="preview-chip">
                   {att.previewUrl ? (
-                    <img src={att.previewUrl} className="preview-thumb" />
+                    <img src={att.previewUrl} className="preview-thumb" alt="" />
                   ) : (
                     <span className="preview-icon">📄</span>
                   )}
@@ -231,24 +406,25 @@ export default function ChatView() {
             className="chat-input"
             rows={1}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={connected ? "Ask me anything..." : "Connecting..."}
+            placeholder={connected ? "Ask me anything... (type / for commands)" : "Connecting..."}
             disabled={loading || !connected}
           />
         </div>
 
         {loading ? (
-          <button className="chat-stop-btn" onClick={sendInterrupt}>
-            ■
+          <button className="chat-stop-btn" onClick={sendInterrupt} title="Stop generation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         ) : (
           <button
             className="chat-send-btn"
             onClick={handleSend}
             disabled={loading || (!input.trim() && attachments.length === 0) || !connected}
+            title="Send message"
           >
-            &gt;
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         )}
       </div>

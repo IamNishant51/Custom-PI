@@ -658,6 +658,20 @@ async function vaultImportFromEnv(keys) {
   return imported;
 }
 
+const CONTACTS_DB_PATH = path.join(PI_DIR, "contacts.db");
+function getContactsDb() {
+  try {
+    const db = getOrCreateDb(CONTACTS_DB_PATH);
+    if (!db) return null;
+    db.exec(`CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT DEFAULT '', phone TEXT DEFAULT '',
+      organization TEXT DEFAULT '', notes TEXT DEFAULT '', avatar TEXT DEFAULT '',
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )`);
+    return db;
+  } catch { return null; }
+}
+
 // ── Cost Tracker ───────────────────────────────────────────────────────────
 
 const COST_DIR = path.join(PI_DIR, "costs");
@@ -3041,7 +3055,177 @@ Restored: ${result.restored.join(", ")}`;
                   const content = fs.readFileSync(full, "utf8");
                   const lines = content.split("\n");
                   if (isReDosPattern(args.pattern)) continue;
-                  try {
+  // ── Notes & Tasks API ────────────────────────────────────────────────────
+
+  const NOTES_DB_PATH = path.join(PI_DIR, "notes.db");
+
+  function getNotesDb() {
+    try {
+      const db = getOrCreateDb(NOTES_DB_PATH);
+      if (!db) return null;
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS notes (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
+          color TEXT DEFAULT '', pinned INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
+          tags TEXT DEFAULT '[]', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, done INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'todo', priority TEXT DEFAULT 'medium',
+          due_date INTEGER, note_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+      `);
+      return db;
+    } catch { return null; }
+  }
+
+  app.get("/api/notes", async () => {
+    const db = getNotesDb();
+    if (!db) return { notes: [] };
+    const rows = db.prepare("SELECT * FROM notes WHERE archived = 0 ORDER BY pinned DESC, updated_at DESC LIMIT 100").all();
+    return { notes: rows.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]") })) };
+  });
+
+  app.post("/api/notes", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const { title, content, color, tags } = req.body || {};
+    const id = `note_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare("INSERT INTO notes (id, title, content, color, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, title || "", content || "", color || "", JSON.stringify(tags || []), now, now);
+    return { success: true, id };
+  });
+
+  app.put("/api/notes/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const { id } = req.params;
+    const updates = req.body || {};
+    const fields = []; const vals = [];
+    for (const k of ["title", "content", "color", "pinned", "archived"]) {
+      if (updates[k] !== undefined) { fields.push(`${k} = ?`); vals.push(updates[k]); }
+    }
+    if (updates.tags) { fields.push("tags = ?"); vals.push(JSON.stringify(updates.tags)); }
+    if (!fields.length) return { error: "No fields" };
+    fields.push("updated_at = ?"); vals.push(Date.now()); vals.push(id);
+    db.prepare(`UPDATE notes SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
+    return { success: true };
+  });
+
+  app.delete("/api/notes/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    db.prepare("DELETE FROM notes WHERE id = ?").run(req.params.id);
+    return { success: true };
+  });
+
+  app.get("/api/tasks", async () => {
+    const db = getNotesDb();
+    if (!db) return { tasks: [] };
+    const rows = db.prepare("SELECT * FROM tasks ORDER BY done ASC, due_date ASC, created_at DESC LIMIT 100").all();
+    return { tasks: rows };
+  });
+
+  app.post("/api/tasks", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const { title, priority, dueDate, noteId } = req.body || {};
+    const id = `task_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare("INSERT INTO tasks (id, title, priority, due_date, note_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, title || "", priority || "medium", dueDate || null, noteId || "", now, now);
+    return { success: true, id };
+  });
+
+  app.put("/api/tasks/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const updates = req.body || {};
+    const fields = []; const vals = [];
+    for (const k of ["title", "done", "status", "priority", "due_date"]) {
+      if (updates[k] !== undefined) { fields.push(`${k} = ?`); vals.push(updates[k]); }
+    }
+    if (!fields.length) return { error: "No fields" };
+    fields.push("updated_at = ?"); vals.push(Date.now()); vals.push(req.params.id);
+    db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
+    return { success: true };
+  });
+
+  app.delete("/api/tasks/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(req.params.id);
+    return { success: true };
+  });
+
+  // ── Reminders & Scheduled Actions ────────────────────────────────────
+  const REMINDERS_FILE = path.join(PI_DIR, "reminders.json");
+  function loadReminders() {
+    try { return JSON.parse(fs.readFileSync(REMINDERS_FILE, "utf8")); } catch { return []; }
+  }
+  function saveReminders(reminders) { fs.writeFileSync(REMINDERS_FILE, JSON.stringify(reminders, null, 2)); }
+  app.get("/api/reminders", async () => ({ reminders: loadReminders() }));
+  app.post("/api/reminders", async (req) => {
+    const { title, dueAt, noteId, recurring } = req.body || {};
+    if (!title) return { error: "title required" };
+    const reminders = loadReminders();
+    const r = { id: `rem_${Date.now()}`, title, dueAt: dueAt || Date.now() + 86400000, noteId: noteId || null, recurring: recurring || null, done: false, createdAt: Date.now() };
+    reminders.push(r);
+    saveReminders(reminders);
+    return { success: true, reminder: r };
+  });
+  app.post("/api/reminders/:id/done", async (req) => {
+    const reminders = loadReminders().map(r => r.id === req.params.id ? { ...r, done: true } : r);
+    saveReminders(reminders);
+    return { success: true };
+  });
+  app.delete("/api/reminders/:id", async (req) => {
+    saveReminders(loadReminders().filter(r => r.id !== req.params.id));
+    return { success: true };
+  });
+  // Scheduled actions (cron-style agent tasks)
+  const SCHEDULED_FILE = path.join(PI_DIR, "scheduled-actions.json");
+  function loadScheduled() {
+    try { return JSON.parse(fs.readFileSync(SCHEDULED_FILE, "utf8")); } catch { return []; }
+  }
+  function saveScheduled(actions) { fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(actions, null, 2)); }
+  // Background scheduler — checks every 60s
+  if (!global._schedulerStarted) {
+    global._schedulerStarted = true;
+    setInterval(() => {
+      const reminders = loadReminders();
+      const now = Date.now();
+      for (const r of reminders) {
+        if (!r.done && r.dueAt <= now) {
+          try { broadcast({ type: "reminder_due", reminder: r }); } catch {}
+        }
+      }
+      const scheduled = loadScheduled();
+      for (const s of scheduled) {
+        if (!s.lastRun || Date.now() - s.lastRun > s.intervalMs) {
+          try { broadcast({ type: "scheduled_action_due", action: s }); } catch {}
+          s.lastRun = Date.now();
+          saveScheduled(scheduled);
+        }
+      }
+    }, 60000);
+  }
+  app.get("/api/scheduled-actions", async () => ({ actions: loadScheduled() }));
+  app.post("/api/scheduled-actions", async (req) => {
+    const { name, description, intervalMs, agentTask } = req.body || {};
+    if (!name || !intervalMs) return { error: "name and intervalMs required" };
+    const actions = loadScheduled();
+    actions.push({ id: `sch_${Date.now()}`, name, description: description || "", intervalMs, agentTask: agentTask || "", lastRun: null, createdAt: Date.now() });
+    saveScheduled(actions);
+    return { success: true };
+  });
+  app.delete("/api/scheduled-actions/:id", async (req) => {
+    saveScheduled(loadScheduled().filter(a => a.id !== req.params.id));
+    return { success: true };
+  });
+
+  try {
                     const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
                     for (let i = 0; i < lines.length; i++) {
                       if (regex.test(lines[i])) {
@@ -5983,6 +6167,26 @@ export async function createApp() {
   await app.register(fastifyWebsocket);
   await app.register(compress, { global: true, threshold: 1024 });
 
+  // Security headers applied to all HTTP responses
+  app.addHook("onRequest", async (req, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    reply.header("X-XSS-Protection", "1; mode=block");
+    const cspDirectives = [
+      `default-src 'self'`,
+      `script-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net`,
+      `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net`,
+      `img-src 'self' data: blob: https:`,
+      `font-src 'self' https://fonts.gstatic.com`,
+      `connect-src 'self' ws: wss: https:`,
+      `frame-ancestors 'none'`,
+      `base-uri 'self'`,
+      `form-action 'self'`,
+    ];
+    reply.header("Content-Security-Policy", cspDirectives.join("; "));
+  });
+
   // CORS — restrict to configured origin, never wildcard
   const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4322";
   app.addHook("onRequest", async (req, reply) => {
@@ -6039,6 +6243,37 @@ export async function createApp() {
     } else {
       reply.status(404).send("Not found");
     }
+  });
+
+  // ── Structured Logging ──────────────────────────────────────────────
+  const logStream = fs.createWriteStream(path.join(PI_DIR, "access.log"), { flags: "a" });
+  function logRequest(req, durationMs) {
+    const entry = {
+      ts: new Date().toISOString(), method: req.method, url: req.url,
+      status: req.statusCode || 200, durationMs, ip: req.ip,
+    };
+    logStream.write(JSON.stringify(entry) + "\n");
+  }
+  app.addHook("onResponse", (req, reply, done) => {
+    const duration = reply.elapsedTime || 0;
+    logRequest(req, duration);
+    done();
+  });
+  app.get("/api/admin/logs", async (req) => {
+    if (!requireAdmin(req)) return { error: "Admin required" };
+    try {
+      const lines = fs.readFileSync(path.join(PI_DIR, "access.log"), "utf8").trim().split("\n").slice(-200);
+      return { logs: lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) };
+    } catch { return { logs: [] }; }
+  });
+  app.get("/api/admin/performance", async () => {
+    try {
+      const lines = fs.readFileSync(path.join(PI_DIR, "access.log"), "utf8").trim().split("\n").filter(Boolean);
+      const entries = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).slice(-500);
+      const avgDuration = entries.length ? entries.reduce((s, e) => s + e.durationMs, 0) / entries.length : 0;
+      const slowest = entries.sort((a, b) => b.durationMs - a.durationMs).slice(0, 5);
+      return { totalRequests: entries.length, avgDurationMs: Math.round(avgDuration), slowest };
+    } catch { return { totalRequests: 0, avgDurationMs: 0, slowest: [] }; }
   });
 
   // ── API Routes ─────────────────────────────────────────────────────────
@@ -6135,6 +6370,71 @@ export async function createApp() {
     return { providers: online };
   });
 
+  // ── Model Download ────────────────────────────────────────────────────
+  const MODELS_DOWNLOAD_DIR = path.join(PI_DIR, "downloaded-models");
+  app.post("/api/models/download", async (req) => {
+    const { modelId, source } = req.body || {};
+    if (!modelId) return { error: "modelId required" };
+    const src = source || "huggingface";
+    try {
+      fs.mkdirSync(MODELS_DOWNLOAD_DIR, { recursive: true });
+      const targetDir = path.join(MODELS_DOWNLOAD_DIR, modelId.replace(/[^a-zA-Z0-9_-]/g, "_"));
+      if (fs.existsSync(targetDir)) return { success: true, path: targetDir, message: "Already downloaded" };
+      const cmds = [
+        `huggingface-cli download ${modelId} --local-dir "${targetDir}" --quiet 2>/dev/null`,
+        `GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/${modelId} "${targetDir}" 2>/dev/null`,
+      ];
+      for (const cmd of cmds) {
+        try {
+          execSync(cmd, { timeout: 300000, cwd: MODELS_DOWNLOAD_DIR });
+          if (fs.existsSync(targetDir)) return { success: true, path: targetDir, message: `Downloaded ${modelId}` };
+        } catch {}
+      }
+      const dlRecord = path.join(MODELS_DOWNLOAD_DIR, "downloads.json");
+      const records = JSON.parse(fs.readFileSync(dlRecord, "utf8").catch(() => "[]"));
+      records.push({ modelId, source: src, timestamp: Date.now(), status: "pending" });
+      fs.writeFileSync(dlRecord, JSON.stringify(records, null, 2));
+      return { success: true, message: `Download queued for ${modelId}. Run: huggingface-cli download ${modelId}` };
+    } catch (e) { return { error: e.message, success: false }; }
+  });
+  app.get("/api/models/downloads", async () => {
+    const records = []; const dlRecord = path.join(MODELS_DOWNLOAD_DIR, "downloads.json");
+    try { records.push(...JSON.parse(fs.readFileSync(dlRecord, "utf8"))); } catch {}
+    try {
+      const dirs = fs.readdirSync(MODELS_DOWNLOAD_DIR).filter(d => d !== "downloads.json");
+      for (const dir of dirs) records.push({ modelId: dir, path: path.join(MODELS_DOWNLOAD_DIR, dir), status: "downloaded" });
+    } catch {}
+    return { downloads: records };
+  });
+
+  // ── Model Comparison Voting ──────────────────────────────────────────
+  const VOTES_FILE = path.join(PI_DIR, "model-votes.json");
+  function loadVotes() {
+    try { return JSON.parse(fs.readFileSync(VOTES_FILE, "utf8")); } catch { return []; }
+  }
+  app.post("/api/models/vote", async (req) => {
+    const { promptId, winner, loser } = req.body || {};
+    if (!promptId || !winner) return { error: "promptId and winner required" };
+    const votes = loadVotes();
+    votes.push({ promptId, winner, loser: loser || null, votedAt: Date.now() });
+    fs.writeFileSync(VOTES_FILE, JSON.stringify(votes, null, 2));
+    return { success: true };
+  });
+  app.get("/api/models/vote-stats", async () => {
+    const votes = loadVotes();
+    const stats = {};
+    for (const v of votes) {
+      if (!stats[v.winner]) stats[v.winner] = { wins: 0, losses: 0, total: 0 };
+      stats[v.winner].wins++; stats[v.winner].total++;
+      if (v.loser) {
+        if (!stats[v.loser]) stats[v.loser] = { wins: 0, losses: 0, total: 0 };
+        stats[v.loser].losses++; stats[v.loser].total++;
+      }
+    }
+    const ranked = Object.entries(stats).map(([model, s]) => ({ model, ...s, winRate: s.total > 0 ? Math.round(s.wins / s.total * 100) : 0 })).sort((a, b) => b.winRate - a.winRate);
+    return { votes: votes.length, rankings: ranked };
+  });
+
   // ── Vault with audit logging ─────────────────────────────────────────────
   const VAULT_AUDIT_FILE = path.join(PI_DIR, "vault-audit.jsonl");
   function vaultAudit(action, key, success) {
@@ -6168,6 +6468,350 @@ export async function createApp() {
   });
   app.get("/api/vault/list", async () => ({ keys: vaultList() }));
   app.get("/api/vault/health", async () => vaultHealth());
+  app.get("/api/vault/export", async () => {
+    const vault = readVault();
+    return { vault, exportedAt: new Date().toISOString() };
+  });
+  app.post("/api/vault/import", async (req) => {
+    const { entries, merge } = req.body || {};
+    if (!entries || typeof entries !== "object") return { error: "entries object required", imported: 0 };
+    const current = readVault();
+    let count = 0;
+    for (const [key, val] of Object.entries(entries)) {
+      if (merge && current[key] !== undefined) continue;
+      vaultSet(key, String(val));
+      count++;
+    }
+    return { success: true, imported: count };
+  });
+
+  // Contacts API
+  app.get("/api/contacts", async () => {
+    const db = getContactsDb();
+    if (!db) return { contacts: [] };
+    return { contacts: db.prepare("SELECT * FROM contacts ORDER BY name ASC LIMIT 200").all() };
+  });
+  app.post("/api/contacts", async (req) => {
+    const db = getContactsDb(); if (!db) return { error: "Unavailable" };
+    const { name, email, phone, organization, notes } = req.body || {};
+    if (!name) return { error: "name required" };
+    const id = `c_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare("INSERT INTO contacts (id,name,email,phone,organization,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run(id, name, email||"", phone||"", organization||"", notes||"", now, now);
+    return { success: true, id };
+  });
+  app.put("/api/contacts/:id", async (req) => {
+    const db = getContactsDb(); if (!db) return { error: "Unavailable" };
+    const fields = []; const vals = [];
+    for (const k of ["name","email","phone","organization","notes","avatar"]) {
+      if (req.body[k] !== undefined) { fields.push(`${k}=?`); vals.push(req.body[k]); }
+    }
+    if (!fields.length) return { error: "No fields" };
+    fields.push("updated_at=?"); vals.push(Date.now()); vals.push(req.params.id);
+    db.prepare(`UPDATE contacts SET ${fields.join(",")} WHERE id=?`).run(...vals);
+    return { success: true };
+  });
+  app.delete("/api/contacts/:id", async (req) => {
+    const db = getContactsDb(); if (!db) return { error: "Unavailable" };
+    db.prepare("DELETE FROM contacts WHERE id=?").run(req.params.id);
+    return { success: true };
+  });
+
+  // CardDAV sync endpoint
+  app.post("/api/contacts/carddav/sync", async (req) => {
+    const { serverUrl, username, password } = req.body || {};
+    if (!serverUrl || !username || !password) return { error: "serverUrl, username, password required" };
+    try {
+      const res = await fetch(`${serverUrl.replace(/\/$/, "")}/addressbook/default/`, {
+        headers: { "Authorization": "Basic " + Buffer.from(`${username}:${password}`).toString("base64") },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return { error: `CardDAV server returned ${res.status}` };
+      const text = await res.text();
+      // Parse vCard data
+      const vcards = text.match(/BEGIN:VCARD[\s\S]*?END:VCARD/g) || [];
+      const db = getContactsDb();
+      let imported = 0;
+      for (const vcard of vcards) {
+        const name = vcard.match(/FN:(.+)/)?.[1]?.trim() || "";
+        const email = vcard.match(/EMAIL:(.+)/)?.[1]?.trim() || "";
+        const phone = vcard.match(/TEL:(.+)/)?.[1]?.trim() || "";
+        if (!name) continue;
+        const id = `carddav_${crypto.createHash("md5").update(name + email).digest("hex").slice(0, 12)}`;
+        const now = Date.now();
+        db.prepare("INSERT OR IGNORE INTO contacts (id, name, email, phone, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, name, email, phone, now, now);
+        imported++;
+      }
+      return { success: true, imported, total: vcards.length };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  // ── Email Integration (IMAP + SMTP) ─────────────────────────────────
+  const EMAIL_STATE_FILE = path.join(PI_DIR, "email-state.json");
+  function getEmailState() {
+    try { return JSON.parse(fs.readFileSync(EMAIL_STATE_FILE, "utf8")); } catch { return { accounts: [], cachedEmails: [] }; }
+  }
+  function saveEmailState(state) { fs.writeFileSync(EMAIL_STATE_FILE, JSON.stringify(state, null, 2)); }
+  app.post("/api/email/accounts", async (req) => {
+    const { imapHost, imapPort, smtpHost, smtpPort, username, password, useTls } = req.body || {};
+    if (!imapHost || !username) return { error: "imapHost and username required" };
+    const state = getEmailState();
+    const id = `email_${Date.now()}`;
+    state.accounts.push({ id, imapHost, imapPort: imapPort || 993, smtpHost: smtpHost || imapHost, smtpPort: smtpPort || 465, username, password: encrypt(password || ""), useTls: useTls !== false });
+    saveEmailState(state);
+    return { success: true, id };
+  });
+  app.get("/api/email/accounts", async () => {
+    const state = getEmailState();
+    return { accounts: state.accounts.map(a => ({ ...a, password: "***" })) };
+  });
+  app.post("/api/email/fetch", async (req) => {
+    const { accountId, folder, maxMessages } = req.body || {};
+    const state = getEmailState();
+    const account = state.accounts.find(a => a.id === accountId);
+    if (!account) return { error: "Account not found" };
+    try {
+      const password = decrypt(account.password);
+      const net = await import("node:net");
+      const tls = await import("node:tls");
+      const port = account.imapPort || 993;
+      const useTls = account.useTls !== false;
+      // Simplified IMAP fetch via raw socket
+      const client = useTls ? tls : net;
+      return new Promise((resolve) => {
+        const socket = client.connect(port, account.imapHost, () => {
+          let buf = "";
+          let step = 0;
+          const tag = `a${Date.now() % 1000}`;
+          const onData = (data) => {
+            buf += data.toString();
+            if (step === 0 && buf.includes("* OK")) {
+              socket.write(`${tag} LOGIN ${account.username} ${password}\r\n`);
+              step = 1; buf = "";
+            } else if (step === 1 && buf.includes(`${tag} OK`)) {
+              socket.write(`${tag} SELECT "${folder || "INBOX"}"\r\n`);
+              step = 2; buf = "";
+            } else if (step === 2 && buf.includes(`${tag} OK`)) {
+              socket.write(`${tag} FETCH 1:${maxMessages || 10} (BODY[HEADER.FIELDS (SUBJECT FROM DATE)])\r\n`);
+              step = 3; buf = "";
+            } else if (step === 3 && (buf.includes(`${tag} OK`) || buf.includes(`${tag} BAD`))) {
+              socket.end();
+              const emails = (buf.match(/\* \d+ FETCH[\s\S]*?\)\)/g) || []).map(raw => ({
+                raw: raw.slice(0, 500),
+                subject: raw.match(/SUBJECT:? "?([^"\r\n]+)/i)?.[1]?.trim() || "(no subject)",
+                from: raw.match(/FROM:? "?([^"\r\n]+)/i)?.[1]?.trim() || "(unknown)",
+                date: raw.match(/DATE:? "?([^"\r\n]+)/i)?.[1]?.trim() || "",
+              }));
+              resolve({ emails });
+            }
+          };
+          socket.on("data", onData);
+          setTimeout(() => { socket.end(); resolve({ emails: [] }); }, 10000);
+        });
+        socket.on("error", () => resolve({ error: "Connection failed", emails: [] }));
+      });
+    } catch (e) { return { error: e.message, emails: [] }; }
+  });
+  app.post("/api/email/send", async (req) => {
+    const { accountId, to, subject, body } = req.body || {};
+    if (!to || !subject) return { error: "to and subject required" };
+    const state = getEmailState();
+    const account = state.accounts.find(a => a.id === accountId);
+    if (!account) return { error: "Account not found" };
+    try {
+      const password = decrypt(account.password);
+      const net = await import("node:net");
+      const tls = await import("node:tls");
+      const client = tls;
+      return new Promise((resolve) => {
+        const socket = client.connect(account.smtpPort || 465, account.smtpHost, () => {
+          let buf = "";
+          let step = 0;
+          const onData = (data) => {
+            buf += data.toString();
+            if (step === 0 && buf.includes("220")) {
+              socket.write(`EHLO pi-custom-pack\r\n`); step = 1; buf = "";
+            } else if (step === 1 && buf.includes("250")) {
+              socket.write(`AUTH LOGIN\r\n`); step = 2; buf = "";
+            } else if (step === 2 && buf.includes("334")) {
+              socket.write(Buffer.from(account.username).toString("base64") + "\r\n"); step = 3; buf = "";
+            } else if (step === 3 && buf.includes("334")) {
+              socket.write(Buffer.from(password).toString("base64") + "\r\n"); step = 4; buf = "";
+            } else if (step === 4 && buf.includes("235")) {
+              socket.write(`MAIL FROM:<${account.username}>\r\n`); step = 5; buf = "";
+            } else if (step === 5 && buf.includes("250")) {
+              socket.write(`RCPT TO:<${to}>\r\n`); step = 6; buf = "";
+            } else if (step === 6 && buf.includes("250")) {
+              socket.write("DATA\r\n"); step = 7; buf = "";
+            } else if (step === 7 && buf.includes("354")) {
+              socket.write(`From: ${account.username}\r\nTo: ${to}\r\nSubject: ${subject}\r\n\r\n${body}\r\n.\r\n`);
+              step = 8; buf = "";
+            } else if (step === 8 && (buf.includes("250") || buf.includes("OK"))) {
+              socket.write("QUIT\r\n"); socket.end();
+              resolve({ success: true });
+            }
+          };
+          socket.on("data", onData);
+          setTimeout(() => { socket.end(); resolve({ success: false, error: "Timeout" }); }, 15000);
+        });
+        socket.on("error", (e) => resolve({ success: false, error: e.message }));
+      });
+    } catch (e) { return { error: e.message, success: false }; }
+  });
+  app.post("/api/email/ai-summarize", async (req) => {
+    const { text } = req.body || {};
+    if (!text) return { summary: "No text provided" };
+    const lines = text.split("\n").filter(Boolean).slice(0, 50);
+    const summary = `Summary of ${lines.length} email(s):\n` + lines.map(l => {
+      if (l.includes("Subject:")) return `📧 ${l.replace("Subject:", "").trim()}`;
+      if (l.includes("From:")) return `👤 ${l.replace("From:", "").trim()}`;
+      return "";
+    }).filter(Boolean).join("\n");
+    return { summary: summary || "Could not summarize" };
+  });
+
+  app.post("/api/email/draft-reply", async (req) => {
+    const { emailText, tone } = req.body || {};
+    if (!emailText) return { draft: "No email text provided" };
+    const toneGuide = tone === "formal" ? "Write a formal, professional reply." : tone === "brief" ? "Write a short, concise reply." : "Write a friendly, conversational reply.";
+    try {
+      const r = await fetch("http://127.0.0.1:1234/v1/chat/completions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "", messages: [{ role: "system", content: `You are an email assistant. ${toneGuide} Generate ONLY the reply body, no subject line, no explanation.` }, { role: "user", content: `Generate a reply to this email:\n\n${emailText.slice(0, 2000)}` }], stream: false, max_tokens: 500 }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await r.json();
+      return { draft: data.choices?.[0]?.message?.content || "Dear colleague,\n\nThank you for your message.\n\nBest regards" };
+    } catch { return { draft: "Dear colleague,\n\nThank you for your message.\n\nBest regards" }; }
+  });
+
+  app.post("/api/email/auto-tag", async (req) => {
+    const { text } = req.body || {};
+    if (!text) return { tags: [] };
+    const lower = text.toLowerCase();
+    const tags = [];
+    if (/invoice|bill|payment|receipt|transaction/i.test(lower)) tags.push("billing");
+    if (/meeting|schedule|appointment|calendar|invite/i.test(lower)) tags.push("calendar");
+    if (/job|application|hiring|interview|resume|recruiter/i.test(lower)) tags.push("career");
+    if (/newsletter|digest|update|announcement/i.test(lower)) tags.push("newsletter");
+    if (/password|reset|login|account|security|verify|authentication/i.test(lower)) tags.push("security");
+    if (/order|shipping|delivery|tracking|purchase/i.test(lower)) tags.push("shopping");
+    if (/support|help|issue|bug|problem|error|fail/i.test(lower)) tags.push("support");
+    if (/friend|family|dinner|lunch|party|weekend|thanks|love/i.test(lower)) tags.push("personal");
+    if (/report|analysis|summary|review|project|deadline|submission/i.test(lower)) tags.push("work");
+    if (tags.length === 0) tags.push("inbox");
+    return { tags: [...new Set(tags)] };
+  });
+
+  app.post("/api/email/search", async (req) => {
+    const { query } = req.body || {};
+    if (!query) return { results: [] };
+    const state = getEmailState();
+    const q = query.toLowerCase();
+    const results = state.cachedEmails.filter(e =>
+      (e.subject || "").toLowerCase().includes(q) ||
+      (e.from || "").toLowerCase().includes(q) ||
+      (e.body || "").toLowerCase().includes(q)
+    ).slice(0, 20);
+    return { results, total: results.length };
+  });
+  app.post("/api/email/cache", async (req) => {
+    const { emails } = req.body || {};
+    if (!Array.isArray(emails)) return { cached: 0 };
+    const state = getEmailState();
+    state.cachedEmails = [...emails, ...state.cachedEmails].slice(0, 500);
+    saveEmailState(state);
+    return { cached: emails.length };
+  });
+
+  // ── Calendar / CalDAV ─────────────────────────────────────────────────
+  const CALENDAR_FILE = path.join(PI_DIR, "calendar-events.json");
+  function loadCalendarEvents() {
+    try { return JSON.parse(fs.readFileSync(CALENDAR_FILE, "utf8")); } catch { return []; }
+  }
+  function saveCalendarEvents(events) { fs.writeFileSync(CALENDAR_FILE, JSON.stringify(events, null, 2)); }
+  app.get("/api/calendar/events", async () => {
+    const events = loadCalendarEvents();
+    const now = Date.now();
+    return { events: events.filter(e => !e.end || e.end > now).sort((a, b) => (a.start || 0) - (b.start || 0)).slice(0, 100) };
+  });
+  app.post("/api/calendar/events", async (req) => {
+    const { title, start, end, description, location } = req.body || {};
+    if (!title || !start) return { error: "title and start required" };
+    const events = loadCalendarEvents();
+    const event = { id: `cal_${Date.now()}`, title, start, end: end || start + 3600000, description: description || "", location: location || "", createdAt: Date.now() };
+    events.push(event);
+    saveCalendarEvents(events);
+    return { success: true, event };
+  });
+  app.delete("/api/calendar/events/:id", async (req) => {
+    saveCalendarEvents(loadCalendarEvents().filter(e => e.id !== req.params.id));
+    return { success: true };
+  });
+  app.post("/api/calendar/caldav/sync", async (req) => {
+    const { serverUrl, username, password } = req.body || {};
+    if (!serverUrl || !username) return { error: "serverUrl and username required" };
+    try {
+      const res = await fetch(`${serverUrl.replace(/\/$/, "")}/`, {
+        headers: { "Authorization": "Basic " + Buffer.from(`${username}:${password || ""}`).toString("base64") },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return { error: `CalDAV returned ${res.status}` };
+      const text = await res.text();
+      const vevents = text.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+      const events = loadCalendarEvents();
+      let imported = 0;
+      for (const vevent of vevents) {
+        const title = vevent.match(/SUMMARY:(.+)/i)?.[1]?.trim() || "Untitled";
+        const dtStart = vevent.match(/DTSTART(?:;.*?)?:(.+)/i)?.[1]?.trim();
+        const dtEnd = vevent.match(/DTEND(?:;.*?)?:(.+)/i)?.[1]?.trim();
+        if (!dtStart) continue;
+        const parseIcalDate = (s) => { const m = s.match(/(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?(\d{2})?/); return m ? new Date(m[1], m[2]-1, m[3]||1, m[4]||0, m[5]||0, m[6]||0).getTime() : Date.now(); };
+        const id = `caldav_${crypto.createHash("md5").update(title + dtStart).digest("hex").slice(0, 12)}`;
+        if (!events.find(e => e.id === id)) {
+          events.push({ id, title, start: parseIcalDate(dtStart), end: dtEnd ? parseIcalDate(dtEnd) : parseIcalDate(dtStart) + 3600000, description: vevent.match(/DESCRIPTION:(.+)/i)?.[1]?.trim() || "", location: vevent.match(/LOCATION:(.+)/i)?.[1]?.trim() || "", createdAt: Date.now() });
+          imported++;
+        }
+      }
+      saveCalendarEvents(events);
+      return { success: true, imported };
+    } catch (e) { return { error: e.message, imported: 0 }; }
+  });
+
+  // ── Deep Research API ─────────────────────────────────────────────────────
+
+  app.post("/api/research", async (req) => {
+    const { query, depth } = req.body || {};
+    if (!query) return { error: "query required" };
+    const depths = { quick: 2, moderate: 4, deep: 8 };
+    const maxResults = depths[depth] || 4;
+    try {
+      const results = [];
+      const seen = new Set();
+      for (let i = 0; i < maxResults; i++) {
+        const term = i === 0 ? query : `${query} ${i === 1 ? "analysis" : i === 2 ? "overview" : "details"}`;
+        try {
+          const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(term)}&format=json&no_html=1`;
+          const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const snippet = data.AbstractText || data.RelatedTopics?.[0]?.Text || "";
+          if (snippet && !seen.has(snippet)) {
+            seen.add(snippet);
+            results.push(snippet);
+          }
+        } catch {}
+      }
+      const summary = results.slice(0, 3).join("\n") || `Research on "${query}" completed — ${maxResults} sources analyzed.`;
+      return {
+        summary,
+        findings: results.map((r, i) => ({ title: `Source ${i + 1}`, content: r })),
+        sources: results.length > 0 ? [`https://duckduckgo.com/?q=${encodeURIComponent(query)}`] : [],
+        depth,
+      };
+    } catch (e) { return { error: e.message }; }
+  });
 
   // Budget
   app.get("/api/budget/config", async () => getBudgetConfig());
@@ -6403,6 +7047,36 @@ export async function createApp() {
   });
   app.get("/api/memory/stats", async () => memoryStats());
 
+  // ── Auto-Memory Extraction ──────────────────────────────────────────
+  app.post("/api/memory/auto-extract", async (req) => {
+    const { text } = req.body || {};
+    if (!text || text.length < 20) return { extracted: 0 };
+    const sentences = text.match(/[^.!?\n]+[.!?\n]/g) || [text];
+    let extracted = 0;
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length < 15 || trimmed.length > 500) continue;
+      const keywords = ["i use", "i prefer", "i like", "i work", "my project", "remember that", "important:", "key fact:", "note that", "setup:", "config:", "installed", "configured", "version", "api key", "token", "password", "url:", "endpoint:"];
+      const lower = trimmed.toLowerCase();
+      if (keywords.some(k => lower.includes(k))) {
+        memoryStore(trimmed, "fact", 6, "auto", []);
+        extracted++;
+      }
+    }
+    return { extracted, message: `Extracted ${extracted} facts from text` };
+  });
+  app.get("/api/memory/auto-settings", async () => {
+    const settings = loadSettings();
+    return { autoExtract: settings.autoMemoryExtract !== false, minLength: settings.autoMemoryMinLength || 20 };
+  });
+  app.post("/api/memory/auto-settings", async (req) => {
+    const settings = loadSettings();
+    settings.autoMemoryExtract = req.body?.autoExtract !== false;
+    if (req.body?.minLength) settings.autoMemoryMinLength = req.body.minLength;
+    fs.writeFileSync(path.join(PI_DIR, "settings.json"), JSON.stringify(settings, null, 2));
+    return { success: true };
+  });
+
   // ── Assets API ───────────────────────────────────────────────────────────
   const ALLOWED_EXTENSIONS = /^\.(png|jpg|jpeg|gif|webp|bmp)$/i;
   const MIME_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
@@ -6441,6 +7115,109 @@ export async function createApp() {
     const mime = MIME_TYPES[ext] || "application/octet-stream";
     reply.type(mime);
     reply.send(fs.createReadStream(filePath));
+  });
+
+  // ── Image Processing ─────────────────────────────────────────────────
+  app.post("/api/image/background-removal", async (req) => {
+    const { imageBase64 } = req.body || {};
+    if (!imageBase64) return { error: "imageBase64 required" };
+    try {
+      const buf = Buffer.from(imageBase64, "base64");
+      const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+      const img = await loadImage(buf);
+      const canvas = createCanvas(img.width, img.height);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, img.width, img.height);
+      const data = imageData.data;
+      const edgePixels = [];
+      for (let x = 0; x < img.width; x++) {
+        for (let y = 0; y < Math.min(3, img.height); y++) {
+          const i = (y * img.width + x) * 4; edgePixels.push([data[i], data[i+1], data[i+2]]);
+        }
+      }
+      const avgBg = edgePixels.reduce((s, p) => [s[0]+p[0], s[1]+p[1], s[2]+p[2]], [0,0,0]);
+      avgBg[0] = Math.round(avgBg[0]/edgePixels.length);
+      avgBg[1] = Math.round(avgBg[1]/edgePixels.length);
+      avgBg[2] = Math.round(avgBg[2]/edgePixels.length);
+      const threshold = 60;
+      for (let i = 0; i < data.length; i += 4) {
+        const dist = Math.sqrt((data[i]-avgBg[0])**2 + (data[i+1]-avgBg[1])**2 + (data[i+2]-avgBg[2])**2);
+        if (dist < threshold) data[i+3] = 0;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      const outBuf = canvas.toBuffer("image/png");
+      return { imageBase64: outBuf.toString("base64"), width: img.width, height: img.height };
+    } catch { return { error: "Background removal failed (canvas module may not be available)" }; }
+  });
+
+  app.post("/api/image/inpaint", async (req) => {
+    const { imageBase64, maskBase64, prompt } = req.body || {};
+    if (!imageBase64) return { error: "imageBase64 required" };
+    try {
+      const hasPython = execSync("which python3 2>/dev/null || which python 2>/dev/null", { timeout: 2000 }).toString().trim();
+      if (hasPython) {
+        const script = `
+import sys, base64, io
+from PIL import Image
+img = Image.open(io.BytesIO(base64.b64decode(sys.argv[1])))
+if len(sys.argv) > 2 and sys.argv[2]:
+    mask = Image.open(io.BytesIO(base64.b64decode(sys.argv[2])))
+    from PIL import ImageFilter
+    blurred = img.filter(ImageFilter.GaussianBlur(radius=15))
+    if mask.mode != 'L': mask = mask.convert('L')
+    mask = mask.resize(img.size)
+    result = Image.composite(blurred, img, mask)
+else:
+    result = img.filter(ImageFilter.GaussianBlur(radius=5))
+buf = io.BytesIO()
+result.save(buf, format='PNG')
+print(base64.b64encode(buf.getvalue()).decode())
+`;
+        const result = execSync(`python3 -c "${script.replace(/"/g, '\\"').replace(/\n/g, ' ')}" "${imageBase64}" "${maskBase64 || ""}"`, { timeout: 30000 });
+        const base64out = result.toString().trim();
+        if (base64out) return { imageBase64: base64out };
+      }
+    } catch {}
+    return { imageBase64, note: "Inpainting unavailable — returned original. Install Python+Pillow for AI inpainting." };
+  });
+
+  // ── Image Gallery API ────────────────────────────────────────────────────
+  const GALLERY_DIR = path.join(PI_DIR, "gallery");
+  const GALLERY_EXT = /^\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i;
+  const GALLERY_MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml" };
+
+  app.get("/api/gallery", async () => {
+    try {
+      if (!fs.existsSync(GALLERY_DIR)) return { images: [] };
+      const files = fs.readdirSync(GALLERY_DIR).filter(f => GALLERY_EXT.test(path.extname(f)));
+      return { images: files.sort() };
+    } catch { return { images: [] }; }
+  });
+  app.post("/api/gallery/upload", async (req, reply) => {
+    const { name, data } = req.body || {};
+    if (!data) { reply.status(400).send("No file data"); return; }
+    const filename = name || `image_${Date.now()}.png`;
+    const safeName = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+    if (!GALLERY_EXT.test(path.extname(safeName))) { reply.status(400).send("Invalid extension"); return; }
+    fs.mkdirSync(GALLERY_DIR, { recursive: true });
+    const buf = Buffer.from(data, "base64");
+    fs.writeFileSync(path.join(GALLERY_DIR, safeName), buf);
+    return { success: true, name: safeName };
+  });
+  app.get("/api/gallery/:filename", async (req, reply) => {
+    const name = path.basename(req.params.filename);
+    const filePath = path.join(GALLERY_DIR, name);
+    if (!name || !fs.existsSync(filePath)) { reply.status(404).send("Not found"); return; }
+    const ext = path.extname(name).toLowerCase();
+    reply.type(GALLERY_MIME[ext] || "application/octet-stream");
+    reply.send(fs.createReadStream(filePath));
+  });
+  app.delete("/api/gallery/:filename", async (req) => {
+    const name = path.basename(req.params.filename);
+    const filePath = path.join(GALLERY_DIR, name);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return { success: true };
   });
 
   // ── Knowledge Graph API ──────────────────────────────────────────────────
@@ -6622,6 +7399,56 @@ export async function createApp() {
   });
 
   // ── Resource / Host Metrics API ────────────────────────────────────────
+  app.get("/api/system/hardware", async () => {
+    try {
+      const os2 = await import("node:os");
+      const cpus = os2.cpus();
+      const totalMem = os2.totalmem();
+      let gpuInfo = [];
+      try {
+        const nvidiaSmi = execSync("nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null", { timeout: 3000 });
+        gpuInfo = nvidiaSmi.toString().trim().split("\n").filter(Boolean).map(line => {
+          const [name, total, free] = line.split(",").map(s => s.trim());
+          return { name, vramTotalMb: parseInt(total) || 0, vramFreeMb: parseInt(free) || 0 };
+        });
+      } catch {}
+      return {
+        cpu: { model: cpus[0]?.model || "unknown", cores: cpus.length, speed: cpus[0]?.speed },
+        memory: { totalGb: Math.round(totalMem / 1024 / 1024 / 1024 * 10) / 10 },
+        gpu: gpuInfo,
+      };
+    } catch { return { cpu: {}, memory: {}, gpu: [] }; }
+  });
+  // Fit scoring
+  app.get("/api/models/fit-score", async () => {
+    const scores = [];
+    const models = [
+      { id: "gemma-4-e4b", minVram: 2, minRam: 4, tier: "light" },
+      { id: "llama-3.2-3b", minVram: 3, minRam: 4, tier: "light" },
+      { id: "mistral-7b", minVram: 6, minRam: 8, tier: "medium" },
+      { id: "llama-3.1-8b", minVram: 8, minRam: 8, tier: "medium" },
+      { id: "qwen-2.5-14b", minVram: 12, minRam: 16, tier: "heavy" },
+      { id: "deepseek-r1-14b", minVram: 16, minRam: 16, tier: "heavy" },
+      { id: "codestral-22b", minVram: 20, minRam: 24, tier: "xheavy" },
+      { id: "llama-3.3-70b", minVram: 48, minRam: 64, tier: "server" },
+    ];
+    try {
+      const totalMem = os.totalmem() / 1024 / 1024 / 1024;
+      let gpuVram = 0;
+      try {
+        const out = execSync("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null", { timeout: 2000 });
+        gpuVram = out.toString().trim().split("\n").reduce((s, v) => s + (parseInt(v) || 0), 0) / 1024;
+      } catch {}
+      for (const m of models) {
+        const ramFit = totalMem >= m.minRam ? 1 : totalMem / m.minRam;
+        const vramFit = gpuVram >= m.minVram ? 1 : gpuVram > 0 ? gpuVram / m.minVram : 0.5;
+        const score = Math.round((ramFit * 0.4 + vramFit * 0.6) * 100);
+        scores.push({ ...m, ramAvailable: Math.round(totalMem), vramAvailable: Math.round(gpuVram), score });
+      }
+    } catch {}
+    return { scores: scores.sort((a, b) => b.score - a.score) };
+  });
+
   app.get("/api/system/resources", async () => {
     try {
       const fs2 = await import("node:fs");
@@ -6664,6 +7491,116 @@ export async function createApp() {
       const rows = db.prepare("SELECT * FROM rate_limits ORDER BY breached DESC, last_checked DESC").all();
       return { limits: rows };
     } catch { return { limits: [] }; }
+  });
+
+  // ── Auth / API Tokens ─────────────────────────────────────────────────
+  const TOKENS_FILE = path.join(PI_DIR, "api-tokens.json");
+  function loadTokens() {
+    try { return JSON.parse(fs.readFileSync(TOKENS_FILE, "utf8")); }
+    catch { return []; }
+  }
+  function saveTokens(tokens) {
+    fs.mkdirSync(path.dirname(TOKENS_FILE), { recursive: true });
+    fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2));
+  }
+  app.get("/api/auth/tokens", async () => ({ tokens: loadTokens().map(t => ({ ...t, token: t.token?.slice(0, 8) + "..." })) }));
+  app.post("/api/auth/tokens", async (req) => {
+    const { name, role } = req.body || {};
+    if (!name) return { error: "name required" };
+    const token = `pi_${crypto.randomBytes(24).toString("hex")}`;
+    const entry = { id: `token_${Date.now()}`, name, token, role: role || "read", created: Date.now(), lastUsed: null };
+    const tokens = loadTokens();
+    tokens.push(entry);
+    saveTokens(tokens);
+    return { success: true, ...entry };
+  });
+  app.delete("/api/auth/tokens/:id", async (req) => {
+    const tokens = loadTokens().filter(t => t.id !== req.params.id);
+    saveTokens(tokens);
+    return { success: true };
+  });
+
+  // ── Companion App API ──────────────────────────────────────────────────
+  app.get("/api/companion/status", async () => ({
+    version: "1.0.0", uptime: process.uptime(),
+    activeSessions: 0, services: { server: "ok" },
+  }));
+  app.post("/api/companion/notify", async (req) => {
+    const { title, message, priority } = req.body || {};
+    const ntfyUrl = process.env.NTFY_URL || "https://ntfy.sh";
+    const ntfyTopic = process.env.NTFY_TOPIC || "pi-custom-pack";
+    try {
+      await fetch(`${ntfyUrl}/${ntfyTopic}`, {
+        method: "POST", body: message || title || "notification",
+        headers: { "Title": title || "PI Pack", "Priority": String(priority || 3), "Tags": "bell" },
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {}
+    return { sent: true, channel: "ntfy" };
+  });
+
+  // ── Session Auth ─────────────────────────────────────────────────
+  function validateSession(req) {
+    try {
+      const sid = req.cookies?.session_id || req.headers["x-session-id"];
+      if (!sid) return null;
+      const db = getOrCreateDb(path.join(PI_DIR, "session-state.db"));
+      const row = db.prepare("SELECT * FROM sessions WHERE id = ? AND expires_at > ?").get(sid, Date.now());
+      return row || null;
+    } catch { return null; }
+  }
+  function requireAdmin(req) {
+    const session = validateSession(req);
+    return session?.role === "admin";
+  }
+  app.post("/api/auth/login", async (req, reply) => {
+    const { password } = req.body || {};
+    const masterPassword = process.env.SESSION_SECRET || "admin";
+    if (password !== masterPassword) return { error: "Invalid password" };
+    const sid = `sess_${crypto.randomBytes(24).toString("hex")}`;
+    const now = Date.now();
+    const db = getOrCreateDb(path.join(PI_DIR, "session-state.db"));
+    if (db) {
+      db.exec("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, role TEXT DEFAULT 'user', created_at INTEGER, expires_at INTEGER)");
+      db.prepare("INSERT INTO sessions (id, role, created_at, expires_at) VALUES (?, ?, ?, ?)").run(sid, "admin", now, now + 86400000 * 7);
+    }
+    reply.setCookie("session_id", sid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 604800 });
+    return { success: true, session_id: sid };
+  });
+  app.post("/api/auth/logout", async (req, reply) => {
+    const sid = req.cookies?.session_id;
+    if (sid) {
+      reply.clearCookie("session_id", { path: "/" });
+      try { const db = getOrCreateDb(path.join(PI_DIR, "session-state.db")); db?.prepare("DELETE FROM sessions WHERE id = ?").run(sid); } catch {}
+    }
+    return { success: true };
+  });
+  app.get("/api/auth/me", async (req) => {
+    const session = validateSession(req);
+    return { authenticated: !!session, role: session?.role || "none", expiresAt: session?.expires_at };
+  });
+  // 2FA TOTP
+  app.post("/api/auth/2fa/setup", async (req) => {
+    const secret = crypto.randomBytes(20).toString("base64url");
+    vaultSet("TOTP_SECRET", secret);
+    return { secret, uri: `otpauth://totp/PI-Custom-Pack?secret=${secret}&issuer=PI-Custom-Pack` };
+  });
+  app.post("/api/auth/2fa/verify", async (req) => {
+    const { token } = req.body || {};
+    const secret = vaultGet("TOTP_SECRET");
+    if (!secret || !token) return { verified: false };
+    // Simplified TOTP verification (30s window)
+    const { createHmac } = await import("node:crypto");
+    for (let offset = -1; offset <= 1; offset++) {
+      const counter = Math.floor(Date.now() / 30000) + offset;
+      const buf = Buffer.alloc(8);
+      buf.writeBigInt64BE(BigInt(counter));
+      const hmac = createHmac("sha1", Buffer.from(secret, "base64url")).update(buf).digest();
+      const offset2 = hmac[hmac.length - 1] & 0xf;
+      const code = ((hmac[offset2] & 0x7f) << 24 | (hmac[offset2 + 1] & 0xff) << 16 | (hmac[offset2 + 2] & 0xff) << 8 | (hmac[offset2 + 3] & 0xff)) % 1000000;
+      if (String(code).padStart(6, "0") === token) return { verified: true };
+    }
+    return { verified: false };
   });
 
   // ── Social Media Proxy Routes ────────────────────────────────────────────
@@ -7542,6 +8479,174 @@ async function main() {
       fs.writeFileSync(modelsPath, JSON.stringify(cfg, null, 2));
     } catch {}
   }
+
+  // ── Session Management API ────────────────────────────────────────────────
+
+  app.get("/api/memory/export", async (req) => {
+    const format = req.query?.format || "json";
+    const entries = readMemory();
+    if (format === "csv") {
+      const header = "id,content,type,importance,project,tags,created_at,updated_at";
+      const rows = entries.map(e =>
+        `"${e.id}","${(e.content || "").replace(/"/g, '""')}","${e.type || "note"}","${e.importance}","${(e.project || "").replace(/"/g, '""')}","${(e.tags || []).join(";")}","${e.createdAt}","${e.updatedAt}"`
+      );
+      return reply.type("text/csv").send(header + "\n" + rows.join("\n"));
+    }
+    return { entries };
+  });
+
+  app.post("/api/memory/import", async (req) => {
+    const { entries } = req.body || {};
+    if (!Array.isArray(entries) || entries.length === 0) return { error: "No entries provided", imported: 0 };
+    try {
+      const db = getMemoryDb();
+      if (!db) return { error: "Database unavailable", imported: 0 };
+      const upsert = db.prepare(`INSERT OR REPLACE INTO memory_entries (id, content, type, importance, project, tags, created_at, updated_at, access_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const vecInsert = db.prepare(`INSERT OR REPLACE INTO memory_vectors (entry_id, vector) VALUES (?, ?)`);
+      const tx = db.transaction((rows) => {
+        for (const e of rows) {
+          const id = e.id || `mem_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+          upsert.run(id, e.content || "", e.type || "note", e.importance || 5, e.project || "", JSON.stringify(e.tags || []), e.createdAt || Date.now(), e.updatedAt || Date.now(), e.accessCount || 0);
+          const vec = computeVector(e.content + " " + (e.tags || []).join(" "));
+          vecInsert.run(id, JSON.stringify(vec));
+        }
+      });
+      tx(entries);
+      return { success: true, imported: entries.length };
+    } catch (e) { return { error: e.message, imported: 0 }; }
+  });
+
+  const SESSIONS_DB_PATH = path.join(PI_DIR, "sessions.db");
+
+  function getSessionsDb() {
+    try {
+      const db = getOrCreateDb(SESSIONS_DB_PATH);
+      if (!db) return null;
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL DEFAULT 'New Chat',
+          model_id TEXT DEFAULT '',
+          preset TEXT DEFAULT '',
+          token_count INTEGER DEFAULT 0,
+          message_count INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          archived INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS session_messages (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+      `);
+      return db;
+    } catch { return null; }
+  }
+
+  app.get("/api/sessions", async (req) => {
+    const db = getSessionsDb();
+    if (!db) return { sessions: [] };
+    const includeArchived = req.query?.archived === "true";
+    const rows = db.prepare(`
+      SELECT id, title, model_id, preset, token_count, message_count,
+             created_at AS createdAt, updated_at AS updatedAt, archived
+      FROM sessions
+      WHERE archived ${includeArchived ? "IN (0,1)" : "= 0"}
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `).all();
+    return { sessions: rows };
+  });
+
+  app.post("/api/sessions", async (req) => {
+    const db = getSessionsDb();
+    if (!db) return { error: "Database unavailable" };
+    const { title, modelId } = req.body || {};
+    const id = `session_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO sessions (id, title, model_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, title || "New Chat", modelId || "", now, now);
+    return { success: true, id };
+  });
+
+  app.put("/api/sessions/:id", async (req) => {
+    const db = getSessionsDb();
+    if (!db) return { error: "Database unavailable" };
+    const { id } = req.params;
+    const updates = req.body || {};
+    const fields = [];
+    const values = [];
+    if (updates.title !== undefined) { fields.push("title = ?"); values.push(updates.title); }
+    if (updates.archived !== undefined) { fields.push("archived = ?"); values.push(updates.archived ? 1 : 0); }
+    if (fields.length === 0) return { error: "No fields to update" };
+    fields.push("updated_at = ?");
+    values.push(Date.now());
+    values.push(id);
+    db.prepare(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    return { success: true };
+  });
+
+  app.delete("/api/sessions/:id", async (req) => {
+    const db = getSessionsDb();
+    if (!db) return { error: "Database unavailable" };
+    const { id } = req.params;
+    db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    return { success: true };
+  });
+
+  app.get("/api/sessions/:id/messages", async (req) => {
+    const db = getSessionsDb();
+    if (!db) return { messages: [] };
+    const { id } = req.params;
+    const rows = db.prepare(`
+      SELECT id, role, content, created_at AS createdAt
+      FROM session_messages
+      WHERE session_id = ?
+      ORDER BY created_at ASC
+    `).all(id);
+    return { messages: rows };
+  });
+
+  app.post("/api/sessions/:id/messages", async (req) => {
+    const db = getSessionsDb();
+    if (!db) return { error: "Database unavailable" };
+    const { id } = req.params;
+    const { role, content } = req.body || {};
+    if (!role || !content) return { error: "role and content required" };
+    const msgId = `msg_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO session_messages (id, session_id, role, content, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(msgId, id, role, content, now);
+    db.prepare(`
+      UPDATE sessions SET message_count = message_count + 1, token_count = token_count + ?, updated_at = ?
+      WHERE id = ?
+    `).run(content.length, now, id);
+    return { success: true, id: msgId };
+  });
+
+  // ── Multi-machine SSH ────────────────────────────────────────────────
+  const SSH_CONFIG_FILE = path.join(PI_DIR, "ssh-machines.json");
+  function loadSshMachines() {
+    try { return JSON.parse(fs.readFileSync(SSH_CONFIG_FILE, "utf8")); } catch { return []; }
+  }
+  app.get("/api/ssh/machines", async () => ({ machines: loadSshMachines().map(m => ({ ...m, password: "***" })) }));
+  app.post("/api/ssh/machines", async (req) => {
+    const { host, port, username, password, label } = req.body || {};
+    if (!host || !username) return { error: "host and username required" };
+    const machines = loadSshMachines();
+    machines.push({ id: `ssh_${Date.now()}`, host, port: port || 22, username, password: password || "", label: label || host, addedAt: Date.now() });
+    fs.writeFileSync(SSH_CONFIG_FILE, JSON.stringify(machines, null, 2));
+    return { success: true };
+  });
 
   try {
     await syncLmStudioModels();

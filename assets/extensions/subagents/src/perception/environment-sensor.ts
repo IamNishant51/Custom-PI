@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
+import cp from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
 
 export interface EnvironmentState {
@@ -38,6 +39,25 @@ export interface FileChange {
   path: string;
   timestamp: number;
   size?: number;
+}
+
+export interface SubProcessHealth {
+  subAgents: { running: number; total: number; names: string[] };
+  mcpServers: { name: string; alive: boolean; pid?: number }[];
+  bridges: { email: boolean; social: boolean };
+  status: "healthy" | "degraded" | "unhealthy";
+}
+
+export interface NetworkAvailability {
+  lmStudio: boolean;
+  ollama: boolean;
+  apiEndpoints: Record<string, boolean>;
+}
+
+export interface IDEDetection {
+  vscode: boolean;
+  neovim: boolean;
+  activeFiles?: string[];
 }
 
 export class EnvironmentSensor {
@@ -142,10 +162,10 @@ export class EnvironmentSensor {
   getGitState(dir?: string): { branch: string; dirty: boolean; ahead: number; behind: number; lastCommit: string } | null {
     try {
       const targetDir = dir || process.cwd();
-      const branch = require("child_process").execSync("git rev-parse --abbrev-ref HEAD", { cwd: targetDir, encoding: "utf8", timeout: 5000 }).trim();
-      const status = require("child_process").execSync("git status --porcelain", { cwd: targetDir, encoding: "utf8", timeout: 5000 });
+      const branch = cp.execSync("git rev-parse --abbrev-ref HEAD", { cwd: targetDir, encoding: "utf8", timeout: 5000 }).trim();
+      const status = cp.execSync("git status --porcelain", { cwd: targetDir, encoding: "utf8", timeout: 5000 });
       const dirty = status.trim().length > 0;
-      const lastCommit = require("child_process").execSync("git log --oneline -1", { cwd: targetDir, encoding: "utf8", timeout: 5000 }).trim();
+      const lastCommit = cp.execSync("git log --oneline -1", { cwd: targetDir, encoding: "utf8", timeout: 5000 }).trim();
       return { branch, dirty, ahead: 0, behind: 0, lastCommit };
     } catch {
       return null;
@@ -154,7 +174,7 @@ export class EnvironmentSensor {
 
   isProcessRunning(processName: string): boolean {
     try {
-      const result = require("child_process").execSync(`pgrep -x ${processName} || true`, { encoding: "utf8", timeout: 3000 });
+      const result = cp.execSync(`pgrep -x ${processName} || true`, { encoding: "utf8", timeout: 3000 });
       return result.trim().length > 0;
     } catch {
       return false;
@@ -169,7 +189,7 @@ export class EnvironmentSensor {
     }
     try {
       if (os.platform() === "linux") {
-        const result = require("child_process").execSync(`df -BG ${path} | tail -1`, { encoding: "utf8", timeout: 3000 });
+        const result = cp.execSync(`df -BG ${path} | tail -1`, { encoding: "utf8", timeout: 3000 });
         const parts = result.trim().split(/\s+/);
         const total = parseInt(parts[1]?.replace("G", "") || "0");
         const used = parseInt(parts[2]?.replace("G", "") || "0");
@@ -203,7 +223,7 @@ export class EnvironmentSensor {
 
   private hasCommand(cmd: string, args: string[] = ["--version"]): boolean {
     try {
-      const res = require("child_process").spawnSync(cmd, args, { stdio: "ignore", timeout: 2000 });
+      const res = cp.spawnSync(cmd, args, { stdio: "ignore", timeout: 2000 });
       return res.status === 0;
     } catch {
       return false;
@@ -271,7 +291,7 @@ export class EnvironmentSensor {
         }
       } catch {}
       try {
-        return parseInt(require("child_process").execSync("ps aux --no-headers | wc -l", { encoding: "utf8", timeout: 3000 }).trim());
+        return parseInt(cp.execSync("ps aux --no-headers | wc -l", { encoding: "utf8", timeout: 3000 }).trim());
       } catch {
         return 0;
       }
@@ -292,6 +312,111 @@ export class EnvironmentSensor {
     };
 
     return this.environmentState;
+  }
+
+  checkSubProcessHealth(): SubProcessHealth {
+    const subAgentNames = ["node", "tsx", "ts-node"];
+    const runningNames = subAgentNames.filter(n => this.isProcessRunning(n));
+
+    const mcpChecks = ["mcp-server", "mcp-proxy", "mcp-gateway"];
+    const mcpServers = mcpChecks.map(name => {
+      const pids = this.findPids(name);
+      return { name, alive: pids.length > 0, pid: pids[0] };
+    });
+
+    const bridges = {
+      email: this.isProcessRunning("email-bridge") || this.findPids("email").length > 0,
+      social: this.isProcessRunning("social-bridge") || this.findPids("social").length > 0,
+    };
+
+    const allUp = runningNames.length === subAgentNames.length && mcpServers.every(m => m.alive) && bridges.email && bridges.social;
+    const anyUp = runningNames.length > 0 || mcpServers.some(m => m.alive) || bridges.email || bridges.social;
+
+    return {
+      subAgents: { running: runningNames.length, total: subAgentNames.length, names: runningNames },
+      mcpServers,
+      bridges,
+      status: allUp ? "healthy" : anyUp ? "degraded" : "unhealthy",
+    };
+  }
+
+  getResourcePressure(): string {
+    const env = this.getEnvironment();
+    const max = Math.max(env.cpuUsage, env.memoryUsagePercent, env.diskUsagePercent);
+    if (max >= 90) return "critical";
+    if (max >= 75) return "high";
+    if (max >= 60) return "moderate";
+    return "low";
+  }
+
+  async checkNetworkAvailability(): Promise<NetworkAvailability> {
+    const apiEndpoints: Record<string, boolean> = {};
+    const configured = process.env.API_ENDPOINTS || process.env.OPENAI_BASE_URL || "";
+
+    if (configured) {
+      const urls = configured.split(",").map(u => u.trim()).filter(Boolean);
+      for (const url of urls) {
+        apiEndpoints[url] = await this.pingEndpoint(url);
+      }
+    }
+
+    const [lmStudio, ollama] = await Promise.all([
+      this.pingEndpoint("http://localhost:1234"),
+      this.pingEndpoint("http://localhost:11434"),
+    ]);
+
+    return { lmStudio, ollama, apiEndpoints };
+  }
+
+  detectIDE(): IDEDetection {
+    const vscode = this.hasCommand("code");
+    const neovim = this.hasCommand("nvim") || this.hasCommand("vim");
+    let activeFiles: string[] | undefined;
+
+    try {
+      if (os.platform() === "linux") {
+        const procDirs = fs.readdirSync("/proc").filter(d => /^\d+$/.test(d));
+        const files = new Set<string>();
+        for (const dir of procDirs) {
+          try {
+            const cmdline = fs.readFileSync(`/proc/${dir}/cmdline`, "utf8");
+            const parts = cmdline.split("\0");
+            const exe = parts[0]?.toLowerCase() || "";
+            if (exe.includes("code") || exe.includes("nvim") || exe.includes("vim")) {
+              for (const part of parts.slice(1)) {
+                if (/\.(ts|js|tsx|jsx|json|md|yaml|yml|py|rs|go|c|cpp|h)$/.test(part)) {
+                  files.add(part);
+                }
+              }
+            }
+          } catch {}
+        }
+        if (files.size > 0) activeFiles = Array.from(files);
+      }
+    } catch {}
+
+    return { vscode, neovim, activeFiles };
+  }
+
+  private findPids(pattern: string): number[] {
+    try {
+      const result = cp.execSync(`pgrep -f ${pattern} || true`, { encoding: "utf8", timeout: 3000 });
+      return result.trim().split("\n").filter(Boolean).map(Number);
+    } catch {
+      return [];
+    }
+  }
+
+  private async pingEndpoint(url: string): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(url, { signal: controller.signal, method: "HEAD" });
+      clearTimeout(timer);
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   destroy(): void {

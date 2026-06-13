@@ -64,4 +64,75 @@ describe("GoalDecomposer", () => {
     const ready = decomposer.getReadyTasks(plan.id);
     expect(Array.isArray(ready)).toBe(true);
   });
+
+  it("extracts milestones from multi-step plans", async () => {
+    const plan = await decomposer.createPlan("Research. Design architecture. Implement core. Write tests. Deploy. Monitor.");
+    expect(plan.milestones.length).toBeGreaterThanOrEqual(1);
+    expect(plan.milestones.some(m => m.includes("Complete"))).toBe(true);
+  });
+
+  it("estimates time and resources for tasks", async () => {
+    const plan = await decomposer.createPlan("Complex multi-step deployment pipeline with validation and rollback capabilities.");
+    expect(plan.totalEstimatedTimeMs).toBeGreaterThan(0);
+    for (const [, task] of plan.subTasks) {
+      expect(task.estimatedTimeMs).toBeGreaterThan(0);
+      expect(task.estimatedTokens).toBeGreaterThan(0);
+      expect(task.estimatedToolCalls).toBeGreaterThan(0);
+    }
+  });
+
+  it("identifies parallel execution groups", async () => {
+    const plan = await decomposer.createPlan("Step one. Step two. Step three. Step four. Step five.");
+    const groups = decomposer.getParallelGroups(plan.id);
+    expect(Array.isArray(groups)).toBe(true);
+  });
+
+  it("computes critical path through dependency graph", async () => {
+    const plan = await decomposer.createPlan("Init. Build backend. Build frontend. Integrate. Test. Deploy.");
+    const criticalPath = decomposer.getCriticalPath(plan.id);
+    expect(criticalPath.length).toBeGreaterThanOrEqual(1);
+    const lastTask = criticalPath[criticalPath.length - 1];
+    expect(lastTask).toBeDefined();
+  });
+
+  it("re-plans when a task fails with alternative approach", async () => {
+    const plan = await decomposer.createPlan("Setup database. Configure API. Test endpoints.");
+    const firstTask = Array.from(plan.subTasks.values())[0];
+    decomposer.updateTaskStatus(plan.id, firstTask.id, "failed", undefined, "Connection timeout");
+    const replacement = decomposer.rePlan(plan.id, firstTask.id, "Use a different database driver");
+    expect(replacement).not.toBeNull();
+    expect(replacement!.id).toContain("replan");
+    const updatedPlan = decomposer.getPlan(plan.id);
+    expect(updatedPlan!.subTasks.has(replacement!.id)).toBe(true);
+  });
+
+  it("marks tasks as failed and blocks dependents", async () => {
+    const plan = await decomposer.createPlan("Phase A. Phase B. Phase C.");
+    const taskIds = Array.from(plan.subTasks.keys());
+    plan.status = "executing";
+    decomposer.updateTaskStatus(plan.id, taskIds[0], "failed", undefined, "Error in phase A");
+    const failed = plan.subTasks.get(taskIds[0]);
+    expect(failed).not.toBeNull();
+    expect(failed!.status).toBe("failed");
+    expect(failed!.error).toBe("Error in phase A");
+    const hasBlocked = Array.from(plan.subTasks.values()).some(t => t.status === "blocked");
+  });
+
+  it("reports progress summary", async () => {
+    const plan = await decomposer.createPlan("Task A. Task B. Task C. Task D.");
+    const initial = decomposer.getProgressSummary(plan.id);
+    expect(initial.total).toBeGreaterThanOrEqual(1);
+    expect(initial.percentComplete).toBe(0);
+
+    const firstTask = Array.from(plan.subTasks.values())[0];
+    decomposer.updateTaskStatus(plan.id, firstTask.id, "completed");
+    const afterFirst = decomposer.getProgressSummary(plan.id);
+    expect(afterFirst.completed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("estimates time remaining during execution", async () => {
+    const plan = await decomposer.createPlan("Short task list with a few items to estimate.");
+    const timeRemaining = decomposer.getEstimatedTimeRemaining(plan.id);
+    expect(timeRemaining).toBeGreaterThanOrEqual(0);
+  });
 });

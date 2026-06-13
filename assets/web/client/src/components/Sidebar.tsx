@@ -2,7 +2,9 @@ import { View } from "../App";
 import {
   AsciiChat, AsciiDashboard, AsciiVault, AsciiBudget, AsciiMemory,
   AsciiWorkProducts, AsciiAgents, AsciiMCP, AsciiSettings, AsciiTeams, AsciiUsers,
-  AsciiGraph, AsciiBanner, AsciiGitBranch, AsciiActivity, AsciiRefresh,
+  AsciiGraph, AsciiBanner, AsciiGitBranch, AsciiActivity, AsciiRefresh, AsciiNotes,
+  AsciiBook, AsciiSearch, AsciiEye, AsciiCalendar,
+  AsciiMail, AsciiPalette, AsciiShield, AsciiSliders, AsciiImage,
 } from "./Icons";
 
 interface SidebarProps {
@@ -26,6 +28,18 @@ const NAV_ITEMS: { view: View; icon: typeof AsciiChat; label: string }[] = [
   { view: "mcp", icon: AsciiMCP, label: "MCP Servers" },
   { view: "teams", icon: AsciiTeams, label: "Teams" },
   { view: "social", icon: AsciiRefresh, label: "Social Accounts" },
+  { view: "notes", icon: AsciiNotes, label: "Notes & Tasks" },
+  { view: "contacts", icon: AsciiUsers, label: "Contacts" },
+  { view: "cookbook", icon: AsciiBook, label: "Model Cookbook" },
+  { view: "research", icon: AsciiSearch, label: "Deep Research" },
+  { view: "compare", icon: AsciiEye, label: "Model Compare" },
+  { view: "gallery", icon: AsciiCalendar, label: "Image Gallery" },
+  { view: "documents", icon: AsciiWorkProducts, label: "Documents" },
+  { view: "email", icon: AsciiMail, label: "Email" },
+  { view: "canvas-editor", icon: AsciiSliders, label: "Canvas Editor" },
+  { view: "theme", icon: AsciiPalette, label: "Theme Editor" },
+  { view: "login", icon: AsciiShield, label: "Login" },
+  { view: "admin", icon: AsciiShield, label: "Admin" },
   { view: "settings", icon: AsciiSettings, label: "Settings" },
 ];
 
