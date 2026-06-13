@@ -3058,175 +3058,6 @@ Restored: ${result.restored.join(", ")}`;
                   const content = fs.readFileSync(full, "utf8");
                   const lines = content.split("\n");
                   if (isReDosPattern(args.pattern)) continue;
-  // ── Notes & Tasks API ────────────────────────────────────────────────────
-
-  const NOTES_DB_PATH = path.join(PI_DIR, "notes.db");
-
-  function getNotesDb() {
-    try {
-      const db = getOrCreateDb(NOTES_DB_PATH);
-      if (!db) return null;
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS notes (
-          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
-          color TEXT DEFAULT '', pinned INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
-          tags TEXT DEFAULT '[]', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS tasks (
-          id TEXT PRIMARY KEY, title TEXT NOT NULL, done INTEGER DEFAULT 0,
-          status TEXT DEFAULT 'todo', priority TEXT DEFAULT 'medium',
-          due_date INTEGER, note_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-        );
-      `);
-      return db;
-    } catch { return null; }
-  }
-
-  app.get("/api/notes", async () => {
-    const db = getNotesDb();
-    if (!db) return { notes: [] };
-    const rows = db.prepare("SELECT * FROM notes WHERE archived = 0 ORDER BY pinned DESC, updated_at DESC LIMIT 100").all();
-    return { notes: rows.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]") })) };
-  });
-
-  app.post("/api/notes", async (req) => {
-    const db = getNotesDb();
-    if (!db) return { error: "Database unavailable" };
-    const { title, content, color, tags } = req.body || {};
-    const id = `note_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    const now = Date.now();
-    db.prepare("INSERT INTO notes (id, title, content, color, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(id, title || "", content || "", color || "", JSON.stringify(tags || []), now, now);
-    return { success: true, id };
-  });
-
-  app.put("/api/notes/:id", async (req) => {
-    const db = getNotesDb();
-    if (!db) return { error: "Database unavailable" };
-    const { id } = req.params;
-    const updates = req.body || {};
-    const fields = []; const vals = [];
-    for (const k of ["title", "content", "color", "pinned", "archived"]) {
-      if (updates[k] !== undefined) { fields.push(`${k} = ?`); vals.push(updates[k]); }
-    }
-    if (updates.tags) { fields.push("tags = ?"); vals.push(JSON.stringify(updates.tags)); }
-    if (!fields.length) return { error: "No fields" };
-    fields.push("updated_at = ?"); vals.push(Date.now()); vals.push(id);
-    db.prepare(`UPDATE notes SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
-    return { success: true };
-  });
-
-  app.delete("/api/notes/:id", async (req) => {
-    const db = getNotesDb();
-    if (!db) return { error: "Database unavailable" };
-    db.prepare("DELETE FROM notes WHERE id = ?").run(req.params.id);
-    return { success: true };
-  });
-
-  app.get("/api/tasks", async () => {
-    const db = getNotesDb();
-    if (!db) return { tasks: [] };
-    const rows = db.prepare("SELECT * FROM tasks ORDER BY done ASC, due_date ASC, created_at DESC LIMIT 100").all();
-    return { tasks: rows };
-  });
-
-  app.post("/api/tasks", async (req) => {
-    const db = getNotesDb();
-    if (!db) return { error: "Database unavailable" };
-    const { title, priority, dueDate, noteId } = req.body || {};
-    const id = `task_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    const now = Date.now();
-    db.prepare("INSERT INTO tasks (id, title, priority, due_date, note_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(id, title || "", priority || "medium", dueDate || null, noteId || "", now, now);
-    return { success: true, id };
-  });
-
-  app.put("/api/tasks/:id", async (req) => {
-    const db = getNotesDb();
-    if (!db) return { error: "Database unavailable" };
-    const updates = req.body || {};
-    const fields = []; const vals = [];
-    for (const k of ["title", "done", "status", "priority", "due_date"]) {
-      if (updates[k] !== undefined) { fields.push(`${k} = ?`); vals.push(updates[k]); }
-    }
-    if (!fields.length) return { error: "No fields" };
-    fields.push("updated_at = ?"); vals.push(Date.now()); vals.push(req.params.id);
-    db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
-    return { success: true };
-  });
-
-  app.delete("/api/tasks/:id", async (req) => {
-    const db = getNotesDb();
-    if (!db) return { error: "Database unavailable" };
-    db.prepare("DELETE FROM tasks WHERE id = ?").run(req.params.id);
-    return { success: true };
-  });
-
-  // ── Reminders & Scheduled Actions ────────────────────────────────────
-  const REMINDERS_FILE = path.join(PI_DIR, "reminders.json");
-  function loadReminders() {
-    try { return JSON.parse(fs.readFileSync(REMINDERS_FILE, "utf8")); } catch { return []; }
-  }
-  function saveReminders(reminders) { fs.writeFileSync(REMINDERS_FILE, JSON.stringify(reminders, null, 2)); }
-  app.get("/api/reminders", async () => ({ reminders: loadReminders() }));
-  app.post("/api/reminders", async (req) => {
-    const { title, dueAt, noteId, recurring } = req.body || {};
-    if (!title) return { error: "title required" };
-    const reminders = loadReminders();
-    const r = { id: `rem_${Date.now()}`, title, dueAt: dueAt || Date.now() + 86400000, noteId: noteId || null, recurring: recurring || null, done: false, createdAt: Date.now() };
-    reminders.push(r);
-    saveReminders(reminders);
-    return { success: true, reminder: r };
-  });
-  app.post("/api/reminders/:id/done", async (req) => {
-    const reminders = loadReminders().map(r => r.id === req.params.id ? { ...r, done: true } : r);
-    saveReminders(reminders);
-    return { success: true };
-  });
-  app.delete("/api/reminders/:id", async (req) => {
-    saveReminders(loadReminders().filter(r => r.id !== req.params.id));
-    return { success: true };
-  });
-  // Scheduled actions (cron-style agent tasks)
-  const SCHEDULED_FILE = path.join(PI_DIR, "scheduled-actions.json");
-  function loadScheduled() {
-    try { return JSON.parse(fs.readFileSync(SCHEDULED_FILE, "utf8")); } catch { return []; }
-  }
-  function saveScheduled(actions) { fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(actions, null, 2)); }
-  // Background scheduler — checks every 60s
-  if (!global._schedulerStarted) {
-    global._schedulerStarted = true;
-    setInterval(() => {
-      const reminders = loadReminders();
-      const now = Date.now();
-      for (const r of reminders) {
-        if (!r.done && r.dueAt <= now) {
-          try { broadcast({ type: "reminder_due", reminder: r }); } catch {}
-        }
-      }
-      const scheduled = loadScheduled();
-      for (const s of scheduled) {
-        if (!s.lastRun || Date.now() - s.lastRun > s.intervalMs) {
-          try { broadcast({ type: "scheduled_action_due", action: s }); } catch {}
-          s.lastRun = Date.now();
-          saveScheduled(scheduled);
-        }
-      }
-    }, 60000);
-  }
-  app.get("/api/scheduled-actions", async () => ({ actions: loadScheduled() }));
-  app.post("/api/scheduled-actions", async (req) => {
-    const { name, description, intervalMs, agentTask } = req.body || {};
-    if (!name || !intervalMs) return { error: "name and intervalMs required" };
-    const actions = loadScheduled();
-    actions.push({ id: `sch_${Date.now()}`, name, description: description || "", intervalMs, agentTask: agentTask || "", lastRun: null, createdAt: Date.now() });
-    saveScheduled(actions);
-    return { success: true };
-  });
-  app.delete("/api/scheduled-actions/:id", async (req) => {
-    saveScheduled(loadScheduled().filter(a => a.id !== req.params.id));
-    return { success: true };
-  });
 
   try {
                     const regex = new RegExp(args.pattern.replace(/\*/g, "\\w+"), "gi");
@@ -6235,6 +6066,176 @@ export async function createApp() {
     return withRequestContext(contextStore, () => {});
   });
 
+  // ── Notes & Tasks API ────────────────────────────────────────────────────
+
+  const NOTES_DB_PATH = path.join(PI_DIR, "notes.db");
+
+  function getNotesDb() {
+    try {
+      const db = getOrCreateDb(NOTES_DB_PATH);
+      if (!db) return null;
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS notes (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
+          color TEXT DEFAULT '', pinned INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
+          tags TEXT DEFAULT '[]', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, done INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'todo', priority TEXT DEFAULT 'medium',
+          due_date INTEGER, note_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+      `);
+      return db;
+    } catch { return null; }
+  }
+
+  app.get("/api/notes", async () => {
+    const db = getNotesDb();
+    if (!db) return { notes: [] };
+    const rows = db.prepare("SELECT * FROM notes WHERE archived = 0 ORDER BY pinned DESC, updated_at DESC LIMIT 100").all();
+    return { notes: rows.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]") })) };
+  });
+
+  app.post("/api/notes", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const { title, content, color, tags } = req.body || {};
+    const id = `note_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare("INSERT INTO notes (id, title, content, color, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, title || "", content || "", color || "", JSON.stringify(tags || []), now, now);
+    return { success: true, id };
+  });
+
+  app.put("/api/notes/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const { id } = req.params;
+    const updates = req.body || {};
+    const fields = []; const vals = [];
+    for (const k of ["title", "content", "color", "pinned", "archived"]) {
+      if (updates[k] !== undefined) { fields.push(`${k} = ?`); vals.push(updates[k]); }
+    }
+    if (updates.tags) { fields.push("tags = ?"); vals.push(JSON.stringify(updates.tags)); }
+    if (!fields.length) return { error: "No fields" };
+    fields.push("updated_at = ?"); vals.push(Date.now()); vals.push(id);
+    db.prepare(`UPDATE notes SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
+    return { success: true };
+  });
+
+  app.delete("/api/notes/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    db.prepare("DELETE FROM notes WHERE id = ?").run(req.params.id);
+    return { success: true };
+  });
+
+  app.get("/api/tasks", async () => {
+    const db = getNotesDb();
+    if (!db) return { tasks: [] };
+    const rows = db.prepare("SELECT * FROM tasks ORDER BY done ASC, due_date ASC, created_at DESC LIMIT 100").all();
+    return { tasks: rows };
+  });
+
+  app.post("/api/tasks", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const { title, priority, dueDate, noteId } = req.body || {};
+    const id = `task_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+    const now = Date.now();
+    db.prepare("INSERT INTO tasks (id, title, priority, due_date, note_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, title || "", priority || "medium", dueDate || null, noteId || "", now, now);
+    return { success: true, id };
+  });
+
+  app.put("/api/tasks/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    const updates = req.body || {};
+    const fields = []; const vals = [];
+    for (const k of ["title", "done", "status", "priority", "due_date"]) {
+      if (updates[k] !== undefined) { fields.push(`${k} = ?`); vals.push(updates[k]); }
+    }
+    if (!fields.length) return { error: "No fields" };
+    fields.push("updated_at = ?"); vals.push(Date.now()); vals.push(req.params.id);
+    db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
+    return { success: true };
+  });
+
+  app.delete("/api/tasks/:id", async (req) => {
+    const db = getNotesDb();
+    if (!db) return { error: "Database unavailable" };
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(req.params.id);
+    return { success: true };
+  });
+
+  // ── Reminders & Scheduled Actions ────────────────────────────────────
+  const REMINDERS_FILE = path.join(PI_DIR, "reminders.json");
+  function loadReminders() {
+    try { return JSON.parse(fs.readFileSync(REMINDERS_FILE, "utf8")); } catch { return []; }
+  }
+  function saveReminders(reminders) { fs.writeFileSync(REMINDERS_FILE, JSON.stringify(reminders, null, 2)); }
+  app.get("/api/reminders", async () => ({ reminders: loadReminders() }));
+  app.post("/api/reminders", async (req) => {
+    const { title, dueAt, noteId, recurring } = req.body || {};
+    if (!title) return { error: "title required" };
+    const reminders = loadReminders();
+    const r = { id: `rem_${Date.now()}`, title, dueAt: dueAt || Date.now() + 86400000, noteId: noteId || null, recurring: recurring || null, done: false, createdAt: Date.now() };
+    reminders.push(r);
+    saveReminders(reminders);
+    return { success: true, reminder: r };
+  });
+  app.post("/api/reminders/:id/done", async (req) => {
+    const reminders = loadReminders().map(r => r.id === req.params.id ? { ...r, done: true } : r);
+    saveReminders(reminders);
+    return { success: true };
+  });
+  app.delete("/api/reminders/:id", async (req) => {
+    saveReminders(loadReminders().filter(r => r.id !== req.params.id));
+    return { success: true };
+  });
+  // Scheduled actions (cron-style agent tasks)
+  const SCHEDULED_FILE = path.join(PI_DIR, "scheduled-actions.json");
+  function loadScheduled() {
+    try { return JSON.parse(fs.readFileSync(SCHEDULED_FILE, "utf8")); } catch { return []; }
+  }
+  function saveScheduled(actions) { fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(actions, null, 2)); }
+  // Background scheduler — checks every 60s
+  if (!global._schedulerStarted) {
+    global._schedulerStarted = true;
+    setInterval(() => {
+      const reminders = loadReminders();
+      const now = Date.now();
+      for (const r of reminders) {
+        if (!r.done && r.dueAt <= now) {
+          try { broadcast({ type: "reminder_due", reminder: r }); } catch {}
+        }
+      }
+      const scheduled = loadScheduled();
+      for (const s of scheduled) {
+        if (!s.lastRun || Date.now() - s.lastRun > s.intervalMs) {
+          try { broadcast({ type: "scheduled_action_due", action: s }); } catch {}
+          s.lastRun = Date.now();
+          saveScheduled(scheduled);
+        }
+      }
+    }, 60000);
+  }
+  app.get("/api/scheduled-actions", async () => ({ actions: loadScheduled() }));
+  app.post("/api/scheduled-actions", async (req) => {
+    const { name, description, intervalMs, agentTask } = req.body || {};
+    if (!name || !intervalMs) return { error: "name and intervalMs required" };
+    const actions = loadScheduled();
+    actions.push({ id: `sch_${Date.now()}`, name, description: description || "", intervalMs, agentTask: agentTask || "", lastRun: null, createdAt: Date.now() });
+    saveScheduled(actions);
+    return { success: true };
+  });
+  app.delete("/api/scheduled-actions/:id", async (req) => {
+    saveScheduled(loadScheduled().filter(a => a.id !== req.params.id));
+    return { success: true };
+  });
+
   // Serve static client — exact matches only (wildcard: false prevents
   // fastify-static from intercepting API routes before they can be handled)
   if (fs.existsSync(CLIENT_DIR)) {
@@ -6248,7 +6249,12 @@ export async function createApp() {
   // SPA fallback — serves index.html for non-API routes, and handles
   // subdirectory assets (e.g., assets/index-xxx.js) that wildcard: false misses
   app.setNotFoundHandler((req, reply) => {
-    if (req.url.startsWith("/api") || req.url.startsWith("/ws")) return reply.callNotFound();
+    // Return proper 404 for API and WS requests (not callNotFound — that
+    // triggers another 404 handler and causes "Trying to send a NotFound
+    // error inside a 404 handler")
+    if (req.url.startsWith("/api") || req.url.startsWith("/ws")) {
+      return reply.status(404).send({ error: "Not found", path: req.url });
+    }
 
     // Try to serve the file from dist/ (handles assets/*.js, *.css, etc.)
     const filePath = path.join(CLIENT_DIR, req.url.replace(/^\//, ""));
