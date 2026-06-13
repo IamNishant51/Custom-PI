@@ -35,10 +35,11 @@ const CanvasEditorPanel = lazy(() => import("./components/CanvasEditorPanel"));
 const ThemeEditorPanel = lazy(() => import("./components/ThemeEditorPanel"));
 const LoginPanel = lazy(() => import("./components/LoginPanel"));
 const AdminPanel = lazy(() => import("./components/AdminPanel"));
+const VoicePanel = lazy(() => import("./components/VoicePanel"));
 
-export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social" | "notes" | "contacts" | "cookbook" | "research" | "compare" | "gallery" | "documents" | "email" | "canvas-editor" | "theme" | "login" | "admin";
+export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social" | "notes" | "contacts" | "cookbook" | "research" | "compare" | "gallery" | "documents" | "email" | "canvas-editor" | "theme" | "login" | "admin" | "voice";
 
-const ALL_VIEWS: View[] = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin"];
+const ALL_VIEWS: View[] = ["chat", "dashboard", "vault", "budget", "voice", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin"];
 
 function hashToView(): View {
   const raw = window.location.hash.replace(/^#\/?/, "").toLowerCase();
@@ -106,7 +107,7 @@ function AppContent() {
         </div>
         <div className="main-area">
           <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
-          <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""}`}>
+          <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""} ${activeView === "voice" ? "content-area-voice" : ""}`}>
             <Suspense fallback={PANELFallback}>
               {activeView === "chat" && <ChatView />}
               {activeView === "dashboard" && <Dashboard />}
@@ -135,6 +136,7 @@ function AppContent() {
               {activeView === "theme" && <ThemeEditorPanel />}
               {activeView === "login" && <LoginPanel />}
               {activeView === "admin" && <AdminPanel />}
+              {activeView === "voice" && <VoicePanel />}
             </Suspense>
           </div>
         </div>
@@ -151,7 +153,7 @@ const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { 
     "work-products": "Work Products",
     agents: "Sub-Agents", "agent-discovery": "Agent Discovery", mcp: "MCP Servers",
     teams: "Teams", settings: "Settings", social: "Social Accounts", notes: "Notes & Tasks", contacts: "Contacts", cookbook: "Model Cookbook", research: "Deep Research", compare: "Model Comparison", gallery: "Image Gallery", documents: "Documents",
-    email: "Email", "canvas-editor": "Canvas Editor", theme: "Theme Editor", login: "Login", admin: "Admin",
+    email: "Email", "canvas-editor": "Canvas Editor", theme: "Theme Editor",     login: "Login", admin: "Admin", voice: "Voice Agent",
   };
   return (
     <div className="topbar">

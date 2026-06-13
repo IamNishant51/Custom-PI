@@ -3,7 +3,7 @@ import {
   Brain, FileText, Users, Puzzle, Settings, Menu,
   Play, Check, X, Plus, Trash2,
   Eye, RefreshCw, Share2, GitBranch, Activity, StickyNote, Calendar, BookOpen, Search,
-  Mail, Palette, Shield, Sliders, Crop, Image,
+  Mail, Palette, Shield, Sliders, Crop, Image, Mic,
 } from "lucide-react";
 
 interface IconProps {
@@ -81,3 +81,4 @@ export function AsciiShield(props?: IconProps) { return <Shield size={14} {...pr
 export function AsciiSliders(props?: IconProps) { return <Sliders size={14} {...props} />; }
 export function AsciiCrop(props?: IconProps) { return <Crop size={14} {...props} />; }
 export function AsciiImage(props?: IconProps) { return <Image size={14} {...props} />; }
+export function AsciiMic(props?: IconProps) { return <Mic size={14} {...props} />; }

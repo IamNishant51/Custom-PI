@@ -8,6 +8,9 @@ import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+
+// TTS child process handle (set by createApp, killed by main exit handler)
+let ttsProcess = null;
 import dns from "node:dns";
 import { execSync, spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
@@ -3681,7 +3684,7 @@ Provide a structured review with severity-classified issues and an overall verdi
           method: "POST",
           headers: { "Content-Type": "application/json", ...headers },
           body: introspectionQuery,
-          signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(120000),
         });
         if (!response.ok) return `GraphQL server responded with status ${response.status}: ${response.statusText}`;
         const json = await response.json();
@@ -6090,12 +6093,19 @@ function validateEnv() {
 export async function createApp() {
   const app = Fastify({ logger: { level: "warn" } });
 
+  // Raw binary parser for WAV audio uploads (STT)
+  app.addContentTypeParser("audio/wav", function (_req, payload, done) {
+    const chunks = [];
+    payload.on("data", (chunk) => chunks.push(chunk));
+    payload.on("end", () => done(null, Buffer.concat(chunks)));
+  });
+
   // Security headers applied to all HTTP responses
   const SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
   };
   app.addHook("onRequest", async (_req, reply) => {
     for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
@@ -6281,6 +6291,167 @@ export async function createApp() {
   app.get("/api/health", async () => ({
     status: "ok", version: "1.0.0", timestamp: new Date().toISOString(),
   }));
+
+  // ── Voice Agent API ────────────────────────────────────────────────
+  const TTS_SERVER = process.env.TTS_SERVER || "http://127.0.0.1:8000";
+
+  // Voice agent conversation history (same full agent pipeline as web chat)
+  const voiceMessages = [];
+  const MAX_VOICE_HISTORY = 50;
+
+  app.post("/api/voice/chat", async (req, reply) => {
+    const { text, voice } = req.body || {};
+    if (!text) return reply.code(400).send({ error: "text is required" });
+    const voiceId = voice || "af_bella";
+    console.log(`[voice] Agent request: "${text.substring(0, 80)}"`);
+
+    const model = resolveModel();
+    const systemPrompt = loadSystemPrompt();
+    const tools = getActiveTools();
+    const auth = getModelAuth(model);
+    const settings = loadSettings();
+
+    voiceMessages.push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
+    while (voiceMessages.length > MAX_VOICE_HISTORY) voiceMessages.shift();
+
+    let toolCallIndex = 0;
+    let finalText = text;
+    const MAX_TURNS = 10;
+
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+      let stream, currentText = "";
+
+      try {
+        stream = streamSimple(model, {
+          systemPrompt,
+          messages: voiceMessages,
+          tools,
+        }, {
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          reasoning: settings.defaultThinkingLevel || "off",
+          signal: AbortSignal.timeout(120000),
+        });
+      } catch (e) {
+        voiceMessages.pop();
+        console.error(`[voice] streamSimple error: ${e.message}`);
+        return { reply: text, error: `Model error: ${e.message}. Check that your local AI server (LM Studio/Ollama) is running.` };
+      }
+
+      try {
+        for await (const event of stream) {
+          if (event.type === "text_delta") currentText += event.delta;
+        }
+      } catch (e) {
+        if (e.name === "AbortError") {
+          return { reply: currentText || text, error: "Request timed out after 120 seconds." };
+        }
+        console.error(`[voice] stream error: ${e.message}`);
+        return { reply: text, error: `Stream error: ${e.message}` };
+      }
+
+      let finalMessage;
+      try { finalMessage = await stream.result(); } catch (e) {
+        return { reply: text, error: `Result error: ${e.message}` };
+      }
+
+      try {
+        const usage = finalMessage.usage;
+        trackCost("voice-session", "voice-agent", model.provider, model.id,
+          usage?.inputTokens || 0, usage?.outputTokens || 0);
+      } catch {}
+
+      voiceMessages.push(finalMessage);
+      finalText = currentText;
+
+      const toolCalls = finalMessage.content.filter(c => c.type === "toolCall" || c.type === "toolUse");
+      if (toolCalls.length === 0) break;
+
+      for (const tc of toolCalls) {
+        const args = tc.arguments || tc.input || {};
+        const id = tc.id || `tc_${Date.now()}_${toolCallIndex++}`;
+        let resultText;
+        try { resultText = await executeTool(tc.name, args, process.cwd()); }
+        catch (e) { resultText = `Error: ${e.message}`; }
+        voiceMessages.push({
+          role: "toolResult", toolCallId: id, toolName: tc.name,
+          content: [{ type: "text", text: resultText }],
+          isError: resultText.startsWith("Error:"),
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    try {
+      const ttsStart = Date.now();
+      const ttsR = await fetch(`${TTS_SERVER}/v1/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: finalText, voice: voiceId }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (ttsR.ok) {
+        const ttsData = await ttsR.json();
+        console.log(`[voice] TTS generated in ${Date.now() - ttsStart}ms`);
+        return { reply: finalText, audio: ttsData.audio, sampleRate: ttsData.sampleRate };
+      }
+    } catch (e2) {
+      console.error(`[voice] TTS error: ${e2.message}`);
+    }
+
+    return { reply: finalText };
+  });
+
+  app.get("/api/voice/voices", async () => {
+    try {
+      const r = await fetch(`${TTS_SERVER}/v1/voices`);
+      const data = await r.json();
+      return data;
+    } catch {
+      return { voices: [], active: "af_bella" };
+    }
+  });
+
+  app.post("/api/voice/select", async (req, reply) => {
+    const { voice_id } = req.body || {};
+    if (!voice_id) return reply.code(400).send({ error: "voice_id is required" });
+    try {
+      await fetch(`${TTS_SERVER}/v1/voices/select`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice_id }),
+      });
+      return { active: voice_id };
+    } catch {
+      return { active: voice_id };
+    }
+  });
+
+  app.post("/api/voice/stt", async (req, reply) => {
+    const body = req.body;
+    if (!body || !Buffer.isBuffer(body) || body.length < 44) {
+      return reply.code(400).send({ error: "valid WAV audio data required" });
+    }
+    console.log(`[voice] STT forwarding ${body.length} bytes to TTS server`);
+    try {
+      const ttsR = await fetch(`${TTS_SERVER}/v1/stt`, {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body,
+        signal: AbortSignal.timeout(120000),
+      });
+      if (ttsR.ok) return await ttsR.json();
+      const errBody = await ttsR.json().catch(() => ({ error: `HTTP ${ttsR.status}` }));
+      console.error("[voice] STT upstream error:", ttsR.status, errBody);
+      return reply.code(ttsR.status).send(errBody);
+    } catch (err) {
+      console.error("[voice] STT fetch failed:", err.message);
+      if (err.message?.includes("connect") || err.message?.includes("ECONNREFUSED")) {
+        return reply.code(502).send({ error: "TTS server not running on port 8000. Restart the web server to auto-start it." });
+      }
+      return reply.code(500).send({ error: `STT failed: ${err.message}` });
+    }
+  });
 
   // Sub-agent process health — checks bridge processes and active agents
   app.get("/api/health/subagents", async () => {
@@ -8444,6 +8615,10 @@ async function main() {
   // Gracefully terminate child processes on exit
   const handleExit = async () => {
     console.log("\nStopping active servers...");
+    if (ttsProcess) {
+      try { ttsProcess.kill("SIGTERM"); } catch {}
+      ttsProcess = null;
+    }
     for (const sock of swarmSockets) {
       try { sock.close(); } catch {}
     }
@@ -8650,6 +8825,37 @@ async function main() {
 
   try {
     await syncLmStudioModels();
+
+    // Auto-start TTS server as child process if not already running
+    const ttsServerDir = path.join(__dirname, "..", "..", "tts_server");
+    if (process.env.TTS_SERVER_AUTO !== "false" && fs.existsSync(ttsServerDir)) {
+      try {
+        const testConn = await fetch("http://127.0.0.1:8000/health");
+        if (testConn.ok) {
+          console.log("  ✦ TTS server already running on port 8000");
+        }
+      } catch {
+        try {
+          const pythonCmd = process.platform === "win32" ? "python" : "python3";
+          ttsProcess = spawn(pythonCmd, [path.join(ttsServerDir, "main.py")], {
+            cwd: ttsServerDir,
+            stdio: ["ignore", "pipe", "pipe"],
+            env: { ...process.env, PYTHONUNBUFFERED: "1" },
+          });
+          ttsProcess.stdout.on("data", (d) => process.stdout.write(`[tts] ${d}`));
+          ttsProcess.stderr.on("data", (d) => process.stderr.write(`[tts] ${d}`));
+          ttsProcess.on("error", (err) => console.error(`[tts] Failed to start: ${err.message}`));
+          ttsProcess.on("exit", (code) => {
+            if (code !== 0 && code !== null) console.error(`[tts] Exited with code ${code}`);
+          });
+          console.log("  ✦ Starting TTS server (Kokoro)...");
+          await new Promise((r) => setTimeout(r, 8000));
+        } catch (e) {
+          console.error(`[tts] Could not start TTS server: ${e.message}`);
+        }
+      }
+    }
+
     await app.listen({ port: PORT, host: HOST });
     const model = resolveModel();
     console.log(`\n  ✦ Custom-PI Web UI running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);

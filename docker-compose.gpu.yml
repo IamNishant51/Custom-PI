@@ -10,6 +10,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4321
+      - TTS_SERVER=http://tts-server:8000
+    depends_on:
+      - tts-server
     deploy:
       resources:
         reservations:
@@ -34,7 +37,26 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
+  tts-server:
+    build: ./tts_server
+    ports:
+      - "8000:8000"
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - LLM_URL=http://ollama:11434/v1/chat/completions
+      - LLM_MODEL=llama3.2:3b
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
 volumes:
   pi_data:
   pi_vault:
   ollama_data:
+  huggingface_cache:

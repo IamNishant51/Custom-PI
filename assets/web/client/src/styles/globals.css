@@ -6,6 +6,7 @@
   --surface-card: #191919;
   --surface-elevated: #222222;
   --surface-overlay: #1e1e1e;
+  --surface: #151618;
   --surface-dark: #0a0a0a;
   --surface-dark-elevated: #191919;
   --ink: #ffffff;
@@ -131,6 +132,9 @@ h4, h5, h6 { font-size: 16px; line-height: 20px; letter-spacing: 0; margin: 10px
   padding: var(--spacing-lg) 0;
   transition: transform 0.25s ease, width 0.25s ease;
   z-index: 100;
+  box-sizing: border-box;
+  height: 100%;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -1680,6 +1684,18 @@ select {
 .content-area-chat {
   padding: 0 !important;
   overflow: hidden !important;
+}
+
+.content-area-voice {
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-area-voice > .panel {
+  flex: 1;
+  min-height: 0;
 }
 
 .ascii-welcome-logo {
@@ -5316,4 +5332,14 @@ select {
   padding: 4px 8px;
   background: rgba(255, 59, 48, 0.08);
   border-radius: 4px;
+}
+
+.agent-avatar-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-avatar-root svg {
+  overflow: visible;
 }
