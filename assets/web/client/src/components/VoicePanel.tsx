@@ -68,6 +68,7 @@ export default function VoicePanel() {
   const [micStatus, setMicStatus] = useState<MicStatus>("prompt");
   const [micStatusText, setMicStatusText] = useState("");
   const [textInput, setTextInput] = useState("");
+  const [volume, setVolume] = useState(40);
 
   const audioEngineRef = useRef<AudioEngine | null>(null);
   const stateRef = useRef(state);
@@ -561,6 +562,22 @@ export default function VoicePanel() {
             </optgroup>
           ))}
         </select>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--mute)", flexShrink: 0 }}>
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            {volume > 0 && <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />}
+            {volume > 30 && <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />}
+          </svg>
+          <input
+            type="range" min="0" max="100" value={volume}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setVolume(v);
+              getEngine().setVolume((v / 100) * 2.5);
+            }}
+            style={{ width: 64, height: 4, accentColor: "var(--accent)", cursor: "pointer" }}
+          />
+        </div>
       </div>
     </div>
   );

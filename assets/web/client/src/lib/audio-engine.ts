@@ -23,6 +23,15 @@ export class AudioEngine {
     return this._resumed;
   }
 
+  private _volume = 1.0;
+
+  setVolume(v: number) {
+    this._volume = Math.max(0, v);
+    if (this.gain) {
+      this.gain.gain.value = this._volume;
+    }
+  }
+
   async resume() {
     if (this._resumed) return;
     if (!this.ctx) {
@@ -30,10 +39,10 @@ export class AudioEngine {
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 256;
       this.gain = this.ctx.createGain();
-      this.gain.gain.value = 1.5;
+      this.gain.gain.value = this._volume;
       this.analyser.connect(this.gain);
       this.gain.connect(this.ctx.destination);
-      console.log(`[audio] AudioContext created, state: ${this.ctx.state}`);
+      console.log(`[audio] AudioContext created, state: ${this.ctx.state}, gain=${this._volume}`);
     }
     if (this.ctx.state === "suspended") {
       await this.ctx.resume();
