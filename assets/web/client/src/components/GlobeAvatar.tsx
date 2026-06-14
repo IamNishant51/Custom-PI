@@ -1,37 +1,39 @@
-import { useRef, useMemo, useCallback } from "react";
+import { useRef, useMemo, useCallback, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
 type GlobeState = "idle" | "listening" | "thinking" | "speaking";
 
-const STAR_COUNT = 14000;
+const STAR_COUNT = 10000;
 const BH_RADIUS = 1.2;
 
-function glxColor(p: THREE.Vector3, r: number): THREE.Color {
-  const angle = Math.atan2(p.z, p.x);
-  const dist = r / 3.5;
-  const t = (dist * 0.4 + angle * 0.08 + 0.5) % 1;
-  const c = new THREE.Color();
-  if (dist < 0.15) {
-    c.setHSL(0.08 + dist * 0.5, 0.9, 0.4 + dist);
-  } else if (t < 0.25) {
-    c.setHSL(0.62 - dist * 0.08, 0.7, 0.4 + Math.random() * 0.3);
-  } else if (t < 0.5) {
-    c.setHSL(0.55 - dist * 0.1, 0.5, 0.3 + Math.random() * 0.4);
-  } else if (t < 0.7) {
-    c.setHSL(0.08 + Math.random() * 0.06, 0.8, 0.5 + Math.random() * 0.4);
-  } else {
-    c.setHSL(0.6 + Math.random() * 0.08, 0.4, 0.6 + Math.random() * 0.3);
-  }
-  const brightness = 1.0 + Math.random() * 0.8;
-  c.multiplyScalar(brightness);
-  return c;
+// ── Soft glow sprite ──────────────────────────────────────────────
+function makeGlowSprite(inner = 0, falloff = 0.5): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createRadialGradient(32, 32, inner * 32, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(falloff * 0.3, "rgba(255,220,170,0.85)");
+  g.addColorStop(falloff * 0.6, "rgba(255,150,80,0.3)");
+  g.addColorStop(falloff * 0.85, "rgba(200,80,40,0.08)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
 }
 
-function randomStar(r: number): THREE.Vector3 {
+const starSprite = makeGlowSprite(0, 0.45);
+const glowSprite = makeGlowSprite(0, 0.6);
+const wideGlow = makeGlowSprite(0, 0.8);
+
+// ── Position helpers ──────────────────────────────────────────────
+function randomSpherePos(r: number): THREE.Vector3 {
   const theta = Math.random() * Math.PI * 2;
   const phi = Math.acos(2 * Math.random() - 1);
-  const rr = r * (0.5 + Math.random() * 0.5);
+  const rr = r * (0.25 + Math.random() * 0.75);
   return new THREE.Vector3(
     Math.sin(phi) * Math.cos(theta) * rr,
     Math.sin(phi) * Math.sin(theta) * rr,
@@ -39,17 +41,52 @@ function randomStar(r: number): THREE.Vector3 {
   );
 }
 
-function accretionPos(r: number): THREE.Vector3 {
+function randomDiskPos(r: number): THREE.Vector3 {
   const theta = Math.random() * Math.PI * 2;
-  const rr = r * (0.35 + Math.random() * 0.65);
-  const thickness = (Math.random() - 0.5) * 0.15 * rr;
+  const rr = r * (0.2 + Math.random() * 0.8);
   return new THREE.Vector3(
     Math.cos(theta) * rr,
-    thickness,
+    (Math.random() - 0.5) * 0.1 * rr,
     Math.sin(theta) * rr,
   );
 }
 
+function starHueColor(p: THREE.Vector3, r: number): THREE.Color {
+  const angle = Math.atan2(p.z, p.x);
+  const dist = r / (BH_RADIUS * 1.1);
+  const t = (dist * 0.25 + angle * 0.05 + 0.5) % 1;
+  const c = new THREE.Color();
+  if (dist < 0.12) c.setHSL(0.07 + dist * 0.35, 0.85, 0.4 + dist * 0.6);
+  else if (t < 0.25) c.setHSL(0.58 - dist * 0.08, 0.6, 0.35 + Math.random() * 0.35);
+  else if (t < 0.5) c.setHSL(0.5 - dist * 0.1, 0.4, 0.3 + Math.random() * 0.4);
+  else if (t < 0.7) c.setHSL(0.07 + Math.random() * 0.04, 0.7, 0.5 + Math.random() * 0.35);
+  else c.setHSL(0.55 + Math.random() * 0.08, 0.3, 0.6 + Math.random() * 0.25);
+  c.multiplyScalar(1.8 + Math.random() * 1.0);
+  return c;
+}
+
+// ── Hover indicator ring ──────────────────────────────────────────
+function HoverRing({ posRef, visible }: { posRef: React.MutableRefObject<THREE.Vector3>; visible: boolean }) {
+  const ref = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const t = clock.getElapsedTime();
+    ref.current.position.copy(posRef.current);
+    ref.current.lookAt(new THREE.Vector3(0, 0, 0));
+    const mat = ref.current.material as THREE.MeshBasicMaterial;
+    mat.opacity = visible ? 0.3 + 0.15 * Math.sin(t * 3.5) : 0;
+  });
+
+  return (
+    <mesh ref={ref}>
+      <ringGeometry args={[0.08, 0.16, 24]} />
+      <meshBasicMaterial color="#ffaa44" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+    </mesh>
+  );
+}
+
+// ── Main scene ────────────────────────────────────────────────────
 function BlackHoleScene({
   state,
   analyserNode,
@@ -60,104 +97,81 @@ function BlackHoleScene({
   const starsRef = useRef<THREE.Points>(null);
   const glowRef = useRef<THREE.Points>(null);
   const diskRef = useRef<THREE.Points>(null);
-  const hitMeshRef = useRef<THREE.Mesh>(null);
 
-  const { pointer, camera } = useThree();
-
-  const hoverCenter = useRef(new THREE.Vector3(0, 10, 0));
+  const hitRef = useRef<THREE.Mesh>(null);
+  const hoverPos = useRef(new THREE.Vector3(0, 10, 0));
   const hoverActive = useRef(false);
-  const hoverCount = useRef(0);
-  const hoverBuf = useRef(new Uint16Array(2000));
+  const [showHover, setShowHover] = useState(false);
 
   const smoothAudio = useRef(0);
   const smoothPulse = useRef(0);
   const breathePhase = useRef(0);
   const diskAngle = useRef(0);
 
+  const { pointer, camera } = useThree();
+
+  // Particle data
   const { starBase, starPos, starSize, starCol, glowBase, glowPos, glowSize, glowCol, diskBase, diskPos, diskSize, diskCol } = useMemo(() => {
-    const sb = new Float32Array(STAR_COUNT * 3);
-    const sp = new Float32Array(STAR_COUNT * 3);
-    const ss = new Float32Array(STAR_COUNT);
-    const sc = new Float32Array(STAR_COUNT * 3);
+    const Ns = STAR_COUNT, Ng = 4000, Nd = 5000;
 
-    const gb = new Float32Array(4000 * 3);
-    const gp = new Float32Array(4000 * 3);
-    const gs = new Float32Array(4000);
-    const gc = new Float32Array(4000 * 3);
+    const sb = new Float32Array(Ns * 3), sp = new Float32Array(Ns * 3), ss = new Float32Array(Ns), sc = new Float32Array(Ns * 3);
+    const gb = new Float32Array(Ng * 3), gp = new Float32Array(Ng * 3), gs = new Float32Array(Ng), gc = new Float32Array(Ng * 3);
+    const db = new Float32Array(Nd * 3), dp = new Float32Array(Nd * 3), ds = new Float32Array(Nd), dc = new Float32Array(Nd * 3);
 
-    const db = new Float32Array(6000 * 3);
-    const dp = new Float32Array(6000 * 3);
-    const ds = new Float32Array(6000);
-    const dc = new Float32Array(6000 * 3);
-
-    for (let i = 0; i < STAR_COUNT; i++) {
-      const p = randomStar(BH_RADIUS);
+    for (let i = 0; i < Ns; i++) {
+      const p = randomSpherePos(BH_RADIUS);
       sb[i * 3] = p.x; sb[i * 3 + 1] = p.y; sb[i * 3 + 2] = p.z;
       sp[i * 3] = p.x; sp[i * 3 + 1] = p.y; sp[i * 3 + 2] = p.z;
       const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-      const c = glxColor(p, r);
+      const c = starHueColor(p, r);
       sc[i * 3] = c.r; sc[i * 3 + 1] = c.g; sc[i * 3 + 2] = c.b;
-      ss[i] = 0.015 + (1 - r / BH_RADIUS) * 0.045 + Math.random() * 0.025;
+      ss[i] = 0.045 + (1 - r / BH_RADIUS) * 0.085 + Math.random() * 0.04;
     }
 
-    for (let i = 0; i < 4000; i++) {
-      const p = randomStar(BH_RADIUS * 0.6);
+    for (let i = 0; i < Ng; i++) {
+      const p = randomSpherePos(BH_RADIUS * 0.45);
       gb[i * 3] = p.x; gb[i * 3 + 1] = p.y; gb[i * 3 + 2] = p.z;
       gp[i * 3] = p.x; gp[i * 3 + 1] = p.y; gp[i * 3 + 2] = p.z;
-      const c = new THREE.Color("#ff8844");
-      c.lerp(new THREE.Color("#ffcc66"), Math.random());
-      c.multiplyScalar(1.8);
+      const c = new THREE.Color("#ff8833").lerp(new THREE.Color("#ffbb55"), Math.random());
+      c.multiplyScalar(2.4);
       gc[i * 3] = c.r; gc[i * 3 + 1] = c.g; gc[i * 3 + 2] = c.b;
-      gs[i] = 0.04 + Math.random() * 0.08;
+      gs[i] = 0.15 + Math.random() * 0.18;
     }
 
-    for (let i = 0; i < 6000; i++) {
-      const p = accretionPos(BH_RADIUS);
+    for (let i = 0; i < Nd; i++) {
+      const p = randomDiskPos(BH_RADIUS);
       db[i * 3] = p.x; db[i * 3 + 1] = p.y; db[i * 3 + 2] = p.z;
       dp[i * 3] = p.x; dp[i * 3 + 1] = p.y; dp[i * 3 + 2] = p.z;
       const r = Math.sqrt(p.x * p.x + p.z * p.z);
-      const heat = 1 - Math.min(1, (r - BH_RADIUS * 0.3) / (BH_RADIUS * 0.7));
-      const c = new THREE.Color().setHSL(0.08 - heat * 0.05, 0.9, 0.5 + heat * 0.5);
-      c.multiplyScalar(1.5 + heat * 0.8);
+      const heat = 1 - Math.min(1, (r - BH_RADIUS * 0.15) / (BH_RADIUS * 0.85));
+      const c = new THREE.Color().setHSL(0.07 - heat * 0.035, 0.9, 0.45 + heat * 0.5);
+      c.multiplyScalar(2.0 + heat * 1.0);
       dc[i * 3] = c.r; dc[i * 3 + 1] = c.g; dc[i * 3 + 2] = c.b;
-      ds[i] = 0.02 + heat * 0.06 + Math.random() * 0.015;
+      ds[i] = 0.045 + heat * 0.11 + Math.random() * 0.03;
     }
 
-    return {
-      starBase: sb, starPos: sp, starSize: ss, starCol: sc,
-      glowBase: gb, glowPos: gp, glowSize: gs, glowCol: gc,
-      diskBase: db, diskPos: dp, diskSize: ds, diskCol: dc,
-    };
+    return { starBase: sb, starPos: sp, starSize: ss, starCol: sc, glowBase: gb, glowPos: gp, glowSize: gs, glowCol: gc, diskBase: db, diskPos: dp, diskSize: ds, diskCol: dc };
   }, []);
 
-  const updateHoverIndices = useCallback((center: THREE.Vector3) => {
-    const infl = 0.5;
-    const buf = hoverBuf.current;
-    let c = 0;
-    for (let i = 0; i < STAR_COUNT && c < 2000; i++) {
-      const dx = starBase[i * 3] - center.x;
-      const dy = starBase[i * 3 + 1] - center.y;
-      const dz = starBase[i * 3 + 2] - center.z;
-      if (dx * dx + dy * dy + dz * dz < infl * infl) {
-        buf[c++] = i;
-      }
-    }
-    hoverCount.current = c;
-  }, [starBase]);
-
+  // ── Events ──
   const onPointerMove = useCallback((e: any) => {
-    hoverCenter.current.copy(e.point);
+    hoverPos.current.copy(e.point);
     hoverActive.current = true;
+    setShowHover(true);
   }, []);
 
   const onPointerLeave = useCallback(() => {
     hoverActive.current = false;
-    hoverCount.current = 0;
+    setShowHover(false);
   }, []);
 
+  const prevTime = useRef(0);
+
+  // ── Animation ──
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
-    const dt = Math.min(clock.getDelta(), 0.05);
+    const dt = prevTime.current === 0 ? 0.016 : Math.min(t - prevTime.current, 0.05);
+    prevTime.current = t;
 
     // Audio
     let rawAudio = 0;
@@ -166,235 +180,236 @@ function BlackHoleScene({
       analyserNode.getByteFrequencyData(d);
       let s = 0;
       for (let i = 0; i < d.length; i++) s += d[i];
-      rawAudio = Math.min(1, (s / d.length / 255) * 3.5);
+      rawAudio = Math.min(1, (s / d.length / 255) * 4.5);
     } else if (state === "speaking") {
-      rawAudio = 0.25 + 0.2 * Math.sin(t * 5);
+      rawAudio = 0.35 + 0.3 * Math.sin(t * 5.5);
     }
-    smoothAudio.current += (rawAudio - smoothAudio.current) * Math.min(1, dt * 15);
+    smoothAudio.current += (rawAudio - smoothAudio.current) * Math.min(1, dt * 20);
 
-    let pulseTarget = 0.1;
-    if (state === "listening") pulseTarget = 0.3 + 0.18 * Math.sin(t * 1.3);
-    else if (state === "thinking") pulseTarget = 0.2 + 0.1 * Math.sin(t * 0.9);
-    else if (state === "speaking") pulseTarget = 0.3 + 0.7 * smoothAudio.current;
-    smoothPulse.current += (pulseTarget - smoothPulse.current) * 0.06;
+    // Pulse target
+    let pTarget = 0.15;
+    if (state === "listening") pTarget = 0.4 + 0.25 * Math.sin(t * 1.5);
+    else if (state === "thinking") pTarget = 0.25 + 0.1 * Math.sin(t * 1.1);
+    else if (state === "speaking") pTarget = 0.45 + 0.9 * smoothAudio.current;
+    smoothPulse.current += (pTarget - smoothPulse.current) * 0.08;
 
-    breathePhase.current += dt * 0.35;
-    const breath = 1 + Math.sin(breathePhase.current) * 0.004;
+    // Breathing
+    breathePhase.current += dt * 0.3;
+    const breath = 1 + Math.sin(breathePhase.current) * 0.005;
 
     // Rotation
+    const starRotY = t * 0.035, starRotX = Math.sin(t * 0.01) * 0.035;
+    const diskRotSpeed = 0.1 + smoothAudio.current * 0.25;
+    diskAngle.current += dt * diskRotSpeed;
+
     if (starsRef.current) {
-      starsRef.current.rotation.y = t * 0.045;
-      starsRef.current.rotation.x = Math.sin(t * 0.015) * 0.03;
+      starsRef.current.rotation.y = starRotY;
+      starsRef.current.rotation.x = starRotX;
     }
     if (glowRef.current) {
-      glowRef.current.rotation.y = t * 0.05;
-      glowRef.current.rotation.x = Math.sin(t * 0.012) * 0.02;
+      glowRef.current.rotation.y = t * 0.04;
+      glowRef.current.rotation.x = Math.sin(t * 0.008) * 0.025;
     }
-    diskAngle.current += dt * 0.3;
     if (diskRef.current) {
-      diskRef.current.rotation.y = t * 0.15 + diskAngle.current;
-      diskRef.current.rotation.x = 0.15;
+      diskRef.current.rotation.y = t * diskRotSpeed + diskAngle.current;
+      diskRef.current.rotation.x = 0.2 + Math.sin(t * 0.015) * 0.025;
     }
 
-    // Hover
-    if (hoverActive.current) {
-      updateHoverIndices(hoverCenter.current);
-    }
+    // Audio shockwave ring
+    const shockRadius = BH_RADIUS + smoothAudio.current * 0.6;
+    const shockOpacity = smoothAudio.current * 0.3;
 
-    const hc = hoverCenter.current;
-    const hCount = hoverCount.current;
-    const hBuf = hoverBuf.current;
+    const hc = hoverPos.current;
+    const hAct = hoverActive.current;
     const audioAmp = smoothAudio.current;
     const pulseAmp = smoothPulse.current;
 
-    // Update star positions
+    // ── Stars ──
     for (let i = 0; i < STAR_COUNT; i++) {
+      const bx = starBase[i * 3], by = starBase[i * 3 + 1], bz = starBase[i * 3 + 2];
+      const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
+
       let hWave = 0;
-      if (hCount > 0 && hoverActive.current) {
-        for (let j = 0; j < hCount; j++) {
-          if (hBuf[j] === i) {
-            const dx = starBase[i * 3] - hc.x;
-            const dy = starBase[i * 3 + 1] - hc.y;
-            const dz = starBase[i * 3 + 2] - hc.z;
-            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            hWave = Math.sin(dist * 22 - t * 6) * Math.exp(-dist * 3.8) * 0.1 * pulseAmp;
-            break;
-          }
+      if (hAct) {
+        const dx = bx - hc.x, dy = by - hc.y, dz = bz - hc.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 0.35) {
+          const dist = Math.sqrt(d2);
+          hWave = Math.sin(dist * 20 - t * 7) * Math.exp(-dist * 3.5) * 0.22 * pulseAmp;
         }
       }
 
       let aWave = 0;
       if (audioAmp > 0.02) {
-        const bx = starBase[i * 3], by = starBase[i * 3 + 1], bz = starBase[i * 3 + 2];
-        const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
-        aWave = Math.sin(bd * (7 + audioAmp * 6) - t * 4) * audioAmp * 0.04;
+        aWave = Math.sin(bd * (7 + audioAmp * 6) - t * 4) * audioAmp * 0.08;
       }
 
       const tw = hWave + aWave;
-      const bx = starBase[i * 3], by = starBase[i * 3 + 1], bz = starBase[i * 3 + 2];
-      const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
-
       const tx = bx + (bx / bd) * tw * breath;
       const ty = by + (by / bd) * tw * breath;
       const tz = bz + (bz / bd) * tw * breath;
-
-      const l = hoverActive.current ? 0.2 : audioAmp > 0.02 ? 0.1 : 0.012;
+      const l = hAct ? 0.28 : audioAmp > 0.02 ? 0.14 : 0.012;
       starPos[i * 3] += (tx - starPos[i * 3]) * l;
       starPos[i * 3 + 1] += (ty - starPos[i * 3 + 1]) * l;
       starPos[i * 3 + 2] += (tz - starPos[i * 3 + 2]) * l;
 
-      const boost = 1 + pulseAmp * 0.5 + audioAmp * 0.4;
-      const baseSize = 0.015 + (1 - bd / BH_RADIUS) * 0.045;
-      starSize[i] += (baseSize * boost - starSize[i]) * 0.04;
+      const boost = 1 + pulseAmp * 0.7 + audioAmp * 0.6;
+      const baseSize = 0.045 + (1 - bd / BH_RADIUS) * 0.085;
+      starSize[i] += (baseSize * boost - starSize[i]) * 0.06;
     }
 
-    // Glow layer
+    // ── Glow layer ──
     for (let i = 0; i < 4000; i++) {
       const bx = glowBase[i * 3], by = glowBase[i * 3 + 1], bz = glowBase[i * 3 + 2];
       const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
-      const aw = audioAmp > 0.02 ? Math.sin(bd * 8 - t * 3) * audioAmp * 0.05 : 0;
-      const l = audioAmp > 0.02 ? 0.1 : 0.01;
-      glowPos[i * 3] += ((bx + (bx / bd) * aw) - glowPos[i * 3]) * l;
-      glowPos[i * 3 + 1] += ((by + (by / bd) * aw) - glowPos[i * 3 + 1]) * l;
-      glowPos[i * 3 + 2] += ((bz + (bz / bd) * aw) - glowPos[i * 3 + 2]) * l;
-      glowSize[i] += (0.04 + Math.sin(bd * 5 - t * 2) * 0.02 * pulseAmp + 0.06 * audioAmp - glowSize[i]) * 0.04;
+      const aw = audioAmp > 0.02 ? Math.sin(bd * 6 - t * 3) * audioAmp * 0.1 : 0;
+      const l2 = audioAmp > 0.02 ? 0.15 : 0.01;
+      glowPos[i * 3] += ((bx + (bx / bd) * aw) - glowPos[i * 3]) * l2;
+      glowPos[i * 3 + 1] += ((by + (by / bd) * aw) - glowPos[i * 3 + 1]) * l2;
+      glowPos[i * 3 + 2] += ((bz + (bz / bd) * aw) - glowPos[i * 3 + 2]) * l2;
+      const gs = 0.15 + Math.sin(bd * 3.5 - t * 1.2) * 0.05 * pulseAmp + 0.12 * audioAmp;
+      glowSize[i] += (gs - glowSize[i]) * 0.05;
     }
 
-    // Accretion disk
-    for (let i = 0; i < 6000; i++) {
+    // ── Disk ──
+    for (let i = 0; i < 5000; i++) {
       const bx = diskBase[i * 3], by = diskBase[i * 3 + 1], bz = diskBase[i * 3 + 2];
       const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
-      const aw = audioAmp > 0.02 ? Math.sin(bd * 10 - t * 5) * audioAmp * 0.06 : 0;
-      diskPos[i * 3] += ((bx + (bx / bd) * aw) - diskPos[i * 3]) * 0.12;
-      diskPos[i * 3 + 1] += (by - diskPos[i * 3 + 1]) * 0.06;
-      diskPos[i * 3 + 2] += ((bz + (bz / bd) * aw) - diskPos[i * 3 + 2]) * 0.12;
-      diskSize[i] += ((0.02 + (1 - Math.min(1, (bd - BH_RADIUS * 0.3) / (BH_RADIUS * 0.7))) * 0.06) * (1 + audioAmp * 0.6) - diskSize[i]) * 0.04;
+      const aw = audioAmp > 0.02 ? Math.sin(bd * 8 - t * 4.5) * audioAmp * 0.12 : 0;
+      diskPos[i * 3] += ((bx + (bx / bd) * aw) - diskPos[i * 3]) * 0.18;
+      diskPos[i * 3 + 1] += (by - diskPos[i * 3 + 1]) * 0.08;
+      diskPos[i * 3 + 2] += ((bz + (bz / bd) * aw) - diskPos[i * 3 + 2]) * 0.18;
+      const heat = 1 - Math.min(1, (bd - BH_RADIUS * 0.15) / (BH_RADIUS * 0.85));
+      diskSize[i] += ((0.045 + heat * 0.11) * (1 + audioAmp * 0.9) - diskSize[i]) * 0.05;
     }
 
-    starsRef.current!.geometry.attributes.position.needsUpdate = true;
-    (starsRef.current!.geometry.attributes as any).size.needsUpdate = true;
-    glowRef.current!.geometry.attributes.position.needsUpdate = true;
-    (glowRef.current!.geometry.attributes as any).size.needsUpdate = true;
-    diskRef.current!.geometry.attributes.position.needsUpdate = true;
-    (diskRef.current!.geometry.attributes as any).size.needsUpdate = true;
+    // Mark dirty
+    const mark = (p: THREE.Points) => {
+      p.geometry.attributes.position.needsUpdate = true;
+      (p.geometry.attributes as any).size.needsUpdate = true;
+    };
+    mark(starsRef.current!);
+    mark(glowRef.current!);
+    mark(diskRef.current!);
   });
 
   return (
     <group>
-      {/* Black hole core — dark sphere */}
+      {/* Black hole core */}
       <mesh>
-        <sphereGeometry args={[BH_RADIUS * 0.25, 24, 24]} />
+        <sphereGeometry args={[BH_RADIUS * 0.2, 20, 20]} />
         <meshBasicMaterial color="#000000" />
       </mesh>
 
-      {/* Event horizon glow ring */}
-      <mesh rotation={[0.2, 0, 0]}>
-        <ringGeometry args={[BH_RADIUS * 0.22, BH_RADIUS * 0.35, 64]} />
-        <meshBasicMaterial color="#ff4400" transparent opacity={0.08} side={THREE.DoubleSide} />
+      {/* Event horizon ring */}
+      <mesh rotation={[0.15, 0.3, 0]}>
+        <ringGeometry args={[BH_RADIUS * 0.18, BH_RADIUS * 0.45, 48]} />
+        <meshBasicMaterial color="#ff4400" transparent opacity={0.15} side={THREE.DoubleSide} />
       </mesh>
+
+      {/* Central glow corona */}
+      <points>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={1} array={new Float32Array([0, 0, 0])} itemSize={3} />
+        </bufferGeometry>
+        <pointsMaterial map={wideGlow} size={BH_RADIUS * 2.0} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthWrite={false} color="#ff6633" sizeAttenuation />
+      </points>
 
       {/* Accretion disk */}
       <points ref={diskRef}>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" count={6000} array={diskPos} itemSize={3} />
-          <bufferAttribute attach="attributes-color" count={6000} array={diskCol} itemSize={3} />
-          <bufferAttribute attach="attributes-size" count={6000} array={diskSize} itemSize={1} />
+          <bufferAttribute attach="attributes-position" count={5000} array={diskPos} itemSize={3} />
+          <bufferAttribute attach="attributes-color" count={5000} array={diskCol} itemSize={3} />
+          <bufferAttribute attach="attributes-size" count={5000} array={diskSize} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial size={0.035} vertexColors transparent opacity={0.7} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial map={starSprite} size={0.07} vertexColors transparent opacity={0.75} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
-      {/* Star field */}
+      {/* Stars */}
       <points ref={starsRef}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" count={STAR_COUNT} array={starPos} itemSize={3} />
           <bufferAttribute attach="attributes-color" count={STAR_COUNT} array={starCol} itemSize={3} />
           <bufferAttribute attach="attributes-size" count={STAR_COUNT} array={starSize} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial size={0.03} vertexColors transparent opacity={0.85} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial map={starSprite} size={0.07} vertexColors transparent opacity={0.88} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
-      {/* Glow/halo layer — large soft particles */}
+      {/* Glow/halo layer */}
       <points ref={glowRef}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" count={4000} array={glowPos} itemSize={3} />
           <bufferAttribute attach="attributes-color" count={4000} array={glowCol} itemSize={3} />
           <bufferAttribute attach="attributes-size" count={4000} array={glowSize} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial size={0.06} vertexColors transparent opacity={0.3} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial map={glowSprite} size={0.22} vertexColors transparent opacity={0.3} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
-      {/* Invisible hit mesh for hover */}
-      <mesh ref={hitMeshRef} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave} visible={false}>
+      {/* Ambient outer glow sphere */}
+      <mesh>
+        <sphereGeometry args={[BH_RADIUS * 1.8, 20, 20]} />
+        <meshBasicMaterial color="#ff5522" transparent opacity={0.018} side={THREE.BackSide} />
+      </mesh>
+
+      {/* Audio shockwave ring */}
+      <AudioShockwaveRing audio={smoothAudio} />
+
+      {/* Hover indicator */}
+      <HoverRing posRef={hoverPos} visible={showHover} />
+
+      {/* Hit detection mesh — transparent but raycastable */}
+      <mesh ref={hitRef} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
         <sphereGeometry args={[BH_RADIUS, 32, 32]} />
-        <meshBasicMaterial transparent opacity={0} side={THREE.FrontSide} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} side={THREE.FrontSide} />
       </mesh>
     </group>
   );
 }
 
-function AccretionGlowRing({ state }: { state: GlobeState }) {
+// ── Audio shockwave ring ──────────────────────────────────────────
+function AudioShockwaveRing({ audio }: { audio: React.MutableRefObject<number> }) {
   const ref = useRef<THREE.Mesh>(null);
 
   useFrame(({ clock }) => {
-    const t = clock.getElapsedTime();
-    if (ref.current) {
-      ref.current.rotation.x = 0.15 + Math.sin(t * 0.02) * 0.05;
-      ref.current.rotation.z = Math.sin(t * 0.015) * 0.04;
-      const mat = ref.current.material as THREE.MeshBasicMaterial;
-      const p = state === "speaking" ? 0.12 + 0.1 * Math.sin(t * 2.5)
-        : state === "listening" ? 0.08 + 0.04 * Math.sin(t * 1.2)
-        : 0.035 + 0.015 * Math.sin(t * 0.6);
-      mat.opacity = p;
-    }
+    if (!ref.current) return;
+    const a = audio.current;
+    const mat = ref.current.material as THREE.MeshBasicMaterial;
+    const scale = 1 + a * 1.2;
+    ref.current.scale.set(scale, scale, scale);
+    mat.opacity = a * 0.25;
+    ref.current.rotation.x = 0.1 + Math.sin(clock.getElapsedTime() * 0.02) * 0.05;
   });
 
   return (
-    <mesh ref={ref} rotation={[0.15, 0.2, 0]}>
-      <ringGeometry args={[1.4, 1.55, 64]} />
-      <meshBasicMaterial color="#ff6622" transparent opacity={0.04} side={THREE.DoubleSide} />
+    <mesh ref={ref}>
+      <ringGeometry args={[BH_RADIUS * 0.9, BH_RADIUS * 0.95, 48]} />
+      <meshBasicMaterial color="#ff8844" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
     </mesh>
   );
 }
 
-function OrbitRing({ radius, tilt, phase, color, opacity }: { radius: number; tilt: number; phase: number; color: string; opacity?: number }) {
+// ── Orbit ring ────────────────────────────────────────────────────
+function OrbitRing({ radius, tilt, phase, color }: { radius: number; tilt: number; phase: number; color: string }) {
   const ref = useRef<THREE.Group>(null);
-
-  const points = useMemo(() => {
-    const pts: THREE.Vector3[] = [];
-    for (let i = 0; i <= 48; i++) {
-      const a = (i / 48) * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
-    }
-    return pts;
+  const pts = useMemo(() => {
+    const a: THREE.Vector3[] = [];
+    for (let i = 0; i <= 48; i++) a.push(new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * radius, 0, Math.sin(i / 48 * Math.PI * 2) * radius));
+    return a;
   }, [radius]);
+  const geom = useMemo(() => new THREE.BufferGeometry().setFromPoints(pts), [pts]);
 
   useFrame(({ clock }) => {
-    if (ref.current) {
-      ref.current.rotation.x = tilt;
-      ref.current.rotation.z = clock.getElapsedTime() * 0.025 + phase;
-    }
+    if (ref.current) { ref.current.rotation.x = tilt; ref.current.rotation.z = clock.getElapsedTime() * 0.02 + phase; }
   });
-
-  const geom = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
 
   return (
     <group ref={ref}>
-      <line geometry={geom}>
-        <lineBasicMaterial color={color} transparent opacity={opacity ?? 0.05} />
-      </line>
-      {[0, 1, 2, 3, 4].map((i) => {
-        const a = (i / 5) * Math.PI * 2 + phase;
-        return (
-          <mesh key={i} position={[Math.cos(a) * radius, 0, Math.sin(a) * radius]}>
-            <sphereGeometry args={[0.008, 6, 6]} />
-            <meshBasicMaterial color={color} transparent opacity={(opacity ?? 0.05) * 2} />
-          </mesh>
-        );
-      })}
+      <line geometry={geom}><lineBasicMaterial color={color} transparent opacity={0.035} /></line>
     </group>
   );
 }
 
+// ── Public component ──────────────────────────────────────────────
 interface GlobeAvatarProps {
   state: GlobeState;
   analyserNode?: AnalyserNode | null;
@@ -402,47 +417,30 @@ interface GlobeAvatarProps {
 }
 
 export default function GlobeAvatar({ state, analyserNode, size = 280 }: GlobeAvatarProps) {
-  const stateScale = state === "listening" ? 1.03 : state === "thinking" ? 0.97 : 1;
+  const sc = state === "listening" ? 1.04 : state === "thinking" ? 0.96 : 1;
 
   return (
-    <div
-      style={{
-        width: size, height: size, position: "relative",
-        transition: "transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
-        transform: `scale(${stateScale})`,
-        cursor: "pointer",
-      }}
-    >
-      <div style={{
-        width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden",
-        position: "relative",
-      }}>
+    <div style={{
+      width: size, height: size, position: "relative",
+      transition: "transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
+      transform: `scale(${sc})`, cursor: "pointer",
+    }}>
+      <div style={{ width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden", position: "relative" }}>
         <Canvas
           dpr={[0.5, 1.5]}
-          camera={{ position: [0, 0.3, 3.5], fov: 36, near: 0.1, far: 10 }}
+          camera={{ position: [0, 0.3, 3.6], fov: 36, near: 0.1, far: 10 }}
           style={{ width: "100%", height: "100%" }}
           gl={{ antialias: true, alpha: true }}
           onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
         >
           <BlackHoleScene state={state} analyserNode={analyserNode} />
-          <AccretionGlowRing state={state} />
-          <OrbitRing radius={1.75} tilt={0.3} phase={0} color="#ff6622" opacity={0.04} />
-          <OrbitRing radius={2.0} tilt={-0.22} phase={1.8} color="#4488ff" opacity={0.03} />
+          <OrbitRing radius={1.85} tilt={0.25} phase={0} color="#ff6622" />
         </Canvas>
       </div>
-
-      <div style={{
-        position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-        width: "60%", height: "60%", borderRadius: "50%",
-        background: "radial-gradient(circle, rgba(255,68,0,0.04) 0%, transparent 70%)",
-        pointerEvents: "none", zIndex: 0,
-      }} />
-
       <div style={{
         position: "absolute", bottom: 4, left: "50%", transform: "translateX(-50%)",
         fontSize: 10, color: "var(--mute)", background: "var(--surface)", padding: "1px 10px",
-        borderRadius: 8, whiteSpace: "nowrap", border: "1px solid var(--hairline)",
-        lineHeight: 1.5, zIndex: 1,
+        borderRadius: 8, whiteSpace: "nowrap", border: "1px solid var(--hairline)", lineHeight: 1.5, zIndex: 1,
       }}>
         {state === "idle" && "Tap mic to speak"}
         {state === "listening" && "Listening..."}
