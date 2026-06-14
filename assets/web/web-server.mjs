@@ -6569,16 +6569,17 @@ export async function createApp() {
             }
           } catch (e) {
             console.error(`[voice-stream] stream error: ${e.message}`);
-            try { socket.send(JSON.stringify({ type: "error", message: `Stream error: ${e.message}` })); } catch {}
-            return;
+            // Don't return yet! Let the pending sentence buffer play out.
           }
 
           let finalMessage;
           try {
             finalMessage = await stream.result();
           } catch (e) {
-            try { socket.send(JSON.stringify({ type: "error", message: `Result error: ${e.message}` })); } catch {}
-            return;
+            console.error(`[voice-stream] Result error: ${e.message}`);
+            // If the model stopped prematurely (e.g. SAFETY), there might not be a finalMessage.
+            // We construct a dummy final message so the conversation can continue or gracefully end.
+            finalMessage = { role: "agent", content: [{ type: "text", text: accumulatedText + currentText }] };
           }
 
           try {
