@@ -4872,6 +4872,50 @@ NOT available: create_subagent, grep_search (use grep), memory_write/memory_read
   return parts.join("\n\n");
 }
 
+function loadVoiceSystemPrompt() {
+  const parts = [];
+
+  // 1. SOUL.md (~/.pi/agent/SOUL.md) — identity
+  try {
+    const soul = fs.readFileSync(path.join(PI_DIR, "SOUL.md"), "utf8");
+    if (soul.trim()) parts.push(`## IDENTITY\n${soul.trim()}`);
+  } catch {}
+
+  // 2. Agent_Memory.md (Obsidian vault) — core memory
+  try {
+    const memPath = path.join(OBSIDIAN_VAULT, "Agent_Memory.md");
+    if (fs.existsSync(memPath)) {
+      const mem = fs.readFileSync(memPath, "utf8");
+      if (mem.trim()) parts.push(`## CORE MEMORY\n${mem.trim()}`);
+    }
+  } catch {}
+
+  // 3. MEMORY.md (~/.pi/agent/MEMORY.md)
+  try {
+    const mem = fs.readFileSync(path.join(PI_DIR, "MEMORY.md"), "utf8");
+    if (mem.trim()) parts.push(`## PERSISTENT MEMORY\n${mem.trim()}`);
+  } catch {}
+
+  // 4. USER.md (~/.pi/agent/USER.md)
+  try {
+    const usr = fs.readFileSync(path.join(PI_DIR, "USER.md"), "utf8");
+    if (usr.trim()) parts.push(`## USER CONTEXT\n${usr.trim()}`);
+  } catch {}
+
+  // 5. Base voice persona instructions
+  parts.push(`## VOICE MODE RULES
+You are currently operating in a VOICE INTERFACE mode. Keep your responses natural, warm, empathetic, and highly conversational.
+1. NO MARKDOWN: Do not use bold (**), italics (*), code blocks (\`\`\`), or list formatting (-). Speak in plain text.
+2. NO EMOJIS OR SYMBOLS: Emojis and special symbols cannot be pronounced.
+3. NO NARRATIVE ACTIONS: Do not include parenthetical actions or tones like "(smiles)" or "(confident)".
+4. CONCISE & CONVERSATIONAL: Keep your responses relatively short. Do NOT generate long, multi-paragraph essays. If a response contains a long explanation or code, offer a brief summary first and ask the user if they want you to explain further.
+5. SHORTER SENTENCES: Keep your sentences short and punchy. Use periods often.
+6. ACT HUMAN: Speak with feelings, warmth, and emotion. Use natural filler words occasionally (like "hmm", "well", "ah") and conversational pacing.
+7. TOOL USAGE: You can execute tools natively when needed (e.g. to read/write files or search the web). When executing tools, state briefly what you are doing, then execute the tool. Keep comments to a minimum.`);
+
+  return parts.join("\n\n");
+}
+
 class WebSession {
   constructor() {
     this.messages = [];
