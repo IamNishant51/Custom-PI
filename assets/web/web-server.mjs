@@ -6395,6 +6395,7 @@ export async function createApp() {
           apiKey: auth.apiKey,
           headers: auth.headers,
           reasoning: "off",
+          maxTokens: model.maxTokens || 8192,
           signal: AbortSignal.timeout(120000),
         });
       } catch (e) {
@@ -6562,6 +6563,7 @@ export async function createApp() {
               apiKey: auth.apiKey,
               headers: auth.headers,
               reasoning: "off",
+              maxTokens: model.maxTokens || 8192,
               signal: AbortSignal.timeout(120000),
             });
           } catch (e) {
