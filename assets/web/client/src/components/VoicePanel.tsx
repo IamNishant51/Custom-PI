@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import AgentAvatar from "./AgentAvatar";
+import AnimeAvatar from "./AnimeAvatar";
 import { showToast } from "./Toast";
 import { AudioEngine } from "../lib/audio-engine";
 import Markdown from "./Markdown";
@@ -26,7 +26,6 @@ async function requestMicPermission(): Promise<{ status: MicStatus; error?: stri
     for (const track of stream.getTracks()) track.stop();
     return { status: "granted" };
   } catch (err: any) {
-    console.error("[voice] getUserMedia error:", err?.name, err?.message);
     if (err?.name === "NotAllowedError") return { status: "denied", error: err.message };
     if (err?.name === "NotFoundError") return { status: "denied", error: "No microphone found" };
     if (err?.name === "NotReadableError") return { status: "denied", error: "Microphone busy or not available" };
@@ -93,6 +92,15 @@ export default function VoicePanel() {
     return audioEngineRef.current;
   }, []);
 
+  const ensureAudioContext = useCallback(async () => {
+    const engine = getEngine();
+    try {
+      await engine.resume();
+    } catch {
+      // AudioContext resume may fail outside user gesture; ignore
+    }
+  }, [getEngine]);
+
   useEffect(() => {
     mountedRef.current = true;
     const fetchVoices = async () => {
@@ -136,6 +144,20 @@ export default function VoicePanel() {
     recordedChunksRef.current = [];
   }
 
+  const playAudioResponse = useCallback(async (llmD: any) => {
+    if (llmD.ttsError) {
+      showToast(`Voice output: ${llmD.ttsError}`, "info");
+      return;
+    }
+    if (!llmD.audio) {
+      showToast("No audio response generated", "info");
+      return;
+    }
+    const engine = getEngine();
+    await engine.resume();
+    await engine.playBase64Audio(llmD.audio, llmD.sampleRate || 24000);
+  }, [getEngine]);
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -157,7 +179,6 @@ export default function VoicePanel() {
       setStateSafe("listening");
       setInterimText("");
     } catch (err: any) {
-      console.error("[voice] startRecording error:", err);
       showToast(`Failed to start recording: ${err.message}`, "error");
     }
   }, [setStateSafe]);
@@ -214,7 +235,7 @@ export default function VoicePanel() {
       const d = await r.json();
       const text = (d.text || "").trim();
       if (!text) {
-        showToast("No speech detected. Try speaking again.", "error");
+        showToast("No speech detected. Try speaking again.", "info");
         setStateSafe("idle");
         setInterimText("");
         return;
@@ -250,30 +271,19 @@ export default function VoicePanel() {
       setMessages((prev) => [...prev, agentMsg]);
 
       setInterimText("Speaking…");
-      if (llmD.audio) {
-        console.log(`[voice] Playing audio (${llmD.audio.length} chars base64, ${llmD.sampleRate || 24000}Hz, server peak=${llmD.peak !== undefined ? llmD.peak : 'N/A'})`);
-        const engine = getEngine();
-        await engine.resume();
-        await engine.playBase64Audio(llmD.audio, llmD.sampleRate || 24000);
-        console.log(`[voice] Audio playback finished`);
-      } else {
-        console.log(`[voice] No audio in response`);
-      }
+      await playAudioResponse(llmD);
       setInterimText("");
       setStateSafe("idle");
     } catch (err: any) {
       if (!mountedRef.current) return;
-      console.error("[voice] stopRecording error:", err);
-      showToast(`STT processing failed: ${err.message}`, "error");
+      showToast(`Voice processing failed: ${err.message}`, "error");
       setStateSafe("idle");
       setInterimText("");
     }
-  }, [activeVoice, getEngine, setStateSafe]);
+  }, [activeVoice, playAudioResponse, setStateSafe]);
 
   const toggleMic = useCallback(async () => {
-    // Initialize audio engine inside user gesture (required for browser autoplay policy)
-    const engine = getEngine();
-    await engine.resume().catch(() => {});
+    await ensureAudioContext();
 
     if (state === "listening") {
       await stopRecording();
@@ -304,12 +314,14 @@ export default function VoicePanel() {
     }
 
     await startRecording();
-  }, [state, micStatus, startRecording, stopRecording]);
+  }, [state, micStatus, startRecording, stopRecording, ensureAudioContext]);
 
   const sendTextMessage = useCallback(async () => {
     const txt = textInput.trim();
     if (!txt) return;
     setTextInput("");
+
+    await ensureAudioContext();
 
     if (!mountedRef.current) return;
     const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", text: txt };
@@ -336,13 +348,7 @@ export default function VoicePanel() {
       setMessages((prev) => [...prev, agentMsg]);
 
       setInterimText("Speaking…");
-      if (d.audio) {
-        console.log(`[voice] Playing audio (${d.audio.length} chars base64, server peak=${d.peak !== undefined ? d.peak : 'N/A'})`);
-        const engine = getEngine();
-        await engine.resume();
-        await engine.playBase64Audio(d.audio, d.sampleRate || 24000);
-        console.log(`[voice] Audio playback finished`);
-      }
+      await playAudioResponse(d);
       setInterimText("");
       setStateSafe("idle");
     } catch (err: any) {
@@ -351,7 +357,7 @@ export default function VoicePanel() {
       setStateSafe("idle");
       setInterimText("");
     }
-  }, [textInput, activeVoice, getEngine, setStateSafe]);
+  }, [textInput, activeVoice, playAudioResponse, setStateSafe, ensureAudioContext]);
 
   const handleTextKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -371,6 +377,13 @@ export default function VoicePanel() {
     } catch {}
   }, []);
 
+  const testAudio = useCallback(async () => {
+    await ensureAudioContext();
+    const engine = getEngine();
+    await engine.playTestTone();
+    showToast("Test tone played at 440Hz", "success");
+  }, [ensureAudioContext, getEngine]);
+
   const groupVoices = (vs: VoicePreset[]) => {
     const groups: Record<string, VoicePreset[]> = {};
     for (const v of vs) {
@@ -383,6 +396,7 @@ export default function VoicePanel() {
 
   const grouped = groupVoices(voices);
   const currentVoiceInfo = voices.find(v => v.id === activeVoice) || { gender: "female" };
+  const avatarGender = currentVoiceInfo.gender === "male" ? "male" : "female";
   const engine = getEngine();
   const analyserNode = engine.analyserNode;
   const needsMic = micStatus !== "granted";
@@ -399,12 +413,18 @@ export default function VoicePanel() {
         <span style={{ fontSize: 13, fontWeight: 600 }}>Voice Agent</span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: ttsConnected ? "var(--success)" : "var(--danger)" }} />
-          <span style={{ fontSize: 11, color: "var(--mute)" }}>{ttsConnected ? "TTS Ready" : "TTS Offline"}</span>
+          <span style={{ fontSize: 11, color: "var(--mute)" }}>{ttsConnected ? "TTS Online" : "TTS Offline"}</span>
         </div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 16, overflow: "hidden", minHeight: 0 }}>
-        <AgentAvatar state={state} analyserNode={analyserNode} size={220} gender={currentVoiceInfo.gender as "male" | "female" || "female"} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 16, overflow: "hidden", minHeight: 0 }}>
+        <AnimeAvatar state={state} analyserNode={analyserNode} size={320} gender={avatarGender} />
+
+        {!ttsConnected && (
+          <div style={{ fontSize: 11, color: "var(--danger)", textAlign: "center", maxWidth: 280, lineHeight: 1.5, padding: "6px 12px", background: "rgba(255,59,48,0.06)", borderRadius: 6 }}>
+            TTS server offline — responses will be text-only. Make sure the TTS server is running on port 8000.
+          </div>
+        )}
 
         {needsMic ? (
           <button className="btn btn-primary" onClick={toggleMic}
@@ -421,25 +441,37 @@ export default function VoicePanel() {
             {micStatus === "denied" ? "Try Again" : "Allow Microphone Access"}
           </button>
         ) : (
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button
               className={`btn ${state === "listening" ? "btn-danger" : "btn-primary"}`}
               onClick={toggleMic}
               style={{
-                width: 64, height: 64, borderRadius: "50%",
+                width: 56, height: 56, borderRadius: "50%",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 24, transition: "all 0.2s", position: "relative",
+                fontSize: 22, transition: "all 0.2s", position: "relative",
               }}
             >
               {state === "listening" ? (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="4" height="12" rx="1" /><rect x="14" y="6" width="4" height="12" rx="1" /></svg>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="4" height="12" rx="1" /><rect x="14" y="6" width="4" height="12" rx="1" /></svg>
               ) : (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                   <line x1="12" y1="19" x2="12" y2="22" />
                 </svg>
               )}
+            </button>
+            <button
+              className="btn"
+              onClick={testAudio}
+              title="Play test tone"
+              style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, padding: 0 }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
             </button>
             {state === "speaking" && (
               <button
@@ -447,12 +479,12 @@ export default function VoicePanel() {
                 onClick={stopSpeaking}
                 title="Stop speaking"
                 style={{
-                  width: 44, height: 44, borderRadius: "50%",
+                  width: 38, height: 38, borderRadius: "50%",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 18, padding: 0,
+                  fontSize: 16, padding: 0,
                 }}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="5" height="12" rx="1" /><rect x="13" y="6" width="5" height="12" rx="1" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="5" height="12" rx="1" /><rect x="13" y="6" width="5" height="12" rx="1" /></svg>
               </button>
             )}
           </div>

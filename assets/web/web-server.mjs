@@ -6411,11 +6411,16 @@ export async function createApp() {
         console.log(`[voice] TTS generated in ${Date.now() - ttsStart}ms`);
         return { reply: finalText, audio: ttsData.audio, sampleRate: ttsData.sampleRate };
       }
+      const ttsErr = await ttsR.text().catch(() => `HTTP ${ttsR.status}`);
+      console.error(`[voice] TTS server returned ${ttsR.status}: ${ttsErr}`);
+      return { reply: finalText, ttsError: `TTS server error (${ttsR.status})` };
     } catch (e2) {
       console.error(`[voice] TTS error: ${e2.message}`);
+      if (e2.message?.includes("connect") || e2.message?.includes("ECONNREFUSED")) {
+        return { reply: finalText, ttsError: "TTS server not running on port 8000." };
+      }
+      return { reply: finalText, ttsError: `TTS failed: ${e2.message}` };
     }
-
-    return { reply: finalText };
   });
 
   app.get("/api/voice/voices", async () => {

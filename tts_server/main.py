@@ -104,14 +104,29 @@ def get_tts():
         return _tts_pipeline
     try:
         from kokoro import KPipeline
-        logger.info("Loading Kokoro TTS pipeline...")
-        _tts_pipeline = KPipeline(lang_code='a')
-        logger.info("Kokoro TTS loaded successfully")
+        tts_device = os.environ.get("TTS_DEVICE", "cpu")
+        logger.info(f"Loading Kokoro TTS pipeline (device={tts_device})...")
+        _tts_pipeline = KPipeline(lang_code='a', device=tts_device)
+        logger.info(f"Kokoro TTS loaded successfully on {tts_device}")
         for v in VOICE_PRESETS:
             VOICES[v] = {**VOICE_PRESETS[v], "type": "kokoro", "id": v}
     except ImportError as e:
         logger.warning(f"kokoro package not installed: {e}")
         _tts_pipeline = None
+    except RuntimeError as e:
+        if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
+            logger.warning(f"GPU OOM loading Kokoro, retrying on CPU: {e}")
+            try:
+                _tts_pipeline = KPipeline(lang_code='a', device='cpu')
+                logger.info("Kokoro TTS loaded successfully on CPU (fallback)")
+                for v in VOICE_PRESETS:
+                    VOICES[v] = {**VOICE_PRESETS[v], "type": "kokoro", "id": v}
+            except Exception as e2:
+                logger.error(f"Kokoro CPU fallback also failed: {e2}")
+                _tts_pipeline = None
+        else:
+            logger.error(f"Kokoro load error: {e}")
+            _tts_pipeline = None
     return _tts_pipeline
 
 
@@ -385,10 +400,19 @@ async def synthesize(req: TTSRequest):
     if pipeline is None:
         raise HTTPException(503, "TTS engine not available")
 
-    gen = pipeline(req.text, voice=voice, speed=1.0)
-    all_audio = []
-    for _, _, audio in gen:
-        all_audio.append(audio)
+    try:
+        gen = pipeline(req.text, voice=voice, speed=1.0)
+        all_audio = []
+        for _, _, audio in gen:
+            all_audio.append(audio)
+    except RuntimeError as e:
+        if "out of memory" in str(e).lower():
+            logger.error(f"CUDA OOM during Kokoro inference: {e}")
+            raise HTTPException(500, "TTS GPU out of memory. Set TTS_DEVICE=cpu in environment and restart.")
+        raise HTTPException(500, f"Kokoro inference error: {e}")
+    except Exception as e:
+        logger.error(f"Kokoro inference error: {e}")
+        raise HTTPException(500, f"Kokoro inference error: {e}")
     if not all_audio:
         raise HTTPException(500, "No audio generated")
 

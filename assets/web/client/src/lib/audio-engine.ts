@@ -26,6 +26,10 @@ export class AudioEngine {
     return this._resumed;
   }
 
+  get isRunning() {
+    return this.ctx?.state === "running";
+  }
+
   setVolume(v: number) {
     this._volume = Math.max(0, v);
     if (this.gain) {
@@ -34,7 +38,13 @@ export class AudioEngine {
   }
 
   async resume() {
-    if (this._resumed) return;
+    if (this._resumed && this.ctx?.state === "running") return;
+    if (this.ctx && this.ctx.state === "closed") {
+      this.ctx = null;
+      this.analyser = null;
+      this.gain = null;
+      this._resumed = false;
+    }
     if (!this.ctx) {
       this.ctx = new AudioContext();
       this.analyser = this.ctx.createAnalyser();
@@ -43,17 +53,22 @@ export class AudioEngine {
       this.gain.gain.value = this._volume;
       this.analyser.connect(this.gain);
       this.gain.connect(this.ctx.destination);
-      console.log(`[audio] AudioContext created, state: ${this.ctx.state}, gain=${this._volume}`);
     }
     if (this.ctx.state === "suspended") {
-      await this.ctx.resume();
-      console.log(`[audio] AudioContext resumed, state: ${this.ctx.state}`);
+      try {
+        await this.ctx.resume();
+      } catch (e) {
+        console.warn("[audio] resume failed:", e);
+        this._resumed = false;
+        throw e;
+      }
     }
     this._resumed = true;
   }
 
   async playTestTone(): Promise<void> {
     if (!this.ctx || !this.analyser || !this.gain) return;
+    this.stop();
     const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.15, this.ctx.sampleRate);
     const d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) {
@@ -63,7 +78,6 @@ export class AudioEngine {
     src.buffer = buf;
     src.connect(this.analyser);
     src.start();
-    console.log(`[audio] Test tone playing at 440Hz`);
   }
 
   stop() {
@@ -79,6 +93,11 @@ export class AudioEngine {
   }
 
   async playBase64Audio(base64: string, sampleRate: number): Promise<void> {
+    if (!base64 || base64.length < 100) {
+      console.warn("[audio] Audio data too short, skipping playback");
+      return;
+    }
+
     if (this.ctx && this.analyser && this.gain) {
       try {
         const binary = atob(base64);
@@ -88,7 +107,6 @@ export class AudioEngine {
         for (let i = 0; i < len; i++) {
           view[i] = binary.charCodeAt(i);
         }
-        console.log(`[audio] decodeAudioData, size=${len} bytes, ctx.state=${this.ctx.state}`);
         const audioBuffer = await this.ctx.decodeAudioData(arrayBuf);
         const ch = audioBuffer.getChannelData(0);
         let maxVal = 0;
@@ -96,12 +114,17 @@ export class AudioEngine {
           const abs = Math.abs(ch[i]);
           if (abs > maxVal) maxVal = abs;
         }
-        console.log(`[audio] Decoded buffer: ${audioBuffer.duration.toFixed(1)}s, ${audioBuffer.sampleRate}Hz, ${audioBuffer.numberOfChannels}ch, peak=${maxVal.toFixed(4)}`);
-        if (maxVal < 0.001) console.warn("[audio] ⚠️ WARNING: Audio buffer is near-silent!");
+        if (maxVal < 0.001) {
+          console.warn("[audio] Audio buffer is near-silent, skipping playback");
+          return;
+        }
+
+        this.stop();
         const source = this.ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(this.analyser);
         this._currentSource = source;
+
         return new Promise((resolve) => {
           this._currentResolve = resolve;
           this.onStateChange?.("speaking");
@@ -116,14 +139,13 @@ export class AudioEngine {
           };
         });
       } catch (e) {
-        console.warn("[audio] AudioContext playback failed, falling back to Audio element:", e);
+        console.warn("[audio] AudioContext playback failed, falling back:", e);
       }
     }
 
-    // Fallback: use HTML Audio element (bypasses AudioContext issues)
     return new Promise((resolve) => {
-      this._currentResolve = resolve;
       this.onStateChange?.("speaking");
+      this._currentResolve = resolve;
       const audio = new Audio(`data:audio/wav;base64,${base64}`);
       audio.volume = 1.0;
       audio.onended = () => {
@@ -132,7 +154,6 @@ export class AudioEngine {
         resolve();
       };
       audio.play().catch((e) => {
-        console.error("[audio] Audio element playback failed:", e);
         this._currentResolve = null;
         this.onStateChange?.("idle");
         resolve();
@@ -163,6 +184,7 @@ export class AudioEngine {
       const buffer = this.ctx.createBuffer(1, floatData.length, sampleRate);
       buffer.getChannelData(0).set(floatData);
 
+      this.stop();
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(this.analyser);
