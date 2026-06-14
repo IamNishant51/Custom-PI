@@ -231,16 +231,36 @@ export default function VoicePanel() {
       ws.send(JSON.stringify({ type: "text", text, voice: activeVoice }));
     };
 
+    let accumulatedDelta = "";
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === "status") {
           setStateSafe(msg.status);
         } else if (msg.type === "text_delta") {
-          // Skip updating main text immediately to stay synchronized with the audio playback
+          accumulatedDelta += msg.delta;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentMsgId
+                ? { ...m, text: accumulatedDelta }
+                : m
+            )
+          );
         } else if (msg.type === "audio_chunk") {
           engine.enqueueStreamChunk(msg.audio);
-          if (msg.text) {
+          // text already displayed via text_delta; only update if text_delta never arrived
+          if (!accumulatedDelta && msg.text) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? { ...m, text: m.text + (m.text ? " " : "") + msg.text }
+                  : m
+              )
+            );
+          }
+        } else if (msg.type === "text_chunk") {
+          // TTS failed fallback — show text without audio
+          if (!accumulatedDelta && msg.text) {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === agentMsgId

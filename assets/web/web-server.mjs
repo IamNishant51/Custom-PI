@@ -6613,8 +6613,15 @@ export async function createApp() {
             // Split by standard sentence punctuation (. ! ?)
             const sentences = fullText.split(/(?<=[.!?])\s+/).filter(Boolean);
             
+            // If only one sentence and it's long, also split on clauses to reduce TTS latency
+            let ttsSentences = sentences;
+            if (sentences.length === 1 && sentences[0].length > 120) {
+              ttsSentences = sentences[0].split(/(?<=[,;:])\s+/).filter(Boolean);
+              if (ttsSentences.length < 2) ttsSentences = sentences;
+            }
+
             // Generate all TTS in parallel and wait for all to complete
-            const ttsPromises = sentences.map(async (sentence) => {
+            const ttsPromises = ttsSentences.map(async (sentence) => {
               const cleanSentence = sentence.trim();
               if (!cleanSentence) return null;
               const ttsData = await generateTTS(cleanSentence, voiceId);
@@ -6630,19 +6637,25 @@ export async function createApp() {
             // Change status to speaking as voice playback begins
             try { socket.send(JSON.stringify({ type: "status", status: "speaking" })); } catch {}
 
-            // Send all generated audio chunks to the client immediately in one go
+            // Send all results — always include text, whether TTS succeeded or not
             for (const item of results) {
-              if (item.ttsData) {
-                try {
+              try {
+                if (item.ttsData) {
                   socket.send(JSON.stringify({
                     type: "audio_chunk",
                     audio: item.ttsData.audio,
                     sampleRate: item.ttsData.sampleRate || 24000,
                     text: item.text
                   }));
-                } catch (e) {
-                  console.error("[voice-stream] Failed to send audio chunk over socket:", e.message);
+                } else {
+                  // TTS failed — still deliver text so the user sees the full response
+                  socket.send(JSON.stringify({
+                    type: "text_chunk",
+                    text: item.text
+                  }));
                 }
+              } catch (e) {
+                console.error("[voice-stream] Failed to send chunk over socket:", e.message);
               }
             }
           }
