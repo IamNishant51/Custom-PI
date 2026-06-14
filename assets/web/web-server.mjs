@@ -6535,77 +6535,21 @@ export async function createApp() {
             return;
           }
 
-          // Sentence accumulator state
-          let sentenceBuffer = "";
-          let deliveryQueue = Promise.resolve(); // To deliver audio chunks to client in order
-
           try {
-            // Send status: speaking or thinking
-            try { socket.send(JSON.stringify({ type: "status", status: "speaking" })); } catch {}
+            // Keep the status as thinking while generating the whole response
+            try { socket.send(JSON.stringify({ type: "status", status: "thinking" })); } catch {}
 
             for await (const event of stream) {
               if (event.type === "text_delta") {
                 const delta = event.delta;
                 currentText += delta;
-                sentenceBuffer += delta;
 
-                // Send text delta to frontend immediately so user sees typing
+                // Send text delta to frontend immediately so user sees typing in real-time
                 try { socket.send(JSON.stringify({ type: "text_delta", delta })); } catch {}
-
-                // Eager clause-based splitting to dramatically reduce voice latency
-                let splitIndex = -1;
-                let splitLength = 0;
-
-                // 1. Highest priority: standard sentence endings
-                const sentenceMatch = sentenceBuffer.match(/[^.!?\n]+[.!?\n]+(?=\s|$)/);
-                if (sentenceMatch) {
-                  splitIndex = sentenceMatch.index;
-                  splitLength = sentenceMatch[0].length;
-                } else {
-                  // 2. Secondary priority: clause boundaries (commas, semicolons, colons, dashes)
-                  // Only split if the clause has enough words or length to be a meaningful segment
-                  const clauseMatch = sentenceBuffer.match(/[^,;:—\-]+[,;:—\-]+(?=\s|$)/);
-                  if (clauseMatch) {
-                    const clauseSegment = clauseMatch[0].trim();
-                    const wordCount = clauseSegment.split(/\s+/).length;
-                    if (wordCount >= 3 || clauseSegment.length >= 12) {
-                      splitIndex = clauseMatch.index;
-                      splitLength = clauseMatch[0].length;
-                    }
-                  }
-                }
-
-                if (splitIndex !== -1) {
-                  const sentence = sentenceBuffer.substring(splitIndex, splitIndex + splitLength).trim();
-                  sentenceBuffer = sentenceBuffer.slice(splitIndex + splitLength);
-
-                  if (sentence) {
-                    const currentSentence = sentence;
-                    // Start synthesis IMMEDIATELY in parallel!
-                    const ttsPromise = generateTTS(currentSentence, voiceId);
-                    // Queue delivery sequentially to keep order
-                    deliveryQueue = deliveryQueue.then(async () => {
-                      const ttsData = await ttsPromise;
-                      if (ttsData) {
-                        try {
-                          socket.send(JSON.stringify({
-                            type: "audio_chunk",
-                            audio: ttsData.audio,
-                            sampleRate: ttsData.sampleRate || 24000,
-                            text: currentSentence
-                          }));
-                        } catch (e) {
-                          console.error("[voice-stream] Failed to send audio chunk over socket:", e.message);
-                        }
-                      }
-                    });
-                  }
-                }
               }
             }
           } catch (e) {
             console.error(`[voice-stream] stream error: ${e.message}`);
-            // Don't return yet! Let the pending sentence buffer play out.
           }
 
           let finalMessage;
@@ -6613,8 +6557,6 @@ export async function createApp() {
             finalMessage = await stream.result();
           } catch (e) {
             console.error(`[voice-stream] Result error: ${e.message}`);
-            // If the model stopped prematurely (e.g. SAFETY), there might not be a finalMessage.
-            // We construct a dummy final message so the conversation can continue or gracefully end.
             finalMessage = { role: "agent", content: [{ type: "text", text: accumulatedText + currentText }] };
           }
 
@@ -6629,29 +6571,45 @@ export async function createApp() {
             accumulatedText += (accumulatedText ? " " : "") + currentText.trim();
           }
 
-          // Handle any remaining text in sentenceBuffer at the end of the stream
-          if (sentenceBuffer.trim()) {
-            const remaining = sentenceBuffer.trim();
-            const ttsPromise = generateTTS(remaining, voiceId);
-            deliveryQueue = deliveryQueue.then(async () => {
-              const ttsData = await ttsPromise;
-              if (ttsData) {
+          // Once the LLM response is fully generated, split and synthesize the entire text
+          const fullText = currentText.trim();
+          if (fullText) {
+            // Split by standard sentence punctuation (. ! ?)
+            const sentences = fullText.split(/(?<=[.!?])\s+/).filter(Boolean);
+            
+            // Generate all TTS in parallel and wait for all to complete
+            const ttsPromises = sentences.map(async (sentence) => {
+              const cleanSentence = sentence.trim();
+              if (!cleanSentence) return null;
+              const ttsData = await generateTTS(cleanSentence, voiceId);
+              return {
+                text: cleanSentence,
+                ttsData
+              };
+            });
+
+            // Wait for all TTS promises to resolve (ensures continuous audio playback with 0 gaps)
+            const results = (await Promise.all(ttsPromises)).filter(Boolean);
+
+            // Change status to speaking as voice playback begins
+            try { socket.send(JSON.stringify({ type: "status", status: "speaking" })); } catch {}
+
+            // Send all generated audio chunks to the client immediately in one go
+            for (const item of results) {
+              if (item.ttsData) {
                 try {
                   socket.send(JSON.stringify({
                     type: "audio_chunk",
-                    audio: ttsData.audio,
-                    sampleRate: ttsData.sampleRate || 24000,
-                    text: remaining
+                    audio: item.ttsData.audio,
+                    sampleRate: item.ttsData.sampleRate || 24000,
+                    text: item.text
                   }));
                 } catch (e) {
-                  console.error("[voice-stream] Failed to send remaining audio chunk:", e.message);
+                  console.error("[voice-stream] Failed to send audio chunk over socket:", e.message);
                 }
               }
-            });
+            }
           }
-
-          // Wait for all queued audio chunks to be delivered to the client
-          await deliveryQueue;
 
           const toolCalls = finalMessage.content.filter(c => c.type === "toolCall" || c.type === "toolUse");
           if (toolCalls.length === 0) break;
