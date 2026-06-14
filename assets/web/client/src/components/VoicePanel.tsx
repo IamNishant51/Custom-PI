@@ -237,11 +237,18 @@ export default function VoicePanel() {
         if (msg.type === "status") {
           setStateSafe(msg.status);
         } else if (msg.type === "text_delta") {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === agentMsgId ? { ...m, text: m.text + msg.delta } : m))
-          );
+          // Skip updating main text immediately to stay synchronized with the audio playback
         } else if (msg.type === "audio_chunk") {
           engine.enqueueStreamChunk(msg.audio);
+          if (msg.text) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? { ...m, text: m.text + (m.text ? " " : "") + msg.text }
+                  : m
+              )
+            );
+          }
         } else if (msg.type === "done") {
           setStateSafe("idle");
           ws.close();

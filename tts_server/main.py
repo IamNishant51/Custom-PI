@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 tts_cache = TTSCache()
 
 # Concurrency semaphore
-TTS_SEMAPHORE = asyncio.Semaphore(2)
+TTS_SEMAPHORE = asyncio.Semaphore(4)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -6501,7 +6501,8 @@ export async function createApp() {
 2. NO EMOJIS OR SYMBOLS: Emojis and special symbols cannot be pronounced properly.
 3. NO NARRATIVE ACTIONS: Do not include parenthetical actions or tones like "(Narrative Tone: Confident)" or "(smiles)".
 4. CONCISE & CONVERSATIONAL: Keep your responses highly conversational, natural, and relatively short. Do NOT generate long, multi-paragraph essays.
-5. ACT HUMAN: Speak with feelings, warmth, and emotion. Use natural filler words occasionally (like "hmm", "well", "ah") and conversational pacing. Be a helpful, empathetic friend.`;
+5. SHORTER SENTENCES: Keep your sentences short and punchy. Avoid long compound sentences with clauses. Use periods often, as this allows our TTS system to stream and speak your response with zero latency.
+6. ACT HUMAN: Speak with feelings, warmth, and emotion. Use natural filler words occasionally (like "hmm", "well", "ah") and conversational pacing. Be a helpful, empathetic friend.`;
         const tools = getActiveTools();
         const auth = getModelAuth(model);
         const settings = loadSettings();
@@ -6536,7 +6537,7 @@ export async function createApp() {
 
           // Sentence accumulator state
           let sentenceBuffer = "";
-          let sentenceQueue = Promise.resolve(); // To synthesize sentences in order
+          let deliveryQueue = Promise.resolve(); // To deliver audio chunks to client in order
 
           try {
             // Send status: speaking or thinking
@@ -6559,10 +6560,24 @@ export async function createApp() {
                   sentenceBuffer = sentenceBuffer.slice(match.index + match[0].length);
 
                   if (sentence) {
-                    // Schedule synthesis in order
                     const currentSentence = sentence;
-                    sentenceQueue = sentenceQueue.then(async () => {
-                      await generateAndSendTTS(currentSentence, voiceId, socket);
+                    // Start synthesis IMMEDIATELY in parallel!
+                    const ttsPromise = generateTTS(currentSentence, voiceId);
+                    // Queue delivery sequentially to keep order
+                    deliveryQueue = deliveryQueue.then(async () => {
+                      const ttsData = await ttsPromise;
+                      if (ttsData) {
+                        try {
+                          socket.send(JSON.stringify({
+                            type: "audio_chunk",
+                            audio: ttsData.audio,
+                            sampleRate: ttsData.sampleRate || 24000,
+                            text: currentSentence
+                          }));
+                        } catch (e) {
+                          console.error("[voice-stream] Failed to send audio chunk over socket:", e.message);
+                        }
+                      }
                     });
                   }
                 }
@@ -6597,13 +6612,26 @@ export async function createApp() {
           // Handle any remaining text in sentenceBuffer at the end of the stream
           if (sentenceBuffer.trim()) {
             const remaining = sentenceBuffer.trim();
-            sentenceQueue = sentenceQueue.then(async () => {
-              await generateAndSendTTS(remaining, voiceId, socket);
+            const ttsPromise = generateTTS(remaining, voiceId);
+            deliveryQueue = deliveryQueue.then(async () => {
+              const ttsData = await ttsPromise;
+              if (ttsData) {
+                try {
+                  socket.send(JSON.stringify({
+                    type: "audio_chunk",
+                    audio: ttsData.audio,
+                    sampleRate: ttsData.sampleRate || 24000,
+                    text: remaining
+                  }));
+                } catch (e) {
+                  console.error("[voice-stream] Failed to send remaining audio chunk:", e.message);
+                }
+              }
             });
           }
 
-          // Wait for all sentences in the current turn to finish synthesis
-          await sentenceQueue;
+          // Wait for all queued audio chunks to be delivered to the client
+          await deliveryQueue;
 
           const toolCalls = finalMessage.content.filter(c => c.type === "toolCall" || c.type === "toolUse");
           if (toolCalls.length === 0) break;
@@ -6638,8 +6666,8 @@ export async function createApp() {
     });
   });
 
-  // Helper to generate TTS and send over websocket
-  async function generateAndSendTTS(text, voiceId, socket) {
+  // Helper to generate TTS in parallel
+  async function generateTTS(text, voiceId) {
     // Clean text of markdown/emojis/etc.
     const cleanText = text
       .replace(/\*/g, "")
@@ -6651,7 +6679,7 @@ export async function createApp() {
       .replace(/\s+/g, " ")
       .trim();
 
-    if (!cleanText) return;
+    if (!cleanText) return null;
 
     try {
       const ttsStart = Date.now();
@@ -6665,22 +6693,15 @@ export async function createApp() {
       if (ttsR.ok) {
         const ttsData = await ttsR.json();
         console.log(`[voice-stream] TTS sentence generated in ${Date.now() - ttsStart}ms: "${cleanText.substring(0, 40)}..."`);
-        try {
-          socket.send(JSON.stringify({
-            type: "audio_chunk",
-            audio: ttsData.audio,
-            sampleRate: ttsData.sampleRate || 24000,
-            text: cleanText
-          }));
-        } catch (e) {
-          console.error("[voice-stream] Failed to send audio chunk over socket:", e.message);
-        }
+        return ttsData;
       } else {
         const ttsErr = await ttsR.text().catch(() => `HTTP ${ttsR.status}`);
         console.error(`[voice-stream] TTS server returned ${ttsR.status}: ${ttsErr}`);
+        return null;
       }
     } catch (e) {
       console.error(`[voice-stream] TTS fetch error: ${e.message}`);
+      return null;
     }
   }
 
