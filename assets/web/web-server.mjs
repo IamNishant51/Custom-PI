@@ -6440,6 +6440,290 @@ export async function createApp() {
     }
   });
 
+  // WebSocket Voice Chat streaming endpoint
+  app.get("/api/voice/chat-stream", { websocket: true }, (socket, req) => {
+    console.log(`[voice-stream] WebSocket connected from ${req.ip}`);
+
+    // Heartbeat — close stale connections
+    let alive = true;
+    const pingTimer = setInterval(() => {
+      if (!alive) {
+        try { socket.close(); } catch {}
+        return;
+      }
+      alive = false;
+      try { socket.ping(); } catch {}
+    }, 30000);
+
+    socket.on("pong", () => { alive = true; });
+
+    socket.on("close", () => {
+      clearInterval(pingTimer);
+      console.log("[voice-stream] WebSocket disconnected");
+    });
+
+    socket.on("error", (err) => {
+      clearInterval(pingTimer);
+      console.error("[voice-stream] WebSocket error:", err?.message);
+    });
+
+    socket.on("message", async (data) => {
+      let msg;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch (e) {
+        try { socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" })); } catch {}
+        return;
+      }
+
+      if (msg.type === "ping") {
+        try { socket.send(JSON.stringify({ type: "pong" })); } catch {}
+        return;
+      }
+
+      if (msg.type === "text") {
+        const { text, voice } = msg;
+        if (!text) {
+          try { socket.send(JSON.stringify({ type: "error", message: "text is required" })); } catch {}
+          return;
+        }
+
+        const voiceId = voice || "af_bella";
+        console.log(`[voice-stream] Agent request: "${text.substring(0, 80)}"`);
+
+        // Send status: thinking
+        try { socket.send(JSON.stringify({ type: "status", status: "thinking" })); } catch {}
+
+        const model = resolveModel();
+        let systemPrompt = loadSystemPrompt();
+        systemPrompt += `\n\nCRITICAL INSTRUCTION FOR VOICE MODE: You are currently operating in VOICE INTERFACE mode. The user is speaking to you, and your responses are being read aloud by a Text-To-Speech engine. Therefore, you MUST follow these strict rules:
+1. NO MARKDOWN: Do not use bold (**), italics (*), code blocks (\`\`\`), or list formatting (-). Speak in plain text.
+2. NO EMOJIS OR SYMBOLS: Emojis and special symbols cannot be pronounced properly.
+3. NO NARRATIVE ACTIONS: Do not include parenthetical actions or tones like "(Narrative Tone: Confident)" or "(smiles)".
+4. CONCISE & CONVERSATIONAL: Keep your responses highly conversational, natural, and relatively short. Do NOT generate long, multi-paragraph essays or huge code blocks. Provide brief summaries and offer to elaborate if needed.`;
+        const tools = getActiveTools();
+        const auth = getModelAuth(model);
+        const settings = loadSettings();
+
+        voiceMessages.push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
+        while (voiceMessages.length > MAX_VOICE_HISTORY) voiceMessages.shift();
+
+        let toolCallIndex = 0;
+        let accumulatedText = "";
+        const MAX_TURNS = 10;
+
+        for (let turn = 0; turn < MAX_TURNS; turn++) {
+          let stream, currentText = "";
+
+          try {
+            stream = streamSimple(model, {
+              systemPrompt,
+              messages: voiceMessages,
+              tools,
+            }, {
+              apiKey: auth.apiKey,
+              headers: auth.headers,
+              reasoning: settings.defaultThinkingLevel || "off",
+              signal: AbortSignal.timeout(120000),
+            });
+          } catch (e) {
+            voiceMessages.pop();
+            console.error(`[voice-stream] streamSimple error: ${e.message}`);
+            try { socket.send(JSON.stringify({ type: "error", message: `Model error: ${e.message}` })); } catch {}
+            return;
+          }
+
+          // Sentence accumulator state
+          let sentenceBuffer = "";
+          let sentenceQueue = Promise.resolve(); // To synthesize sentences in order
+
+          try {
+            // Send status: speaking or thinking
+            try { socket.send(JSON.stringify({ type: "status", status: "speaking" })); } catch {}
+
+            for await (const event of stream) {
+              if (event.type === "text_delta") {
+                const delta = event.delta;
+                currentText += delta;
+                sentenceBuffer += delta;
+
+                // Send text delta to frontend immediately so user sees typing
+                try { socket.send(JSON.stringify({ type: "text_delta", delta })); } catch {}
+
+                // Check for sentence end
+                // Find all sentences in buffer
+                const match = sentenceBuffer.match(/[^.!?\n]+[.!?\n]+(?=\s|$)/);
+                if (match) {
+                  const sentence = match[0].trim();
+                  sentenceBuffer = sentenceBuffer.slice(match.index + match[0].length);
+
+                  if (sentence) {
+                    // Schedule synthesis in order
+                    const currentSentence = sentence;
+                    sentenceQueue = sentenceQueue.then(async () => {
+                      await generateAndSendTTS(currentSentence, voiceId, socket);
+                    });
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.error(`[voice-stream] stream error: ${e.message}`);
+            try { socket.send(JSON.stringify({ type: "error", message: `Stream error: ${e.message}` })); } catch {}
+            return;
+          }
+
+          let finalMessage;
+          try {
+            finalMessage = await stream.result();
+          } catch (e) {
+            try { socket.send(JSON.stringify({ type: "error", message: `Result error: ${e.message}` })); } catch {}
+            return;
+          }
+
+          try {
+            const usage = finalMessage.usage;
+            trackCost("voice-session", "voice-agent", model.provider, model.id,
+              usage?.inputTokens || 0, usage?.outputTokens || 0);
+          } catch {}
+
+          voiceMessages.push(finalMessage);
+          if (currentText.trim()) {
+            accumulatedText += (accumulatedText ? " " : "") + currentText.trim();
+          }
+
+          // Handle any remaining text in sentenceBuffer at the end of the stream
+          if (sentenceBuffer.trim()) {
+            const remaining = sentenceBuffer.trim();
+            sentenceQueue = sentenceQueue.then(async () => {
+              await generateAndSendTTS(remaining, voiceId, socket);
+            });
+          }
+
+          // Wait for all sentences in the current turn to finish synthesis
+          await sentenceQueue;
+
+          const toolCalls = finalMessage.content.filter(c => c.type === "toolCall" || c.type === "toolUse");
+          if (toolCalls.length === 0) break;
+
+          // If there are tool calls, we execute them and repeat the loop
+          // Send status: thinking
+          try { socket.send(JSON.stringify({ type: "status", status: "thinking" })); } catch {}
+
+          for (const tc of toolCalls) {
+            const args = tc.arguments || tc.input || {};
+            const id = tc.id || `tc_${Date.now()}_${toolCallIndex++}`;
+            let resultText;
+            try { resultText = await executeTool(tc.name, args, process.cwd()); }
+            catch (e) { resultText = `Error: ${e.message}`; }
+            voiceMessages.push({
+              role: "toolResult", toolCallId: id, toolName: tc.name,
+              content: [{ type: "text", text: resultText }],
+              isError: resultText.startsWith("Error:"),
+              timestamp: Date.now(),
+            });
+          }
+        }
+
+        // Send done event
+        try {
+          socket.send(JSON.stringify({
+            type: "done",
+            reply: accumulatedText
+          }));
+        } catch {}
+      }
+    });
+  });
+
+  // Helper to generate TTS and send over websocket
+  async function generateAndSendTTS(text, voiceId, socket) {
+    // Clean text of markdown/emojis/etc.
+    const cleanText = text
+      .replace(/\*/g, "")
+      .replace(/_/g, "")
+      .replace(/#/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "")
+      .replace(/\([^)]+\)/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!cleanText) return;
+
+    try {
+      const ttsStart = Date.now();
+      const ttsR = await fetch(`${TTS_SERVER}/v1/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cleanText, voice: voiceId }),
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (ttsR.ok) {
+        const ttsData = await ttsR.json();
+        console.log(`[voice-stream] TTS sentence generated in ${Date.now() - ttsStart}ms: "${cleanText.substring(0, 40)}..."`);
+        try {
+          socket.send(JSON.stringify({
+            type: "audio_chunk",
+            audio: ttsData.audio,
+            sampleRate: ttsData.sampleRate || 24000,
+            text: cleanText
+          }));
+        } catch (e) {
+          console.error("[voice-stream] Failed to send audio chunk over socket:", e.message);
+        }
+      } else {
+        const ttsErr = await ttsR.text().catch(() => `HTTP ${ttsR.status}`);
+        console.error(`[voice-stream] TTS server returned ${ttsR.status}: ${ttsErr}`);
+      }
+    } catch (e) {
+      console.error(`[voice-stream] TTS fetch error: ${e.message}`);
+    }
+  }
+
+  // Node.js Voice Cloning endpoint
+  app.post("/api/voice/clone", async (req, reply) => {
+    const { name, transcript, audio } = req.body || {};
+    if (!name || !transcript || !audio) {
+      return reply.code(400).send({ error: "name, transcript, and audio (base64) are required" });
+    }
+
+    try {
+      const cloneR = await fetch(`${TTS_SERVER}/v1/voices/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, transcript, audio_base64: audio }),
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (cloneR.ok) {
+        const cloneData = await cloneR.json();
+        return cloneData;
+      }
+      const errText = await cloneR.text().catch(() => `HTTP ${cloneR.status}`);
+      return reply.code(cloneR.status).send({ error: `TTS server clone failed: ${errText}` });
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
+    }
+  });
+
+  app.delete("/api/voice/clone/:id", async (req, reply) => {
+    const { id } = req.params;
+    try {
+      const delR = await fetch(`${TTS_SERVER}/v1/voices/clone/${id}`, {
+        method: "DELETE",
+      });
+      if (delR.ok) {
+        return await delR.json();
+      }
+      const errText = await delR.text().catch(() => `HTTP ${delR.status}`);
+      return reply.code(delR.status).send({ error: `TTS server delete failed: ${errText}` });
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
+    }
+  });
+
   app.get("/api/voice/voices", async () => {
     try {
       const r = await fetch(`${TTS_SERVER}/v1/voices`);

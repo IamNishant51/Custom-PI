@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import GlobeAvatar from "./GlobeAvatar";
 import { showToast } from "./Toast";
 import { AudioEngine } from "../lib/audio-engine";
-import { Volume2 } from "lucide-react";
+import { Volume2, Plus, X } from "lucide-react";
 import Markdown from "./Markdown";
 
 interface VoicePreset {
@@ -11,6 +11,7 @@ interface VoicePreset {
   name: string;
   gender: string;
   desc: string;
+  type?: string;
 }
 
 interface ChatMessage {
@@ -74,6 +75,13 @@ export default function VoicePanel() {
     return saved ? Number(saved) : 40;
   });
 
+  // Voice cloning modal state
+  const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
+  const [cloneName, setCloneName] = useState("");
+  const [cloneTranscript, setCloneTranscript] = useState("");
+  const [cloneAudioFile, setCloneAudioFile] = useState<File | null>(null);
+  const [isCloning, setIsCloning] = useState(false);
+
   const audioEngineRef = useRef<AudioEngine | null>(null);
   const stateRef = useRef(state);
   const mountedRef = useRef(true);
@@ -82,6 +90,7 @@ export default function VoicePanel() {
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const activeWsRef = useRef<WebSocket | null>(null);
 
   const setStateSafe = useCallback((s: typeof state) => {
     stateRef.current = s;
@@ -133,6 +142,9 @@ export default function VoicePanel() {
       clearInterval(iv);
       audioEngineRef.current?.destroy();
       cleanupRecording();
+      if (activeWsRef.current) {
+        activeWsRef.current.close();
+      }
     };
   }, []);
 
@@ -192,6 +204,71 @@ export default function VoicePanel() {
     }
   }, [activeVoice, playAudioResponse]);
 
+  // WebSocket-based streaming pipeline integration
+  const sendStreamingMessage = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    await ensureAudioContext();
+    const engine = getEngine();
+    engine.stop(); // Clear any ongoing audio and stream queues
+
+    // Add user message to history
+    const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", text };
+    setMessages((prev) => [...prev, userMsg]);
+
+    // Create placeholder message for agent streaming text
+    const agentMsgId = (Date.now() + 1).toString();
+    setMessages((prev) => [...prev, { id: agentMsgId, role: "agent", text: "" }]);
+
+    setStateSafe("thinking");
+
+    // Connect WebSocket
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/api/voice/chat-stream`;
+    const ws = new WebSocket(wsUrl);
+    activeWsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "text", text, voice: activeVoice }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "status") {
+          setStateSafe(msg.status);
+        } else if (msg.type === "text_delta") {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === agentMsgId ? { ...m, text: m.text + msg.delta } : m))
+          );
+        } else if (msg.type === "audio_chunk") {
+          engine.enqueueStreamChunk(msg.audio);
+        } else if (msg.type === "done") {
+          setStateSafe("idle");
+          ws.close();
+        } else if (msg.type === "error") {
+          showToast(msg.message, "error");
+          setStateSafe("idle");
+          ws.close();
+        }
+      } catch (e) {
+        console.error("[voice-stream] parse error:", e);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error("[voice-stream] error:", err);
+      showToast("Voice stream connection error", "error");
+      setStateSafe("idle");
+    };
+
+    ws.onclose = () => {
+      activeWsRef.current = null;
+      const cur = stateRef.current;
+      setStateSafe(cur === "thinking" || cur === "speaking" ? "idle" : cur);
+    };
+
+  }, [activeVoice, getEngine, setStateSafe, ensureAudioContext]);
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -235,7 +312,6 @@ export default function VoicePanel() {
     }
 
     const blob = new Blob(chunks, { type: chunks[0].type });
-
     setStateSafe("thinking");
 
     try {
@@ -275,43 +351,14 @@ export default function VoicePanel() {
       }
 
       setInterimText("");
-      const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", text };
-      setMessages((prev) => [...prev, userMsg]);
-
-      const llmR = await fetch("/api/voice/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice: activeVoice }),
-      });
-      if (!mountedRef.current) return;
-      if (!llmR.ok) {
-        showToast(`LLM request failed (${llmR.status})`, "error");
-        setStateSafe("idle");
-        setInterimText("");
-        return;
-      }
-      const llmD = await llmR.json();
-      if (llmD.error) {
-        showToast(llmD.error, "error");
-        setStateSafe("idle");
-        setInterimText("");
-        return;
-      }
-
-      const replyText = llmD.reply !== undefined ? (llmD.reply || "...") : (llmD.text || "...");
-      const agentMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: "agent", text: replyText };
-      setMessages((prev) => [...prev, agentMsg]);
-
-      await playAudioResponse(llmD);
-      setInterimText("");
-      setStateSafe("idle");
+      await sendStreamingMessage(text);
     } catch (err: any) {
       if (!mountedRef.current) return;
       showToast(`Voice processing failed: ${err.message}`, "error");
       setStateSafe("idle");
       setInterimText("");
     }
-  }, [activeVoice, playAudioResponse, setStateSafe]);
+  }, [sendStreamingMessage, setStateSafe]);
 
   const toggleMic = useCallback(async () => {
     await ensureAudioContext();
@@ -351,42 +398,8 @@ export default function VoicePanel() {
     const txt = textInput.trim();
     if (!txt) return;
     setTextInput("");
-
-    await ensureAudioContext();
-
-    if (!mountedRef.current) return;
-    const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", text: txt };
-    setMessages((prev) => [...prev, userMsg]);
-    setStateSafe("thinking");
-
-    try {
-      const r = await fetch("/api/voice/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: txt, voice: activeVoice }),
-      });
-      if (!mountedRef.current) return;
-      const d = await r.json();
-      if (d.error) {
-        showToast(d.error, "error");
-        setStateSafe("idle");
-        setInterimText("");
-        return;
-      }
-      const replyText = d.reply || d.text || txt;
-      const agentMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: "agent", text: replyText };
-      setMessages((prev) => [...prev, agentMsg]);
-
-      await playAudioResponse(d);
-      setInterimText("");
-      setStateSafe("idle");
-    } catch (err: any) {
-      if (!mountedRef.current) return;
-      showToast(err.message || "Failed to get response", "error");
-      setStateSafe("idle");
-      setInterimText("");
-    }
-  }, [textInput, activeVoice, playAudioResponse, setStateSafe, ensureAudioContext]);
+    await sendStreamingMessage(txt);
+  }, [textInput, sendStreamingMessage]);
 
   const handleTextKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -414,10 +427,67 @@ export default function VoicePanel() {
     showToast("Test tone played at 440Hz", "success");
   }, [ensureAudioContext, getEngine]);
 
+  const handleCloneSubmit = async () => {
+    if (!cloneName.trim() || !cloneTranscript.trim() || !cloneAudioFile) return;
+    setIsCloning(true);
+    showToast("Reading audio file...", "info");
+
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64Data = result.split(",")[1];
+          resolve(base64Data);
+        };
+        reader.onerror = (err) => reject(err);
+      });
+      reader.readAsDataURL(cloneAudioFile);
+      const audioBase64 = await base64Promise;
+
+      showToast("Uploading and cloning voice (takes 10-30s)...", "info");
+
+      const r = await fetch("/api/voice/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: cloneName.trim(),
+          transcript: cloneTranscript.trim(),
+          audio: audioBase64
+        })
+      });
+
+      if (!r.ok) {
+        const errData = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        throw new Error(errData.error || r.statusText);
+      }
+
+      const d = await r.json();
+      showToast(`Voice cloned successfully as ${d.name}!`, "success");
+      
+      setActiveVoice(d.voice_id);
+      localStorage.setItem("voiceAgentActiveVoice", d.voice_id);
+
+      const voicesR = await fetch("/api/voice/voices");
+      const voicesD = await voicesR.json();
+      setVoices(voicesD.voices || []);
+
+      setIsCloneModalOpen(false);
+      setCloneName("");
+      setCloneTranscript("");
+      setCloneAudioFile(null);
+    } catch (err: any) {
+      showToast(`Voice cloning failed: ${err.message}`, "error");
+    } finally {
+      setIsCloning(false);
+    }
+  };
+
   const groupVoices = (vs: VoicePreset[]) => {
     const groups: Record<string, VoicePreset[]> = {};
     for (const v of vs) {
-      const g = v.gender === "male" ? "Male" : "Female";
+      const type = v.type;
+      const g = type === "clone" ? "Custom Clones" : (v.gender === "male" ? "Male" : "Female");
       if (!groups[g]) groups[g] = [];
       groups[g].push(v);
     }
@@ -474,7 +544,7 @@ export default function VoicePanel() {
                 </svg>
               )}
             </button>
-            {state === "speaking" && (
+            {(state === "speaking" || state === "thinking") && (
               <button
                 className="btn btn-danger"
                 onClick={stopSpeaking}
@@ -607,10 +677,10 @@ export default function VoicePanel() {
                     <span style={{ color: "var(--mute)", lineHeight: 1.4 }}>{m.text}</span>
                   ) : (
                     <div style={{ lineHeight: 1.4, overflow: "hidden", color: "var(--text)", flex: 1 }}>
-                      <Markdown content={m.text} />
+                      <Markdown content={m.text || "Thinking…"} />
                     </div>
                   )}
-                  {m.role === "agent" && (
+                  {m.role === "agent" && m.text && (
                     <button
                       className="btn"
                       onClick={() => playSpecificText(m.text)}
@@ -641,6 +711,15 @@ export default function VoicePanel() {
                 </optgroup>
               ))}
             </select>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setIsCloneModalOpen(true)}
+              style={{ fontSize: 11, padding: "4px 8px", height: 24, display: "flex", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+              title="Clone a new voice"
+            >
+              <Plus size={10} />
+              Clone
+            </button>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <button
                 className="btn"
@@ -668,6 +747,101 @@ export default function VoicePanel() {
           </div>
         </div>
       </div>
+
+      {/* Voice Cloning Modal */}
+      {isCloneModalOpen && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          padding: 16, pointerEvents: "auto"
+        }}>
+          <div style={{
+            background: "rgba(20,20,22,0.92)", backdropFilter: "blur(20px)",
+            border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12,
+            width: "100%", maxWidth: 400, padding: 20,
+            display: "flex", flexDirection: "column", gap: 16,
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>Clone Voice</h3>
+              <button
+                onClick={() => {
+                  setIsCloneModalOpen(false);
+                  setCloneName("");
+                  setCloneTranscript("");
+                  setCloneAudioFile(null);
+                }}
+                style={{ background: "transparent", border: "none", color: "var(--mute)", cursor: "pointer", display: "flex", alignItems: "center" }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div style={{ fontSize: 11, color: "var(--mute)", lineHeight: 1.5, background: "rgba(255,255,255,0.02)", padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.04)" }}>
+              🔒 <strong>Local GPU Required:</strong> Voice cloning uses F5-TTS locally. Upload a 10-30s clean WAV/MP3 clip of the speaker and provide its exact transcription.
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, color: "var(--mute)", fontWeight: 500 }}>Voice Name</label>
+              <input
+                type="text"
+                className="input"
+                placeholder="e.g. My Voice"
+                value={cloneName}
+                onChange={(e) => setCloneName(e.target.value)}
+                style={{ fontSize: 12, padding: "6px 10px", background: "rgba(0,0,0,0.3)" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, color: "var(--mute)", fontWeight: 500 }}>Reference Clip Transcript</label>
+              <textarea
+                className="input"
+                placeholder="Type the exact text spoken in the audio clip..."
+                value={cloneTranscript}
+                onChange={(e) => setCloneTranscript(e.target.value)}
+                rows={3}
+                style={{ fontSize: 12, padding: "6px 10px", background: "rgba(0,0,0,0.3)", resize: "none" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, color: "var(--mute)", fontWeight: 500 }}>Reference Audio File (WAV/MP3)</label>
+              <input
+                type="file"
+                accept="audio/wav,audio/mpeg,audio/mp3"
+                onChange={(e) => setCloneAudioFile(e.target.files?.[0] || null)}
+                style={{ fontSize: 11, color: "var(--text)", background: "transparent", border: "none" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 8, justifyContent: "flex-end" }}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setIsCloneModalOpen(false);
+                  setCloneName("");
+                  setCloneTranscript("");
+                  setCloneAudioFile(null);
+                }}
+                style={{ fontSize: 12, padding: "6px 12px" }}
+                disabled={isCloning}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleCloneSubmit}
+                style={{ fontSize: 12, padding: "6px 16px" }}
+                disabled={isCloning || !cloneName.trim() || !cloneTranscript.trim() || !cloneAudioFile}
+              >
+                {isCloning ? "Cloning..." : "Start Cloning"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

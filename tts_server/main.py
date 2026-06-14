@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local TTS server with Kokoro (CPU) + Piper (CPU, multi-voice)."""
+"""Local TTS server with Kokoro (CPU) + Piper (CPU, multi-voice) + F5-TTS (Voice Cloning) + Audio pipeline."""
 
 import asyncio
 import base64
@@ -11,28 +11,40 @@ import struct
 import time
 import wave
 import importlib.util
+import shutil
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Pipeline and Preprocessor imports
+from audio_pipeline import process_audio
+from text_preprocessor import preprocess_for_tts
+from cache import TTSCache
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tts-server")
 
 from contextlib import asynccontextmanager
 
+# In-memory cache
+tts_cache = TTSCache()
+
+# Concurrency semaphore
+TTS_SEMAPHORE = asyncio.Semaphore(2)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_tts()
     init_piper_voices()
+    init_cloned_voices()
     voice_count = len(VOICES)
     logger.info(f"TTS server ready with {voice_count} voices, active: {ACTIVE_VOICE}")
     yield
 
 
-app = FastAPI(title="Custom-PI TTS Server", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Custom-PI TTS Server", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -92,8 +104,9 @@ PIPER_VOICES = {
 
 PIPER_DIR = os.path.expanduser("~/.pi/tts/piper")
 
-# Audio boost to make TTS louder and fuller (+6dB = 2x perceived loudness)
+# Audio boost is still kept as a reference, but we use process_audio for main output
 VOLUME_GAIN = 1.2
+SAMPLE_RATE = 24000
 
 # ── Kokoro engine ─────────────────────────────────────────────────
 _tts_pipeline = None
@@ -130,13 +143,51 @@ def get_tts():
     return _tts_pipeline
 
 
+# ── F5-TTS engine ─────────────────────────────────────────────────
+_f5_engine = None
+
+def get_f5():
+    global _f5_engine
+    if _f5_engine is None:
+        from f5_engine import F5TTSEngine
+        _f5_engine = F5TTSEngine()
+    return _f5_engine
+
+
+# ── Cloned voices initialization ──────────────────────────────────
+def init_cloned_voices():
+    clones_dir = os.path.expanduser("~/.pi/tts/clones")
+    if not os.path.exists(clones_dir):
+        return
+    for item in os.listdir(clones_dir):
+        item_path = os.path.join(clones_dir, item)
+        if os.path.isdir(item_path) and item.startswith("clone_"):
+            meta_path = os.path.join(item_path, "metadata.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r") as f:
+                        meta = json.load(f)
+                    name = meta.get("name", item)
+                    VOICES[item] = {
+                        "name": name,
+                        "gender": "custom",
+                        "desc": meta.get("desc", f"Cloned voice '{name}'"),
+                        "type": "clone",
+                        "id": item,
+                        "ref_audio": os.path.join(item_path, "reference.wav"),
+                        "ref_text": meta.get("transcript", "")
+                    }
+                    logger.info(f"Registered cloned voice: {name} (id: {item})")
+                except Exception as e:
+                    logger.error(f"Error loading clone voice meta at {meta_path}: {e}")
+
+
 # ── Piper engine ──────────────────────────────────────────────────
 _piper_installed = False
 _piper_voices: dict[str, dict] = {}
 PIPER_REPO = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
 def _piper_download_url(model_name: str) -> tuple[str, str]:
-    """Build download URLs for a Piper voice model."""
     parts = model_name.split("-")
     lang_code = parts[0]
     quality = parts[-1]
@@ -148,7 +199,6 @@ def _piper_download_url(model_name: str) -> tuple[str, str]:
     return onnx_url, json_url
 
 def ensure_piper_voice(vid: str) -> None:
-    """Download Piper voice model if not already present."""
     if vid in _piper_voices and os.path.exists(_piper_voices[vid]["model_path"]):
         return
     vinfo = PIPER_VOICES[vid]
@@ -184,7 +234,6 @@ def init_piper_voices():
     if importlib.util.find_spec("piper") is None:
         logger.info("piper-tts not installed, skipping Piper voices")
         return
-    # Register all Piper voices (mark available if already downloaded)
     for vid, vinfo in PIPER_VOICES.items():
         model_name = vinfo["model"]
         model_path = os.path.join(PIPER_DIR, f"{model_name}.onnx")
@@ -198,15 +247,14 @@ def init_piper_voices():
             logger.info(f"Piper voice registered (needs download): {vinfo['name']} ({model_name})")
     _piper_installed = True
 
-def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int]:
-    """Synthesize with Piper. Returns (WAV bytes, sample_rate)."""
+def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int, int]:
+    """Synthesize with Piper. Returns (WAV bytes, sample_rate, peak)."""
     from piper import PiperVoice
     from piper.config import SynthesisConfig
     vi = _piper_voices[voice_id]
     voice = PiperVoice.load(vi["model_path"], config_path=vi["config_path"])
     sample_rate = voice.config.sample_rate or 22050
 
-    # Use natural synthesis parameters
     syn_voice = vi.get("config", {})
     config = SynthesisConfig(
         length_scale=syn_voice.get("length_scale", 0.95),
@@ -216,25 +264,19 @@ def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int]:
     )
     audio = voice.synthesize(text.strip(), syn_config=config)
 
-    # synthesize() returns Iterable[AudioChunk], extract float arrays
     chunks = [c.audio_float_array for c in audio]
     if not chunks:
         raise RuntimeError("Piper produced no audio")
-    logger.info(f"Piper: {len(chunks)} chunks generated")
+    
     audio_float = np.concatenate(chunks).astype(np.float32)
-    pre_gain_peak = float(np.max(np.abs(audio_float)))
-    logger.info(f"Piper: pre-gain peak={pre_gain_peak:.6f}, len={len(audio_float)}, dtype={audio_float.dtype}")
-
-    # Apply volume gain (typical ~1.8x, still in [-1,1] float space)
-    audio_float = audio_float * VOLUME_GAIN
-    audio_float = np.clip(audio_float, -1.0, 1.0)
-    post_gain_peak = float(np.max(np.abs(audio_float)))
-    logger.info(f"Piper: post-gain peak={post_gain_peak:.6f}")
+    
+    # Process audio with Pedalboard and LUFS normalizer
+    audio_float = process_audio(audio_float, sample_rate)
 
     # Scale to int16 range
     audio_int16 = (audio_float * 32767).astype(np.int16)
-    peak = int(np.max(np.abs(audio_int16)))
-    logger.info(f"Piper: int16 peak={peak}")
+    peak = int(np.max(np.abs(audio_int16))) if len(audio_int16) > 0 else 0
+    
     # Write WAV
     buf = io.BytesIO()
     with wave.open(buf, 'wb') as wf:
@@ -246,7 +288,6 @@ def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int]:
 
 
 # ── STT (Whisper) ─────────────────────────────────────────────────
-SAMPLE_RATE = 24000
 _stt_model = None
 
 def get_stt():
@@ -280,6 +321,14 @@ class TTSRequest(BaseModel):
     voice: str = ""
     stream: bool = False
 
+class CloneRequest(BaseModel):
+    name: str
+    transcript: str
+    audio_base64: str  # Base64 encoded WAV reference
+
+class SelectVoiceRequest(BaseModel):
+    voice_id: str
+
 
 def apply_gain(pcm: np.ndarray, gain: float = VOLUME_GAIN) -> np.ndarray:
     if gain == 1.0:
@@ -291,12 +340,28 @@ def apply_gain(pcm: np.ndarray, gain: float = VOLUME_GAIN) -> np.ndarray:
     return pcm
 
 
+def _wav_from_pcm(pcm: np.ndarray, sr: int) -> bytes:
+    int16 = np.clip(pcm, -1.0, 1.0) * 32767
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(int16.astype(np.int16).tobytes())
+    return buf.getvalue()
+
+
 @app.get("/health")
 async def health():
+    f5 = get_f5()
     return {
         "status": "ok",
-        "tts_loaded": _tts_pipeline is not None,
-        "stt_loaded": _stt_model is not None,
+        "engines": {
+            "kokoro": {"loaded": _tts_pipeline is not None},
+            "f5": {"loaded": f5.available, "device": f5.device},
+            "piper": {"loaded": _piper_installed, "voices": list(_piper_voices.keys())},
+            "whisper": {"loaded": _stt_model is not None},
+        },
         "voices": list(VOICES.keys()),
         "active": ACTIVE_VOICE,
         "voice_count": len(VOICES),
@@ -345,10 +410,6 @@ async def list_voices():
     return {"voices": [{"id": k, **v} for k, v in VOICES.items()], "active": ACTIVE_VOICE}
 
 
-class SelectVoiceRequest(BaseModel):
-    voice_id: str
-
-
 @app.post("/v1/voices/select")
 async def select_voice(req: SelectVoiceRequest):
     global ACTIVE_VOICE
@@ -359,15 +420,168 @@ async def select_voice(req: SelectVoiceRequest):
     return {"active": ACTIVE_VOICE}
 
 
-def _wav_from_pcm(pcm: np.ndarray, sr: int) -> bytes:
-    int16 = np.clip(pcm, -1.0, 1.0) * 32767
-    buf = io.BytesIO()
-    with wave.open(buf, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(int16.astype(np.int16).tobytes())
-    return buf.getvalue()
+@app.post("/v1/voices/clone")
+async def clone_voice(req: CloneRequest):
+    try:
+        import uuid
+        clone_id = f"clone_{uuid.uuid4().hex[:8]}"
+        clones_dir = os.path.expanduser("~/.pi/tts/clones")
+        clone_dir = os.path.join(clones_dir, clone_id)
+        os.makedirs(clone_dir, exist_ok=True)
+        
+        # Decode base64 audio reference
+        audio_data = base64.b64decode(req.audio_base64)
+        ref_path = os.path.join(clone_dir, "reference.wav")
+        with open(ref_path, "wb") as f:
+            f.write(audio_data)
+            
+        # Write metadata
+        meta = {
+            "name": req.name,
+            "transcript": req.transcript,
+            "created_at": int(time.time()),
+            "engine": "f5-tts"
+        }
+        with open(os.path.join(clone_dir, "metadata.json"), "w") as f:
+            json.dump(meta, f)
+            
+        # Register voice
+        VOICES[clone_id] = {
+            "name": req.name,
+            "gender": "custom",
+            "desc": f"Cloned voice '{req.name}'",
+            "type": "clone",
+            "id": clone_id,
+            "ref_audio": ref_path,
+            "ref_text": req.transcript
+        }
+        logger.info(f"Registered cloned voice: {req.name} (id: {clone_id})")
+        return {"voice_id": clone_id, "name": req.name}
+    except Exception as e:
+        logger.error(f"Failed to clone voice: {e}")
+        raise HTTPException(500, f"Failed to clone voice: {e}")
+
+
+@app.delete("/v1/voices/clone/{voice_id}")
+async def delete_clone(voice_id: str):
+    if voice_id not in VOICES or VOICES[voice_id]["type"] != "clone":
+        raise HTTPException(404, f"Cloned voice '{voice_id}' not found")
+    try:
+        clones_dir = os.path.expanduser("~/.pi/tts/clones")
+        clone_dir = os.path.join(clones_dir, voice_id)
+        if os.path.exists(clone_dir):
+            shutil.rmtree(clone_dir)
+        del VOICES[voice_id]
+        logger.info(f"Deleted cloned voice: {voice_id}")
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Failed to delete voice {voice_id}: {e}")
+        raise HTTPException(500, f"Failed to delete voice: {e}")
+
+
+# ── Main Synthesis Flow with Cache and Fallbacks ───────────────────
+async def do_synthesize(text: str, voice: str) -> tuple[bytes, int, int]:
+    # 1. Text Preprocessing
+    preprocessed_text = preprocess_for_tts(text)
+    if not preprocessed_text.strip():
+        # Fallback for empty/near-empty text
+        silence = np.zeros(int(SAMPLE_RATE * 0.1), dtype=np.float32)
+        return _wav_from_pcm(silence, SAMPLE_RATE), SAMPLE_RATE, 0
+
+    # 2. Caching layer check
+    cached = tts_cache.get(preprocessed_text, voice)
+    if cached:
+        return cached
+
+    # Resolve voice info
+    vinfo = VOICES.get(voice)
+    if not vinfo:
+        logger.warning(f"Voice '{voice}' not found. Falling back to default 'af_bella'")
+        voice = "af_bella"
+        vinfo = VOICES.get(voice)
+        if not vinfo:
+            raise RuntimeError("Default voice not initialized")
+
+    # ── Engine Chain with Fallback ──
+    
+    # 1. Custom Cloned Voice (F5-TTS)
+    if vinfo["type"] == "clone":
+        try:
+            f5 = get_f5()
+            ref_audio = vinfo["ref_audio"]
+            ref_text = vinfo["ref_text"]
+            
+            raw_audio, sr = f5.synthesize(preprocessed_text, ref_audio_path=ref_audio, ref_text=ref_text)
+            processed_audio = process_audio(raw_audio, sr)
+            
+            wav_bytes = _wav_from_pcm(processed_audio, sr)
+            samples = np.frombuffer(wav_bytes[44:], dtype=np.int16)
+            peak_int = int(np.max(np.abs(samples))) if len(samples) > 0 else 0
+            
+            tts_cache.set(preprocessed_text, voice, wav_bytes, sr, peak_int)
+            return wav_bytes, sr, peak_int
+        except Exception as e:
+            logger.error(f"F5-TTS clone synthesis failed: {e}. Falling back to default Kokoro voice.")
+            # Fall back to default Kokoro voice
+            voice = "af_bella"
+            vinfo = VOICES[voice]
+
+    # 2. Piper voice
+    if vinfo["type"] == "piper":
+        try:
+            if not _piper_installed:
+                raise RuntimeError("Piper TTS not installed")
+            ensure_piper_voice(voice)
+            wav_bytes, sr, peak = synthesize_piper(preprocessed_text, voice)
+            
+            tts_cache.set(preprocessed_text, voice, wav_bytes, sr, peak)
+            return wav_bytes, sr, peak
+        except Exception as e:
+            logger.error(f"Piper synthesis failed: {e}. Falling back to default Kokoro voice.")
+            voice = "af_bella"
+            vinfo = VOICES[voice]
+
+    # 3. Kokoro voice (or Kokoro fallback)
+    if vinfo["type"] == "kokoro":
+        try:
+            pipeline = get_tts()
+            if pipeline is None:
+                raise RuntimeError("Kokoro pipeline not loaded")
+                
+            gen = pipeline(preprocessed_text, voice=voice, speed=1.0)
+            all_audio = []
+            for _, _, audio in gen:
+                all_audio.append(audio)
+            
+            if not all_audio:
+                raise RuntimeError("Kokoro generated no audio chunks")
+                
+            combined = np.concatenate(all_audio)
+            processed_audio = process_audio(combined, SAMPLE_RATE)
+            
+            wav_bytes = _wav_from_pcm(processed_audio, SAMPLE_RATE)
+            samples = np.frombuffer(wav_bytes[44:], dtype=np.int16)
+            peak_int = int(np.max(np.abs(samples))) if len(samples) > 0 else 0
+            
+            tts_cache.set(preprocessed_text, voice, wav_bytes, SAMPLE_RATE, peak_int)
+            return wav_bytes, SAMPLE_RATE, peak_int
+        except Exception as e:
+            logger.error(f"Kokoro synthesis failed: {e}.")
+            # Fall back to Piper if installed
+            if _piper_installed:
+                try:
+                    logger.info("Falling back to Piper (piper_indian)")
+                    ensure_piper_voice("piper_indian")
+                    wav_bytes, sr, peak = synthesize_piper(preprocessed_text, "piper_indian")
+                    return wav_bytes, sr, peak
+                except Exception as e2:
+                    logger.error(f"Piper fallback also failed: {e2}")
+
+    # Ultimate silence fallback
+    logger.critical("All TTS engines failed. Returning silence fallback.")
+    silence = np.zeros(int(SAMPLE_RATE * 0.1), dtype=np.float32)
+    wav_bytes = _wav_from_pcm(silence, SAMPLE_RATE)
+    return wav_bytes, SAMPLE_RATE, 0
 
 
 @app.post("/v1/tts")
@@ -376,77 +590,18 @@ async def synthesize(req: TTSRequest):
     if voice not in VOICES:
         voice = "af_bella"
 
-    vinfo = VOICES[voice]
-
-    # ── Piper engine path ──
-    if vinfo["type"] == "piper":
-        if not _piper_installed:
-            raise HTTPException(503, "Piper TTS engine not available")
+    # Use semaphore to limit concurrency and avoid GPU OOM
+    async with TTS_SEMAPHORE:
         try:
-            ensure_piper_voice(voice)
-            wav_bytes, sr, peak = synthesize_piper(req.text, voice)
-            logger.info(f"Piper TTS: peak={peak}, {len(wav_bytes)} bytes, {sr}Hz")
+            wav_bytes, sr, peak = await do_synthesize(req.text, voice)
             return {
                 "audio": base64.b64encode(wav_bytes).decode(),
                 "sampleRate": sr,
-                "peak": peak,
+                "peak": peak
             }
         except Exception as e:
-            logger.error(f"Piper TTS error: {e}")
-            raise HTTPException(500, f"Piper TTS failed: {e}")
-
-    # ── Kokoro engine path ──
-    pipeline = get_tts()
-    if pipeline is None:
-        raise HTTPException(503, "TTS engine not available")
-
-    try:
-        gen = pipeline(req.text, voice=voice, speed=1.0)
-        all_audio = []
-        for _, _, audio in gen:
-            all_audio.append(audio)
-    except RuntimeError as e:
-        if "out of memory" in str(e).lower():
-            logger.error(f"CUDA OOM during Kokoro inference: {e}")
-            raise HTTPException(500, "TTS GPU out of memory. Set TTS_DEVICE=cpu in environment and restart.")
-        raise HTTPException(500, f"Kokoro inference error: {e}")
-    except Exception as e:
-        logger.error(f"Kokoro inference error: {e}")
-        raise HTTPException(500, f"Kokoro inference error: {e}")
-    if not all_audio:
-        logger.warning(f"No audio generated for text: '{req.text}'. Returning 0.1s silence.")
-        silence = np.zeros(int(SAMPLE_RATE * 0.1), dtype=np.float32)
-        wav_bytes = _wav_from_pcm(silence, SAMPLE_RATE)
-        return {"audio": base64.b64encode(wav_bytes).decode(), "sampleRate": SAMPLE_RATE, "peak": 0}
-
-    combined = np.concatenate(all_audio)
-    logger.info(f"Kokoro raw: dtype={combined.dtype}, shape={combined.shape}, "
-                f"min={float(combined.min()):.6f}, max={float(combined.max()):.6f}, "
-                f"mean={float(combined.mean()):.6f}, nan={bool(np.any(np.isnan(combined)))}, "
-                f"inf={bool(np.any(np.isinf(combined)))}")
-
-    # Apply gain for louder, richer audio
-    combined = apply_gain(combined)
-    combined = np.clip(combined, -0.99, 0.99)
-
-    wav_bytes = _wav_from_pcm(combined, SAMPLE_RATE)
-    samples = np.frombuffer(wav_bytes[44:], dtype=np.int16)
-    peak_int = int(np.max(np.abs(samples))) if len(samples) > 0 else 0
-    logger.info(f"Kokoro TTS: peak={peak_int}, {len(wav_bytes)} bytes, {SAMPLE_RATE}Hz, "
-                f"nonzero={int(np.count_nonzero(samples))}/{len(samples)}")
-
-    # Fallback: if generated audio is silent, generate a test tone
-    if peak_int < 1000:
-        logger.warning("Kokoro produced near-silent audio! Generating 440Hz test tone instead.")
-        sr = SAMPLE_RATE
-        duration = 2.0
-        t = np.linspace(0, duration, int(sr * duration), endpoint=False, dtype=np.float32)
-        tone = np.sin(2 * np.pi * 440 * t) * 0.8
-        wav_bytes = _wav_from_pcm(tone, sr)
-        peak_int = 32767
-        logger.info(f"Kokoro fallback: generated test tone, peak={peak_int}")
-
-    return {"audio": base64.b64encode(wav_bytes).decode(), "sampleRate": SAMPLE_RATE, "peak": peak_int}
+            logger.error(f"Synthesize endpoint error: {e}")
+            raise HTTPException(500, f"Synthesis failed: {e}")
 
 
 @app.websocket("/v1/tts/stream")
@@ -472,14 +627,18 @@ async def tts_stream(ws: WebSocket):
             await ws.close()
             return
 
+        preprocessed = preprocess_for_tts(text)
         await ws.send_json({"type": "start", "sampleRate": SAMPLE_RATE, "voice": voice})
 
-        gen = pipeline(text, voice=voice, speed=1.0)
-        for gs, ps, audio in gen:
-            chunks = audio_to_pcm16_chunks(audio, 100)
-            for chunk in chunks:
-                await ws.send_bytes(struct.pack(">I", len(chunk)) + chunk)
-                await asyncio.sleep(0)
+        async with TTS_SEMAPHORE:
+            gen = pipeline(preprocessed, voice=voice, speed=1.0)
+            for gs, ps, audio in gen:
+                # Apply post-processing pipeline to streaming chunks
+                processed_chunk = process_audio(audio, SAMPLE_RATE)
+                chunks = audio_to_pcm16_chunks(processed_chunk, 100)
+                for chunk in chunks:
+                    await ws.send_bytes(struct.pack(">I", len(chunk)) + chunk)
+                    await asyncio.sleep(0)
 
         await ws.send_json({"type": "done"})
     except WebSocketDisconnect:
@@ -548,13 +707,17 @@ async def voice_chat(ws: WebSocket):
 
                 await ws.send_json({"type": "agent_status", "status": "speaking"})
 
-                gen = pipeline(full_response, voice=voice, speed=1.0)
-                await ws.send_json({"type": "text_start", "text": full_response})
-                for gs, ps, audio in gen:
-                    chunks = audio_to_pcm16_chunks(audio, 100)
-                    for chunk in chunks:
-                        await ws.send_bytes(struct.pack(">I", len(chunk)) + chunk)
-                        await asyncio.sleep(0)
+                preprocessed = preprocess_for_tts(full_response)
+                
+                async with TTS_SEMAPHORE:
+                    gen = pipeline(preprocessed, voice=voice, speed=1.0)
+                    await ws.send_json({"type": "text_start", "text": full_response})
+                    for gs, ps, audio in gen:
+                        processed_chunk = process_audio(audio, SAMPLE_RATE)
+                        chunks = audio_to_pcm16_chunks(processed_chunk, 100)
+                        for chunk in chunks:
+                            await ws.send_bytes(struct.pack(">I", len(chunk)) + chunk)
+                            await asyncio.sleep(0)
 
                 await ws.send_json({"type": "done"})
 
