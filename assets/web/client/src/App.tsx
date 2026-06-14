@@ -160,6 +160,7 @@ const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { 
       <button className="hamburger" onClick={onMenuClick}><AsciiMenu /></button>
       <span className="topbar-title">{labels[activeView] || activeView}</span>
       <div className="topbar-status">
+        <div id="topbar-actions" style={{ display: "flex", gap: "12px", alignItems: "center", marginRight: "12px" }}></div>
         <div className={`status-dot ${wsConnected ? "pulse" : ""}`} style={{ background: wsConnected ? "var(--success)" : "var(--danger)" }} />
         <span>{wsConnected ? "Connected" : "Disconnected"}</span>
       </div>

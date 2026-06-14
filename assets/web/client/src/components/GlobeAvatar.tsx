@@ -4,36 +4,55 @@ import * as THREE from "three";
 
 type GlobeState = "idle" | "listening" | "thinking" | "speaking";
 
-const STAR_COUNT = 10000;
-const BH_RADIUS = 1.2;
+const STAR_COUNT = 8000;
+const GLOW_COUNT = 2000;
+const DISK_COUNT = 12000;
+const BH_RADIUS = 0.8;
+const DISK_INNER = 0.9;
+const DISK_OUTER = 3.5;
 
-// ── Soft glow sprite ──────────────────────────────────────────────
-function makeGlowSprite(inner = 0, falloff = 0.5): THREE.CanvasTexture {
+// ── Anime Style Sprites (Harder edges, stylized) ──────────────────────
+function makeAnimeSprite(inner = 0, colorStops: { stop: number; color: string }[]): THREE.CanvasTexture {
   const c = document.createElement("canvas");
-  c.width = 64; c.height = 64;
+  c.width = 256; c.height = 256;
   const ctx = c.getContext("2d")!;
-  const g = ctx.createRadialGradient(32, 32, inner * 32, 32, 32, 32);
-  g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(falloff * 0.3, "rgba(255,220,170,0.85)");
-  g.addColorStop(falloff * 0.6, "rgba(255,150,80,0.3)");
-  g.addColorStop(falloff * 0.85, "rgba(200,80,40,0.08)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
+  const g = ctx.createRadialGradient(128, 128, inner * 128, 128, 128, 128);
+  for (const { stop, color } of colorStops) {
+    g.addColorStop(stop, color);
+  }
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
+  ctx.fillRect(0, 0, 256, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.needsUpdate = true;
   return tex;
 }
 
-const starSprite = makeGlowSprite(0, 0.45);
-const glowSprite = makeGlowSprite(0, 0.6);
-const wideGlow = makeGlowSprite(0, 0.8);
+const starSprite = makeAnimeSprite(0, [
+  { stop: 0, color: "rgba(255,255,255,1)" },
+  { stop: 0.15, color: "rgba(255,255,255,0.9)" }, // Harder core
+  { stop: 0.3, color: "rgba(255,100,200,0.5)" },  // Anime pink/magenta halo
+  { stop: 1, color: "rgba(0,0,0,0)" }
+]);
+
+const glowSprite = makeAnimeSprite(0, [
+  { stop: 0, color: "rgba(200,255,255,0.8)" },
+  { stop: 0.2, color: "rgba(100,200,255,0.5)" },
+  { stop: 0.5, color: "rgba(255,100,255,0.1)" },
+  { stop: 1, color: "rgba(0,0,0,0)" }
+]);
+
+const wideGlow = makeAnimeSprite(0, [
+  { stop: 0, color: "rgba(255,100,255,0.4)" },
+  { stop: 0.4, color: "rgba(100,200,255,0.15)" },
+  { stop: 0.8, color: "rgba(50,50,200,0.05)" },
+  { stop: 1, color: "rgba(0,0,0,0)" }
+]);
 
 // ── Position helpers ──────────────────────────────────────────────
 function randomSpherePos(r: number): THREE.Vector3 {
   const theta = Math.random() * Math.PI * 2;
   const phi = Math.acos(2 * Math.random() - 1);
-  const rr = r * (0.25 + Math.random() * 0.75);
+  const rr = r * Math.cbrt(Math.random()); 
   return new THREE.Vector3(
     Math.sin(phi) * Math.cos(theta) * rr,
     Math.sin(phi) * Math.sin(theta) * rr,
@@ -41,48 +60,14 @@ function randomSpherePos(r: number): THREE.Vector3 {
   );
 }
 
-function randomDiskPos(r: number): THREE.Vector3 {
+function randomDiskPos(inner: number, outer: number): THREE.Vector3 {
   const theta = Math.random() * Math.PI * 2;
-  const rr = r * (0.2 + Math.random() * 0.8);
+  const r = inner + Math.pow(Math.random(), 3) * (outer - inner);
+  const y = (Math.random() - 0.5) * 0.05 * (r - inner + 0.1); // Flatter disk for anime style
   return new THREE.Vector3(
-    Math.cos(theta) * rr,
-    (Math.random() - 0.5) * 0.1 * rr,
-    Math.sin(theta) * rr,
-  );
-}
-
-function starHueColor(p: THREE.Vector3, r: number): THREE.Color {
-  const angle = Math.atan2(p.z, p.x);
-  const dist = r / (BH_RADIUS * 1.1);
-  const t = (dist * 0.25 + angle * 0.05 + 0.5) % 1;
-  const c = new THREE.Color();
-  if (dist < 0.12) c.setHSL(0.07 + dist * 0.35, 0.85, 0.4 + dist * 0.6);
-  else if (t < 0.25) c.setHSL(0.58 - dist * 0.08, 0.6, 0.35 + Math.random() * 0.35);
-  else if (t < 0.5) c.setHSL(0.5 - dist * 0.1, 0.4, 0.3 + Math.random() * 0.4);
-  else if (t < 0.7) c.setHSL(0.07 + Math.random() * 0.04, 0.7, 0.5 + Math.random() * 0.35);
-  else c.setHSL(0.55 + Math.random() * 0.08, 0.3, 0.6 + Math.random() * 0.25);
-  c.multiplyScalar(1.8 + Math.random() * 1.0);
-  return c;
-}
-
-// ── Hover indicator ring ──────────────────────────────────────────
-function HoverRing({ posRef, visible }: { posRef: React.MutableRefObject<THREE.Vector3>; visible: boolean }) {
-  const ref = useRef<THREE.Mesh>(null);
-
-  useFrame(({ clock }) => {
-    if (!ref.current) return;
-    const t = clock.getElapsedTime();
-    ref.current.position.copy(posRef.current);
-    ref.current.lookAt(new THREE.Vector3(0, 0, 0));
-    const mat = ref.current.material as THREE.MeshBasicMaterial;
-    mat.opacity = visible ? 0.3 + 0.15 * Math.sin(t * 3.5) : 0;
-  });
-
-  return (
-    <mesh ref={ref}>
-      <ringGeometry args={[0.08, 0.16, 24]} />
-      <meshBasicMaterial color="#ffaa44" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-    </mesh>
+    Math.cos(theta) * r,
+    y,
+    Math.sin(theta) * r,
   );
 }
 
@@ -101,68 +86,106 @@ function BlackHoleScene({
   const hitRef = useRef<THREE.Mesh>(null);
   const hoverPos = useRef(new THREE.Vector3(0, 10, 0));
   const hoverActive = useRef(false);
-  const [showHover, setShowHover] = useState(false);
 
   const smoothAudio = useRef(0);
   const smoothPulse = useRef(0);
-  const breathePhase = useRef(0);
   const diskAngle = useRef(0);
 
   const { pointer, camera } = useThree();
 
   // Particle data
-  const { starBase, starPos, starSize, starCol, glowBase, glowPos, glowSize, glowCol, diskBase, diskPos, diskSize, diskCol } = useMemo(() => {
-    const Ns = STAR_COUNT, Ng = 4000, Nd = 5000;
+  const { 
+    starBase, starPos, starSize, starCol, starBaseSize, starBaseDist,
+    glowBase, glowPos, glowSize, glowCol, glowBaseSize, glowBaseDist,
+    diskBase, diskPos, diskSize, diskCol, diskBaseSize, diskBaseDist
+  } = useMemo(() => {
+    const Ns = STAR_COUNT, Ng = GLOW_COUNT, Nd = DISK_COUNT;
 
-    const sb = new Float32Array(Ns * 3), sp = new Float32Array(Ns * 3), ss = new Float32Array(Ns), sc = new Float32Array(Ns * 3);
-    const gb = new Float32Array(Ng * 3), gp = new Float32Array(Ng * 3), gs = new Float32Array(Ng), gc = new Float32Array(Ng * 3);
-    const db = new Float32Array(Nd * 3), dp = new Float32Array(Nd * 3), ds = new Float32Array(Nd), dc = new Float32Array(Nd * 3);
+    const sb = new Float32Array(Ns * 3), sp = new Float32Array(Ns * 3), ss = new Float32Array(Ns), sc = new Float32Array(Ns * 3), sbs = new Float32Array(Ns), sbd = new Float32Array(Ns);
+    const gb = new Float32Array(Ng * 3), gp = new Float32Array(Ng * 3), gs = new Float32Array(Ng), gc = new Float32Array(Ng * 3), gbs = new Float32Array(Ng), gbd = new Float32Array(Ng);
+    const db = new Float32Array(Nd * 3), dp = new Float32Array(Nd * 3), ds = new Float32Array(Nd), dc = new Float32Array(Nd * 3), dbs = new Float32Array(Nd), dbd = new Float32Array(Nd);
 
+    // Stars/Nebula (Anime magic particles)
     for (let i = 0; i < Ns; i++) {
-      const p = randomSpherePos(BH_RADIUS);
+      const p = randomSpherePos(DISK_OUTER * 1.5);
       sb[i * 3] = p.x; sb[i * 3 + 1] = p.y; sb[i * 3 + 2] = p.z;
       sp[i * 3] = p.x; sp[i * 3 + 1] = p.y; sp[i * 3 + 2] = p.z;
       const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-      const c = starHueColor(p, r);
+      sbd[i] = r + 0.001;
+      
+      const c = new THREE.Color();
+      if (r < BH_RADIUS) {
+         c.setRGB(0, 0, 0);
+      } else {
+         // Vibrant Anime Pink/Cyan/Purple
+         if (Math.random() > 0.5) {
+           c.setHSL(0.5 + Math.random() * 0.1, 1.0, 0.7); // Cyan
+         } else {
+           c.setHSL(0.8 + Math.random() * 0.1, 1.0, 0.6); // Magenta
+         }
+      }
       sc[i * 3] = c.r; sc[i * 3 + 1] = c.g; sc[i * 3 + 2] = c.b;
-      ss[i] = 0.045 + (1 - r / BH_RADIUS) * 0.085 + Math.random() * 0.04;
+      sbs[i] = 0.05 + Math.random() * 0.08;
+      ss[i] = sbs[i];
     }
 
+    // Glow Layer
     for (let i = 0; i < Ng; i++) {
-      const p = randomSpherePos(BH_RADIUS * 0.45);
+      const p = randomSpherePos(BH_RADIUS * 2.0);
       gb[i * 3] = p.x; gb[i * 3 + 1] = p.y; gb[i * 3 + 2] = p.z;
       gp[i * 3] = p.x; gp[i * 3 + 1] = p.y; gp[i * 3 + 2] = p.z;
-      const c = new THREE.Color("#ff8833").lerp(new THREE.Color("#ffbb55"), Math.random());
-      c.multiplyScalar(2.4);
+      gbd[i] = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) + 0.001;
+
+      const c = new THREE.Color("#00ffff").lerp(new THREE.Color("#ff00ff"), Math.random());
+      c.multiplyScalar(2.0); // Super bright
       gc[i * 3] = c.r; gc[i * 3 + 1] = c.g; gc[i * 3 + 2] = c.b;
-      gs[i] = 0.15 + Math.random() * 0.18;
+      gbs[i] = 0.2 + Math.random() * 0.4;
+      gs[i] = gbs[i];
     }
 
+    // Accretion Disk (Vibrant Anime Rings)
     for (let i = 0; i < Nd; i++) {
-      const p = randomDiskPos(BH_RADIUS);
+      const p = randomDiskPos(DISK_INNER, DISK_OUTER);
       db[i * 3] = p.x; db[i * 3 + 1] = p.y; db[i * 3 + 2] = p.z;
       dp[i * 3] = p.x; dp[i * 3 + 1] = p.y; dp[i * 3 + 2] = p.z;
+      dbd[i] = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) + 0.001;
+
       const r = Math.sqrt(p.x * p.x + p.z * p.z);
-      const heat = 1 - Math.min(1, (r - BH_RADIUS * 0.15) / (BH_RADIUS * 0.85));
-      const c = new THREE.Color().setHSL(0.07 - heat * 0.035, 0.9, 0.45 + heat * 0.5);
-      c.multiplyScalar(2.0 + heat * 1.0);
+      const t = (r - DISK_INNER) / (DISK_OUTER - DISK_INNER);
+      
+      const c = new THREE.Color();
+      if (t < 0.15) {
+        c.setHSL(0.85, 1.0, 0.8); // Hot pink inner edge
+        c.multiplyScalar(3.0);
+      } else if (t < 0.5) {
+        c.setHSL(0.55, 1.0, 0.6); // Electric blue/cyan middle
+        c.multiplyScalar(2.0);
+      } else {
+        c.setHSL(0.7, 1.0, 0.4); // Deep violet outer
+        c.multiplyScalar(1.2);
+      }
+
       dc[i * 3] = c.r; dc[i * 3 + 1] = c.g; dc[i * 3 + 2] = c.b;
-      ds[i] = 0.045 + heat * 0.11 + Math.random() * 0.03;
+      const heat = 1 - Math.min(1, (r - DISK_INNER) / (DISK_OUTER - DISK_INNER));
+      dbs[i] = 0.05 + heat * 0.08 + Math.random() * 0.04;
+      ds[i] = dbs[i];
     }
 
-    return { starBase: sb, starPos: sp, starSize: ss, starCol: sc, glowBase: gb, glowPos: gp, glowSize: gs, glowCol: gc, diskBase: db, diskPos: dp, diskSize: ds, diskCol: dc };
+    return { 
+      starBase: sb, starPos: sp, starSize: ss, starCol: sc, starBaseSize: sbs, starBaseDist: sbd,
+      glowBase: gb, glowPos: gp, glowSize: gs, glowCol: gc, glowBaseSize: gbs, glowBaseDist: gbd,
+      diskBase: db, diskPos: dp, diskSize: ds, diskCol: dc, diskBaseSize: dbs, diskBaseDist: dbd 
+    };
   }, []);
 
   // ── Events ──
   const onPointerMove = useCallback((e: any) => {
     hoverPos.current.copy(e.point);
     hoverActive.current = true;
-    setShowHover(true);
   }, []);
 
   const onPointerLeave = useCallback(() => {
     hoverActive.current = false;
-    setShowHover(false);
   }, []);
 
   const prevTime = useRef(0);
@@ -186,20 +209,18 @@ function BlackHoleScene({
     }
     smoothAudio.current += (rawAudio - smoothAudio.current) * Math.min(1, dt * 20);
 
-    // Pulse target
     let pTarget = 0.15;
-    if (state === "listening") pTarget = 0.4 + 0.25 * Math.sin(t * 1.5);
-    else if (state === "thinking") pTarget = 0.25 + 0.1 * Math.sin(t * 1.1);
-    else if (state === "speaking") pTarget = 0.45 + 0.9 * smoothAudio.current;
-    smoothPulse.current += (pTarget - smoothPulse.current) * 0.08;
+    if (state === "listening") pTarget = 0.4 + 0.25 * Math.sin(t * 2.0);
+    else if (state === "thinking") pTarget = 0.4 + 0.3 * Math.sin(t * 12.0); // Fast intense heartbeat pulse
+    else if (state === "speaking") pTarget = 0.5 + 1.2 * smoothAudio.current;
+    smoothPulse.current += (pTarget - smoothPulse.current) * 0.1;
 
-    // Breathing
-    breathePhase.current += dt * 0.3;
-    const breath = 1 + Math.sin(breathePhase.current) * 0.005;
-
-    // Rotation
-    const starRotY = t * 0.035, starRotX = Math.sin(t * 0.01) * 0.035;
-    const diskRotSpeed = 0.1 + smoothAudio.current * 0.25;
+    // Rotation (Anime disk spins a bit faster)
+    const starRotY = t * 0.03, starRotX = Math.sin(t * 0.005) * 0.02;
+    let diskRotSpeed = 0.2 + smoothAudio.current * 0.4;
+    if (state === "thinking") {
+      diskRotSpeed += 2.0; // Visibly spin much faster while processing
+    }
     diskAngle.current += dt * diskRotSpeed;
 
     if (starsRef.current) {
@@ -208,79 +229,84 @@ function BlackHoleScene({
     }
     if (glowRef.current) {
       glowRef.current.rotation.y = t * 0.04;
-      glowRef.current.rotation.x = Math.sin(t * 0.008) * 0.025;
+      glowRef.current.rotation.x = Math.sin(t * 0.01) * 0.02;
     }
     if (diskRef.current) {
-      diskRef.current.rotation.y = t * diskRotSpeed + diskAngle.current;
-      diskRef.current.rotation.x = 0.2 + Math.sin(t * 0.015) * 0.025;
+      diskRef.current.rotation.y = diskAngle.current;
+      diskRef.current.rotation.x = 0.2 + Math.sin(t * 0.01) * 0.03;
     }
-
-    // Audio shockwave ring
-    const shockRadius = BH_RADIUS + smoothAudio.current * 0.6;
-    const shockOpacity = smoothAudio.current * 0.3;
 
     const hc = hoverPos.current;
     const hAct = hoverActive.current;
     const audioAmp = smoothAudio.current;
     const pulseAmp = smoothPulse.current;
 
-    // ── Stars ──
-    for (let i = 0; i < STAR_COUNT; i++) {
-      const bx = starBase[i * 3], by = starBase[i * 3 + 1], bz = starBase[i * 3 + 2];
-      const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
+    // Apply ripple to mouse and audio waves
+    const applyParticlePhysics = (
+      i: number,
+      base: Float32Array,
+      pos: Float32Array,
+      baseDist: Float32Array,
+      isDisk: boolean
+    ) => {
+      const bx = base[i * 3], by = base[i * 3 + 1], bz = base[i * 3 + 2];
+      const bd = baseDist[i];
 
-      let hWave = 0;
+      let tx = bx, ty = by, tz = bz;
+      let sMult = 1.0;
+
+      // Ripple to mouse
       if (hAct) {
-        const dx = bx - hc.x, dy = by - hc.y, dz = bz - hc.z;
-        const d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 < 0.35) {
-          const dist = Math.sqrt(d2);
-          hWave = Math.sin(dist * 20 - t * 7) * Math.exp(-dist * 3.5) * 0.22 * pulseAmp;
+        const dx = hc.x - bx, dy = hc.y - by, dz = hc.z - bz;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        if (dist < 2.5) {
+          const pull = Math.pow(Math.max(0, 1 - dist / 2.5), 2);
+          const ripple = Math.sin(dist * 12 + t * 15) * 0.2 * pull;
+          
+          tx += dx * pull * 0.2 + (dx / dist) * ripple;
+          ty += dy * pull * 0.2 + (dy / dist) * ripple;
+          tz += dz * pull * 0.2 + (dz / dist) * ripple;
+          
+          sMult += pull * 0.8 + ripple;
         }
       }
 
-      let aWave = 0;
-      if (audioAmp > 0.02) {
-        aWave = Math.sin(bd * (7 + audioAmp * 6) - t * 4) * audioAmp * 0.08;
+      // Audio reactive
+      if (audioAmp > 0.01) {
+        const aWave = Math.sin(bd * 8 - t * 6) * audioAmp * (isDisk ? 0.2 : 0.1);
+        tx += (bx / bd) * aWave;
+        ty += (by / bd) * aWave;
+        tz += (bz / bd) * aWave;
+        sMult += audioAmp * 1.0;
       }
 
-      const tw = hWave + aWave;
-      const tx = bx + (bx / bd) * tw * breath;
-      const ty = by + (by / bd) * tw * breath;
-      const tz = bz + (bz / bd) * tw * breath;
-      const l = hAct ? 0.28 : audioAmp > 0.02 ? 0.14 : 0.012;
-      starPos[i * 3] += (tx - starPos[i * 3]) * l;
-      starPos[i * 3 + 1] += (ty - starPos[i * 3 + 1]) * l;
-      starPos[i * 3 + 2] += (tz - starPos[i * 3 + 2]) * l;
+      sMult += pulseAmp * 0.3;
 
-      const boost = 1 + pulseAmp * 0.7 + audioAmp * 0.6;
-      const baseSize = 0.045 + (1 - bd / BH_RADIUS) * 0.085;
-      starSize[i] += (baseSize * boost - starSize[i]) * 0.06;
+      const l = 0.15;
+      pos[i * 3] += (tx - pos[i * 3]) * l;
+      pos[i * 3 + 1] += (ty - pos[i * 3 + 1]) * l;
+      pos[i * 3 + 2] += (tz - pos[i * 3 + 2]) * l;
+
+      return sMult;
+    };
+
+    // ── Stars ──
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const sMult = applyParticlePhysics(i, starBase, starPos, starBaseDist, false);
+      starSize[i] = starBaseSize[i] * sMult;
     }
 
     // ── Glow layer ──
-    for (let i = 0; i < 4000; i++) {
-      const bx = glowBase[i * 3], by = glowBase[i * 3 + 1], bz = glowBase[i * 3 + 2];
-      const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
-      const aw = audioAmp > 0.02 ? Math.sin(bd * 6 - t * 3) * audioAmp * 0.1 : 0;
-      const l2 = audioAmp > 0.02 ? 0.15 : 0.01;
-      glowPos[i * 3] += ((bx + (bx / bd) * aw) - glowPos[i * 3]) * l2;
-      glowPos[i * 3 + 1] += ((by + (by / bd) * aw) - glowPos[i * 3 + 1]) * l2;
-      glowPos[i * 3 + 2] += ((bz + (bz / bd) * aw) - glowPos[i * 3 + 2]) * l2;
-      const gs = 0.15 + Math.sin(bd * 3.5 - t * 1.2) * 0.05 * pulseAmp + 0.12 * audioAmp;
-      glowSize[i] += (gs - glowSize[i]) * 0.05;
+    for (let i = 0; i < GLOW_COUNT; i++) {
+      const sMult = applyParticlePhysics(i, glowBase, glowPos, glowBaseDist, false);
+      glowSize[i] = glowBaseSize[i] * sMult;
     }
 
     // ── Disk ──
-    for (let i = 0; i < 5000; i++) {
-      const bx = diskBase[i * 3], by = diskBase[i * 3 + 1], bz = diskBase[i * 3 + 2];
-      const bd = Math.sqrt(bx * bx + by * by + bz * bz) + 0.001;
-      const aw = audioAmp > 0.02 ? Math.sin(bd * 8 - t * 4.5) * audioAmp * 0.12 : 0;
-      diskPos[i * 3] += ((bx + (bx / bd) * aw) - diskPos[i * 3]) * 0.18;
-      diskPos[i * 3 + 1] += (by - diskPos[i * 3 + 1]) * 0.08;
-      diskPos[i * 3 + 2] += ((bz + (bz / bd) * aw) - diskPos[i * 3 + 2]) * 0.18;
-      const heat = 1 - Math.min(1, (bd - BH_RADIUS * 0.15) / (BH_RADIUS * 0.85));
-      diskSize[i] += ((0.045 + heat * 0.11) * (1 + audioAmp * 0.9) - diskSize[i]) * 0.05;
+    for (let i = 0; i < DISK_COUNT; i++) {
+      const sMult = applyParticlePhysics(i, diskBase, diskPos, diskBaseDist, true);
+      diskSize[i] = diskBaseSize[i] * sMult;
     }
 
     // Mark dirty
@@ -288,123 +314,85 @@ function BlackHoleScene({
       p.geometry.attributes.position.needsUpdate = true;
       (p.geometry.attributes as any).size.needsUpdate = true;
     };
-    mark(starsRef.current!);
-    mark(glowRef.current!);
-    mark(diskRef.current!);
+    if (starsRef.current) mark(starsRef.current);
+    if (glowRef.current) mark(glowRef.current);
+    if (diskRef.current) mark(diskRef.current);
   });
 
   return (
     <group>
-      {/* Black hole core */}
+      {/* Black hole core (Pitch Black Event Horizon) */}
       <mesh>
-        <sphereGeometry args={[BH_RADIUS * 0.2, 20, 20]} />
+        <sphereGeometry args={[BH_RADIUS * 0.95, 64, 64]} />
         <meshBasicMaterial color="#000000" />
       </mesh>
 
-      {/* Event horizon ring */}
-      <mesh rotation={[0.15, 0.3, 0]}>
-        <ringGeometry args={[BH_RADIUS * 0.18, BH_RADIUS * 0.45, 48]} />
-        <meshBasicMaterial color="#ff4400" transparent opacity={0.15} side={THREE.DoubleSide} />
-      </mesh>
-
-      {/* Central glow corona */}
+      {/* Vibrant Anime Glow Planes */}
       <points>
         <bufferGeometry>
+          {/* @ts-ignore */}
           <bufferAttribute attach="attributes-position" count={1} array={new Float32Array([0, 0, 0])} itemSize={3} />
         </bufferGeometry>
-        <pointsMaterial map={wideGlow} size={BH_RADIUS * 2.0} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthWrite={false} color="#ff6633" sizeAttenuation />
+        <pointsMaterial map={wideGlow} size={BH_RADIUS * 5.0} transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} color="#ff00ff" sizeAttenuation />
       </points>
+      <points>
+        <bufferGeometry>
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-position" count={1} array={new Float32Array([0, 0, 0])} itemSize={3} />
+        </bufferGeometry>
+        <pointsMaterial map={wideGlow} size={BH_RADIUS * 9.0} transparent opacity={0.4} blending={THREE.AdditiveBlending} depthWrite={false} color="#00ffff" sizeAttenuation />
+      </points>
+
+      {/* Inner photon ring (Bright cyan/white) */}
+      <mesh rotation={[0, 0, 0]}>
+        <ringGeometry args={[BH_RADIUS * 0.98, BH_RADIUS * 1.05, 64]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.6} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
 
       {/* Accretion disk */}
       <points ref={diskRef}>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" count={5000} array={diskPos} itemSize={3} />
-          <bufferAttribute attach="attributes-color" count={5000} array={diskCol} itemSize={3} />
-          <bufferAttribute attach="attributes-size" count={5000} array={diskSize} itemSize={1} />
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-position" count={DISK_COUNT} array={diskPos} itemSize={3} />
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-color" count={DISK_COUNT} array={diskCol} itemSize={3} />
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-size" count={DISK_COUNT} array={diskSize} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial map={starSprite} size={0.07} vertexColors transparent opacity={0.75} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial map={starSprite} size={0.07} vertexColors transparent opacity={0.9} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
-      {/* Stars */}
+      {/* Stars/Nebula */}
       <points ref={starsRef}>
         <bufferGeometry>
+          {/* @ts-ignore */}
           <bufferAttribute attach="attributes-position" count={STAR_COUNT} array={starPos} itemSize={3} />
+          {/* @ts-ignore */}
           <bufferAttribute attach="attributes-color" count={STAR_COUNT} array={starCol} itemSize={3} />
+          {/* @ts-ignore */}
           <bufferAttribute attach="attributes-size" count={STAR_COUNT} array={starSize} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial map={starSprite} size={0.07} vertexColors transparent opacity={0.88} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial map={starSprite} size={0.08} vertexColors transparent opacity={0.7} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
-      {/* Glow/halo layer */}
+      {/* Glow layer */}
       <points ref={glowRef}>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" count={4000} array={glowPos} itemSize={3} />
-          <bufferAttribute attach="attributes-color" count={4000} array={glowCol} itemSize={3} />
-          <bufferAttribute attach="attributes-size" count={4000} array={glowSize} itemSize={1} />
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-position" count={GLOW_COUNT} array={glowPos} itemSize={3} />
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-color" count={GLOW_COUNT} array={glowCol} itemSize={3} />
+          {/* @ts-ignore */}
+          <bufferAttribute attach="attributes-size" count={GLOW_COUNT} array={glowSize} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial map={glowSprite} size={0.22} vertexColors transparent opacity={0.3} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial map={glowSprite} size={0.35} vertexColors transparent opacity={0.5} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
-
-      {/* Ambient outer glow sphere */}
-      <mesh>
-        <sphereGeometry args={[BH_RADIUS * 1.8, 20, 20]} />
-        <meshBasicMaterial color="#ff5522" transparent opacity={0.018} side={THREE.BackSide} />
-      </mesh>
-
-      {/* Audio shockwave ring */}
-      <AudioShockwaveRing audio={smoothAudio} />
-
-      {/* Hover indicator */}
-      <HoverRing posRef={hoverPos} visible={showHover} />
 
       {/* Hit detection mesh — transparent but raycastable */}
       <mesh ref={hitRef} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
-        <sphereGeometry args={[BH_RADIUS, 32, 32]} />
+        <sphereGeometry args={[DISK_OUTER, 32, 32]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} side={THREE.FrontSide} />
       </mesh>
-    </group>
-  );
-}
-
-// ── Audio shockwave ring ──────────────────────────────────────────
-function AudioShockwaveRing({ audio }: { audio: React.MutableRefObject<number> }) {
-  const ref = useRef<THREE.Mesh>(null);
-
-  useFrame(({ clock }) => {
-    if (!ref.current) return;
-    const a = audio.current;
-    const mat = ref.current.material as THREE.MeshBasicMaterial;
-    const scale = 1 + a * 1.2;
-    ref.current.scale.set(scale, scale, scale);
-    mat.opacity = a * 0.25;
-    ref.current.rotation.x = 0.1 + Math.sin(clock.getElapsedTime() * 0.02) * 0.05;
-  });
-
-  return (
-    <mesh ref={ref}>
-      <ringGeometry args={[BH_RADIUS * 0.9, BH_RADIUS * 0.95, 48]} />
-      <meshBasicMaterial color="#ff8844" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-    </mesh>
-  );
-}
-
-// ── Orbit ring ────────────────────────────────────────────────────
-function OrbitRing({ radius, tilt, phase, color }: { radius: number; tilt: number; phase: number; color: string }) {
-  const ref = useRef<THREE.Group>(null);
-  const pts = useMemo(() => {
-    const a: THREE.Vector3[] = [];
-    for (let i = 0; i <= 48; i++) a.push(new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * radius, 0, Math.sin(i / 48 * Math.PI * 2) * radius));
-    return a;
-  }, [radius]);
-  const geom = useMemo(() => new THREE.BufferGeometry().setFromPoints(pts), [pts]);
-
-  useFrame(({ clock }) => {
-    if (ref.current) { ref.current.rotation.x = tilt; ref.current.rotation.z = clock.getElapsedTime() * 0.02 + phase; }
-  });
-
-  return (
-    <group ref={ref}>
-      <line geometry={geom}><lineBasicMaterial color={color} transparent opacity={0.035} /></line>
     </group>
   );
 }
@@ -413,11 +401,11 @@ function OrbitRing({ radius, tilt, phase, color }: { radius: number; tilt: numbe
 interface GlobeAvatarProps {
   state: GlobeState;
   analyserNode?: AnalyserNode | null;
-  size?: number;
+  size?: number | string;
 }
 
-export default function GlobeAvatar({ state, analyserNode, size = 280 }: GlobeAvatarProps) {
-  const sc = state === "listening" ? 1.04 : state === "thinking" ? 0.96 : 1;
+export default function GlobeAvatar({ state, analyserNode, size = 320 }: GlobeAvatarProps) {
+  const sc = state === "listening" ? 1.05 : state === "thinking" ? 0.98 : 1;
 
   return (
     <div style={{
@@ -425,27 +413,16 @@ export default function GlobeAvatar({ state, analyserNode, size = 280 }: GlobeAv
       transition: "transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
       transform: `scale(${sc})`, cursor: "pointer",
     }}>
-      <div style={{ width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden", position: "relative" }}>
+      <div style={{ width: "100%", height: "100%", borderRadius: "50%", overflow: "visible", position: "relative" }}>
         <Canvas
-          dpr={[0.5, 1.5]}
-          camera={{ position: [0, 0.3, 3.6], fov: 36, near: 0.1, far: 10 }}
-          style={{ width: "100%", height: "100%" }}
+          dpr={[1, 2]} // Better resolution
+          camera={{ position: [0, 1.2, 4.5], fov: 45, near: 0.1, far: 20 }}
+          style={{ width: "100%", height: "100%", overflow: "visible" }}
           gl={{ antialias: true, alpha: true }}
           onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
         >
           <BlackHoleScene state={state} analyserNode={analyserNode} />
-          <OrbitRing radius={1.85} tilt={0.25} phase={0} color="#ff6622" />
         </Canvas>
-      </div>
-      <div style={{
-        position: "absolute", bottom: 4, left: "50%", transform: "translateX(-50%)",
-        fontSize: 10, color: "var(--mute)", background: "var(--surface)", padding: "1px 10px",
-        borderRadius: 8, whiteSpace: "nowrap", border: "1px solid var(--hairline)", lineHeight: 1.5, zIndex: 1,
-      }}>
-        {state === "idle" && "Tap mic to speak"}
-        {state === "listening" && "Listening..."}
-        {state === "thinking" && "Thinking..."}
-        {state === "speaking" && "Speaking..."}
       </div>
     </div>
   );

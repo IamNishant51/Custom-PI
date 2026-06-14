@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import GlobeAvatar from "./GlobeAvatar";
 import { showToast } from "./Toast";
 import { AudioEngine } from "../lib/audio-engine";
@@ -61,17 +62,21 @@ export default function VoicePanel() {
   const [state, setState] = useState<"idle" | "listening" | "thinking" | "speaking">("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [voices, setVoices] = useState<VoicePreset[]>([]);
-  const [activeVoice, setActiveVoice] = useState("af_bella");
+  const [activeVoice, setActiveVoice] = useState(() => localStorage.getItem("voiceAgentActiveVoice") || "af_bella");
   const [interimText, setInterimText] = useState("");
   const [ttsConnected, setTtsConnected] = useState(false);
   const [micStatus, setMicStatus] = useState<MicStatus>("prompt");
   const [micStatusText, setMicStatusText] = useState("");
   const [textInput, setTextInput] = useState("");
-  const [volume, setVolume] = useState(40);
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem("voiceAgentVolume");
+    return saved ? Number(saved) : 40;
+  });
 
   const audioEngineRef = useRef<AudioEngine | null>(null);
   const stateRef = useRef(state);
   const mountedRef = useRef(true);
+  const [topbarActionsEl, setTopbarActionsEl] = useState<HTMLElement | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -88,9 +93,10 @@ export default function VoicePanel() {
       audioEngineRef.current.setStateCallback((s) => {
         if (mountedRef.current) setStateSafe(s);
       });
+      audioEngineRef.current.setVolume((volume / 100) * 2.5);
     }
     return audioEngineRef.current;
-  }, []);
+  }, [volume, setStateSafe]);
 
   const ensureAudioContext = useCallback(async () => {
     const engine = getEngine();
@@ -102,6 +108,8 @@ export default function VoicePanel() {
   }, [getEngine]);
 
   useEffect(() => {
+    setTopbarActionsEl(document.getElementById("topbar-actions"));
+    
     mountedRef.current = true;
     const fetchVoices = async () => {
       try {
@@ -109,7 +117,9 @@ export default function VoicePanel() {
         const d = await r.json();
         if (!mountedRef.current) return;
         setVoices(d.voices || []);
-        if (d.active) setActiveVoice(d.active);
+        if (d.active && !localStorage.getItem("voiceAgentActiveVoice")) {
+          setActiveVoice(d.active);
+        }
         setTtsConnected(true);
       } catch {
         if (mountedRef.current) setTtsConnected(false);
@@ -202,7 +212,6 @@ export default function VoicePanel() {
 
     const blob = new Blob(chunks, { type: chunks[0].type });
 
-    setInterimText("Transcribing...");
     setStateSafe("thinking");
 
     try {
@@ -245,7 +254,6 @@ export default function VoicePanel() {
       const userMsg: ChatMessage = { id: Date.now().toString(), role: "user", text };
       setMessages((prev) => [...prev, userMsg]);
 
-      setInterimText("Thinking…");
       const llmR = await fetch("/api/voice/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -270,7 +278,6 @@ export default function VoicePanel() {
       const agentMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: "agent", text: replyText };
       setMessages((prev) => [...prev, agentMsg]);
 
-      setInterimText("Speaking…");
       await playAudioResponse(llmD);
       setInterimText("");
       setStateSafe("idle");
@@ -329,7 +336,6 @@ export default function VoicePanel() {
     setStateSafe("thinking");
 
     try {
-      setInterimText("Thinking…");
       const r = await fetch("/api/voice/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -347,7 +353,6 @@ export default function VoicePanel() {
       const agentMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: "agent", text: replyText };
       setMessages((prev) => [...prev, agentMsg]);
 
-      setInterimText("Speaking…");
       await playAudioResponse(d);
       setInterimText("");
       setStateSafe("idle");
@@ -368,6 +373,7 @@ export default function VoicePanel() {
 
   const changeVoice = useCallback(async (voiceId: string) => {
     setActiveVoice(voiceId);
+    localStorage.setItem("voiceAgentActiveVoice", voiceId);
     try {
       await fetch("/api/voice/select", {
         method: "POST",
@@ -405,71 +411,44 @@ export default function VoicePanel() {
     setInterimText("");
   }, [getEngine, setStateSafe]);
 
-  return (
-    <div className="panel" style={{ display: "flex", flexDirection: "column", padding: 0, height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Voice Agent</span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: ttsConnected ? "var(--success)" : "var(--danger)" }} />
-          <span style={{ fontSize: 11, color: "var(--mute)" }}>{ttsConnected ? "TTS Online" : "TTS Offline"}</span>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 16, overflow: "hidden", minHeight: 0 }}>
-        <GlobeAvatar state={state} analyserNode={analyserNode} size={320} />
-
-        {!ttsConnected && (
-          <div style={{ fontSize: 11, color: "var(--danger)", textAlign: "center", maxWidth: 280, lineHeight: 1.5, padding: "6px 12px", background: "rgba(255,59,48,0.06)", borderRadius: 6 }}>
-            TTS server offline — responses will be text-only. Make sure the TTS server is running on port 8000.
-          </div>
-        )}
-
+  const renderTopBarActions = () => {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {needsMic ? (
           <button className="btn btn-primary" onClick={toggleMic}
             style={{
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "10px 20px", fontSize: 13,
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "4px 12px", fontSize: 12, height: 28, borderRadius: 14
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <line x1="12" y1="19" x2="12" y2="22" />
             </svg>
-            {micStatus === "denied" ? "Try Again" : "Allow Microphone Access"}
+            {micStatus === "denied" ? "Try Again" : "Allow Mic"}
           </button>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button
               className={`btn ${state === "listening" ? "btn-danger" : "btn-primary"}`}
               onClick={toggleMic}
               style={{
-                width: 56, height: 56, borderRadius: "50%",
+                width: 28, height: 28, borderRadius: "50%",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 22, transition: "all 0.2s", position: "relative",
+                fontSize: 14, transition: "all 0.2s", position: "relative", padding: 0
               }}
+              title={state === "listening" ? "Stop recording" : "Start recording"}
             >
               {state === "listening" ? (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="4" height="12" rx="1" /><rect x="14" y="6" width="4" height="12" rx="1" /></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="4" height="12" rx="1" /><rect x="14" y="6" width="4" height="12" rx="1" /></svg>
               ) : (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                   <line x1="12" y1="19" x2="12" y2="22" />
                 </svg>
               )}
-            </button>
-            <button
-              className="btn"
-              onClick={testAudio}
-              title="Play test tone"
-              style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, padding: 0 }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-              </svg>
             </button>
             {state === "speaking" && (
               <button
@@ -477,159 +456,182 @@ export default function VoicePanel() {
                 onClick={stopSpeaking}
                 title="Stop speaking"
                 style={{
-                  width: 38, height: 38, borderRadius: "50%",
+                  width: 28, height: 28, borderRadius: "50%",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 16, padding: 0,
+                  fontSize: 14, padding: 0,
                 }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="5" height="12" rx="1" /><rect x="13" y="6" width="5" height="12" rx="1" /></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="5" height="12" rx="1" /><rect x="13" y="6" width="5" height="12" rx="1" /></svg>
               </button>
             )}
           </div>
         )}
-
-        {state === "listening" && (
-          <div style={{ fontSize: 12, color: "var(--accent)", textAlign: "center", maxWidth: 300, lineHeight: 1.5, animation: "pulse 1s infinite" }}>
-            Recording… tap the mic again to stop
-          </div>
-        )}
-
-        {micStatus === "denied" && (
-          <div style={{
-            background: "var(--bg-secondary)",
-            borderRadius: 8,
-            padding: "12px 16px",
-            fontSize: 12,
-            color: "var(--text)",
-            textAlign: "left",
-            maxWidth: 320,
-            lineHeight: 1.6,
-            border: "1px solid var(--hairline)",
-          }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, color: "var(--danger)" }}>
-              Microphone is blocked
-            </div>
-            <div style={{ color: "var(--mute)", marginBottom: 6 }}>
-              Chrome has blocked microphone access for this site. To fix this:
-            </div>
-            <ol style={{ margin: 0, paddingLeft: 18, color: "var(--mute)" }}>
-              <li>Click the <strong>Not Secure</strong> or lock icon in the address bar (left of the URL)</li>
-              <li>Click <strong>Site settings</strong></li>
-              <li>Find <strong>Microphone</strong> and change it to <strong>Allow</strong></li>
-              <li>Reload this page</li>
-            </ol>
-            <div style={{ marginTop: 8, fontSize: 11, color: "var(--mute)", borderTop: "1px solid var(--hairline)", paddingTop: 6 }}>
-              Or type <code style={{ background: "var(--bg)", padding: "1px 4px", borderRadius: 3 }}>chrome://settings/content/microphone</code> in the address bar.
-            </div>
-          </div>
-        )}
-
-        {micStatus === "unsupported" && micStatusText && (
-          <div style={{
-            background: "var(--bg-secondary)",
-            borderRadius: 8,
-            padding: "12px 16px",
-            fontSize: 12,
-            color: "var(--mute)",
-            textAlign: "center",
-            maxWidth: 320,
-            lineHeight: 1.6,
-            border: "1px solid var(--hairline)",
-          }}>
-            {micStatusText}
-          </div>
-        )}
-
-        {micStatus === "prompt" && (
-          <div style={{ fontSize: 12, color: "var(--mute)", textAlign: "center", maxWidth: 300, lineHeight: 1.5 }}>
-            Click the button above to allow microphone access. Your browser will show a permission prompt.
-          </div>
-        )}
-
-        {interimText && (
-          <div style={{ fontSize: 12, color: "var(--mute)", fontStyle: "italic", textAlign: "center", maxWidth: 300 }}>
-            {interimText}
-          </div>
-        )}
-
-        {!needsMic && state === "idle" && messages.length === 0 && (
-          <div style={{ fontSize: 12, color: "var(--mute)", textAlign: "center", maxWidth: 300, lineHeight: 1.5 }}>
-            Tap the mic and speak to talk with your AI agent.
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 8, padding: "8px 16px", borderTop: "1px solid var(--hairline)", flexShrink: 0 }}>
-        <input
-          className="input"
-          type="text"
-          placeholder="Type a message…"
-          value={textInput}
-          onChange={(e) => setTextInput(e.target.value)}
-          onKeyDown={handleTextKeyDown}
-          style={{ flex: 1, fontSize: 12, padding: "6px 10px" }}
-          disabled={state === "listening" || state === "thinking" || state === "speaking"}
-        />
-        <button
-          className="btn btn-primary"
-          onClick={sendTextMessage}
-          style={{ fontSize: 12, padding: "6px 14px" }}
-          disabled={!textInput.trim() || state === "listening" || state === "thinking" || state === "speaking"}
-        >
-          Send
-        </button>
-      </div>
-
-      {messages.length > 0 && (
-        <div style={{ flex: "0 0 auto", maxHeight: 180, overflowY: "auto", borderTop: "1px solid var(--hairline)", padding: "8px 12px" }}>
-          {messages.map((m) => (
-            <div key={m.id} style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 12 }}>
-              <span style={{ fontWeight: 600, color: m.role === "user" ? "var(--accent)" : "var(--text)", whiteSpace: "nowrap" }}>
-                {m.role === "user" ? "You:" : "AI:"}
-              </span>
-              {m.role === "user" ? (
-                <span style={{ color: "var(--mute)", lineHeight: 1.4 }}>{m.text}</span>
-              ) : (
-                <div style={{ lineHeight: 1.4, overflow: "hidden" }}>
-                  <Markdown content={m.text} />
-                </div>
-              )}
-            </div>
-          ))}
+        <div style={{ width: 1, height: 16, background: "var(--hairline)", margin: "0 4px" }} />
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }} title={ttsConnected ? "TTS Server Online" : "TTS Server Offline"}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: ttsConnected ? "var(--success)" : "var(--danger)", animation: ttsConnected ? "pulse 2s infinite" : "none" }} />
+          <span style={{ fontSize: 11, color: "var(--mute)", whiteSpace: "nowrap" }}>TTS</span>
         </div>
-      )}
+      </div>
+    );
+  };
 
-      <div style={{ padding: "8px 16px", borderTop: "1px solid var(--hairline)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: "var(--mute)", whiteSpace: "nowrap" }}>Voice:</span>
-        <select
-          className="input"
-          value={activeVoice}
-          onChange={(e) => changeVoice(e.target.value)}
-          style={{ flex: 1, minWidth: 120, fontSize: 11, padding: "4px 6px" }}
-        >
-          {Object.entries(grouped).map(([group, vs]) => (
-            <optgroup key={group} label={group}>
-              {vs.map((v) => (
-                <option key={v.id} value={v.id}>{v.name} — {v.desc}</option>
+  return (
+    <div style={{ display: "flex", flexDirection: "column", padding: 0, height: "100%" }}>
+      {topbarActionsEl && createPortal(renderTopBarActions(), topbarActionsEl)}
+
+      <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+        {/* Background Avatar */}
+        <div style={{ position: "absolute", inset: 0, zIndex: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "auto" }}>
+          <GlobeAvatar state={state} analyserNode={analyserNode} size="100%" />
+        </div>
+
+        {/* Foreground Overlay */}
+        <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", pointerEvents: "none" }}>
+          {/* Top spacer to push content to bottom or center messages */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 16 }}>
+            {!ttsConnected && (
+              <div style={{ pointerEvents: "auto", fontSize: 11, color: "var(--danger)", textAlign: "center", maxWidth: 280, lineHeight: 1.5, padding: "6px 12px", background: "rgba(255,59,48,0.1)", backdropFilter: "blur(4px)", borderRadius: 6 }}>
+                TTS server offline — responses will be text-only. Make sure the TTS server is running on port 8000.
+              </div>
+            )}
+
+            {state === "listening" && (
+              <div style={{ pointerEvents: "auto", fontSize: 12, color: "var(--accent)", textAlign: "center", maxWidth: 300, lineHeight: 1.5, animation: "pulse 1s infinite", background: "rgba(0,0,0,0.5)", padding: "4px 12px", borderRadius: 12 }}>
+                Recording… tap the mic again to stop
+              </div>
+            )}
+
+            {micStatus === "denied" && (
+              <div style={{
+                pointerEvents: "auto",
+                background: "rgba(30,30,30,0.8)", backdropFilter: "blur(8px)",
+                borderRadius: 8, padding: "12px 16px", fontSize: 12, color: "var(--text)", textAlign: "left", maxWidth: 320, lineHeight: 1.6, border: "1px solid var(--hairline)"
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, color: "var(--danger)" }}>
+                  Microphone is blocked
+                </div>
+                <div style={{ color: "var(--mute)", marginBottom: 6 }}>
+                  Chrome has blocked microphone access for this site. To fix this:
+                </div>
+                <ol style={{ margin: 0, paddingLeft: 18, color: "var(--mute)" }}>
+                  <li>Click the <strong>Not Secure</strong> or lock icon in the address bar (left of the URL)</li>
+                  <li>Click <strong>Site settings</strong></li>
+                  <li>Find <strong>Microphone</strong> and change it to <strong>Allow</strong></li>
+                  <li>Reload this page</li>
+                </ol>
+                <div style={{ marginTop: 8, fontSize: 11, color: "var(--mute)", borderTop: "1px solid var(--hairline)", paddingTop: 6 }}>
+                  Or type <code style={{ background: "var(--bg)", padding: "1px 4px", borderRadius: 3 }}>chrome://settings/content/microphone</code> in the address bar.
+                </div>
+              </div>
+            )}
+
+            {micStatus === "unsupported" && micStatusText && (
+              <div style={{ pointerEvents: "auto", background: "rgba(30,30,30,0.8)", backdropFilter: "blur(8px)", borderRadius: 8, padding: "12px 16px", fontSize: 12, color: "var(--mute)", textAlign: "center", maxWidth: 320, lineHeight: 1.6, border: "1px solid var(--hairline)" }}>
+                {micStatusText}
+              </div>
+            )}
+
+            {micStatus === "prompt" && !topbarActionsEl && (
+              <div style={{ pointerEvents: "auto", fontSize: 12, color: "var(--mute)", textAlign: "center", maxWidth: 300, lineHeight: 1.5, background: "rgba(0,0,0,0.5)", padding: "4px 12px", borderRadius: 12 }}>
+                Click the Allow Mic button in the top bar to enable voice.
+              </div>
+            )}
+
+            {interimText && (
+              <div style={{ pointerEvents: "auto", fontSize: 12, color: "var(--mute)", fontStyle: "italic", textAlign: "center", maxWidth: 300, background: "rgba(0,0,0,0.5)", padding: "4px 12px", borderRadius: 12 }}>
+                {interimText}
+              </div>
+            )}
+
+            {!needsMic && state === "idle" && messages.length === 0 && (
+              <div style={{ pointerEvents: "auto", fontSize: 12, color: "var(--mute)", textAlign: "center", maxWidth: 300, lineHeight: 1.5, background: "rgba(0,0,0,0.5)", padding: "4px 12px", borderRadius: 12 }}>
+                Tap the mic icon in the top bar and speak to talk with your AI agent.
+              </div>
+            )}
+          </div>
+
+          {/* Chat Interface pinned at the bottom */}
+          <div style={{ pointerEvents: "auto", display: "flex", gap: 8, padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,0.05)", flexShrink: 0, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(12px)" }}>
+            <input
+              className="input"
+              type="text"
+              placeholder="Type a message…"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={handleTextKeyDown}
+              style={{ flex: 1, fontSize: 12, padding: "6px 10px", background: "rgba(0,0,0,0.4)" }}
+              disabled={state === "listening" || state === "thinking" || state === "speaking"}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={sendTextMessage}
+              style={{ fontSize: 12, padding: "6px 14px" }}
+              disabled={!textInput.trim() || state === "listening" || state === "thinking" || state === "speaking"}
+            >
+              Send
+            </button>
+          </div>
+
+          {messages.length > 0 && (
+            <div style={{ pointerEvents: "auto", flex: "0 0 auto", maxHeight: 180, overflowY: "auto", borderTop: "1px solid rgba(255,255,255,0.05)", padding: "8px 12px", background: "rgba(0,0,0,0.3)", backdropFilter: "blur(12px)" }}>
+              {messages.map((m) => (
+                <div key={m.id} style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 12 }}>
+                  <span style={{ fontWeight: 600, color: m.role === "user" ? "var(--accent)" : "var(--text)", whiteSpace: "nowrap" }}>
+                    {m.role === "user" ? "You:" : "AI:"}
+                  </span>
+                  {m.role === "user" ? (
+                    <span style={{ color: "var(--mute)", lineHeight: 1.4 }}>{m.text}</span>
+                  ) : (
+                    <div style={{ lineHeight: 1.4, overflow: "hidden", color: "var(--text)" }}>
+                      <Markdown content={m.text} />
+                    </div>
+                  )}
+                </div>
               ))}
-            </optgroup>
-          ))}
-        </select>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--mute)", flexShrink: 0 }}>
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-            {volume > 0 && <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />}
-            {volume > 30 && <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />}
-          </svg>
-          <input
-            type="range" min="0" max="100" value={volume}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setVolume(v);
-              getEngine().setVolume((v / 100) * 2.5);
-            }}
-            style={{ width: 64, height: 4, accentColor: "var(--accent)", cursor: "pointer" }}
-          />
+            </div>
+          )}
+
+          <div style={{ pointerEvents: "auto", padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flexShrink: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(12px)" }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", whiteSpace: "nowrap" }}>Voice:</span>
+            <select
+              className="input"
+              value={activeVoice}
+              onChange={(e) => changeVoice(e.target.value)}
+              style={{ flex: 1, minWidth: 120, fontSize: 11, padding: "4px 6px", background: "rgba(0,0,0,0.5)" }}
+            >
+              {Object.entries(grouped).map(([group, vs]) => (
+                <optgroup key={group} label={group}>
+                  {vs.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name} — {v.desc}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button
+                className="btn"
+                onClick={testAudio}
+                title="Play test tone"
+                style={{ width: 24, height: 24, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, padding: 0, border: "none", background: "transparent" }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "rgba(255,255,255,0.7)" }}>
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  {volume > 0 && <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />}
+                  {volume > 30 && <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />}
+                </svg>
+              </button>
+              <input
+                type="range" min="0" max="100" value={volume}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setVolume(v);
+                  localStorage.setItem("voiceAgentVolume", v.toString());
+                  getEngine().setVolume((v / 100) * 2.5);
+                }}
+                style={{ width: 64, height: 4, accentColor: "var(--accent)", cursor: "pointer" }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
