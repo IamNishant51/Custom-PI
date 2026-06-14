@@ -6322,7 +6322,12 @@ export async function createApp() {
     console.log(`[voice] Agent request: "${text.substring(0, 80)}"`);
 
     const model = resolveModel();
-    const systemPrompt = loadSystemPrompt();
+    let systemPrompt = loadSystemPrompt();
+    systemPrompt += `\n\nCRITICAL INSTRUCTION FOR VOICE MODE: You are currently operating in VOICE INTERFACE mode. The user is speaking to you, and your responses are being read aloud by a Text-To-Speech engine. Therefore, you MUST follow these strict rules:
+1. NO MARKDOWN: Do not use bold (**), italics (*), code blocks (\`\`\`), or list formatting (-). Speak in plain text.
+2. NO EMOJIS OR SYMBOLS: Emojis and special symbols cannot be pronounced properly.
+3. NO NARRATIVE ACTIONS: Do not include parenthetical actions or tones like "(Narrative Tone: Confident)" or "(smiles)".
+4. CONCISE & CONVERSATIONAL: Keep your responses highly conversational, natural, and relatively short. Do NOT generate long, multi-paragraph essays or huge code blocks. Provide brief summaries and offer to elaborate if needed.`;
     const tools = getActiveTools();
     const auth = getModelAuth(model);
     const settings = loadSettings();
@@ -6331,7 +6336,7 @@ export async function createApp() {
     while (voiceMessages.length > MAX_VOICE_HISTORY) voiceMessages.shift();
 
     let toolCallIndex = 0;
-    let finalText = text;
+    let accumulatedText = "";
     const MAX_TURNS = 10;
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -6378,7 +6383,9 @@ export async function createApp() {
       } catch {}
 
       voiceMessages.push(finalMessage);
-      finalText = currentText;
+      if (currentText.trim()) {
+        accumulatedText += (accumulatedText ? " " : "") + currentText.trim();
+      }
 
       const toolCalls = finalMessage.content.filter(c => c.type === "toolCall" || c.type === "toolUse");
       if (toolCalls.length === 0) break;
@@ -6399,27 +6406,37 @@ export async function createApp() {
     }
 
     try {
+      const cleanTextForTTS = accumulatedText
+        .replace(/\*/g, "")
+        .replace(/_/g, "")
+        .replace(/#/g, "")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Remove markdown links, keep text
+        .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "") // Remove emojis
+        .replace(/\([^)]+\)/g, "") // Remove text in parenthesis (like tones)
+        .replace(/\s+/g, " ")
+        .trim();
+
       const ttsStart = Date.now();
       const ttsR = await fetch(`${TTS_SERVER}/v1/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: finalText, voice: voiceId }),
+        body: JSON.stringify({ text: cleanTextForTTS, voice: voiceId }),
         signal: AbortSignal.timeout(60000),
       });
       if (ttsR.ok) {
         const ttsData = await ttsR.json();
         console.log(`[voice] TTS generated in ${Date.now() - ttsStart}ms`);
-        return { reply: finalText, audio: ttsData.audio, sampleRate: ttsData.sampleRate };
+        return { reply: accumulatedText, audio: ttsData.audio, sampleRate: ttsData.sampleRate };
       }
       const ttsErr = await ttsR.text().catch(() => `HTTP ${ttsR.status}`);
       console.error(`[voice] TTS server returned ${ttsR.status}: ${ttsErr}`);
-      return { reply: finalText, ttsError: `TTS server error (${ttsR.status})` };
+      return { reply: accumulatedText, ttsError: `TTS server error (${ttsR.status})` };
     } catch (e2) {
       console.error(`[voice] TTS error: ${e2.message}`);
       if (e2.message?.includes("connect") || e2.message?.includes("ECONNREFUSED")) {
-        return { reply: finalText, ttsError: "TTS server not running on port 8000." };
+        return { reply: accumulatedText, ttsError: "TTS server not running on port 8000." };
       }
-      return { reply: finalText, ttsError: `TTS failed: ${e2.message}` };
+      return { reply: accumulatedText, ttsError: `TTS failed: ${e2.message}` };
     }
   });
 
@@ -6445,6 +6462,38 @@ export async function createApp() {
       return { active: voice_id };
     } catch {
       return { active: voice_id };
+    }
+  });
+
+  app.post("/api/voice/tts", async (req, reply) => {
+    const { text, voice } = req.body || {};
+    if (!text) return reply.code(400).send({ error: "text is required" });
+    const voiceId = voice || "af_bella";
+    
+    const cleanText = text
+      .replace(/\*/g, "")
+      .replace(/_/g, "")
+      .replace(/#/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, "")
+      .replace(/\([^)]+\)/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    try {
+      const ttsR = await fetch(`${TTS_SERVER}/v1/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cleanText, voice: voiceId }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (ttsR.ok) {
+        const ttsData = await ttsR.json();
+        return { audio: ttsData.audio, sampleRate: ttsData.sampleRate };
+      }
+      return reply.code(ttsR.status).send({ error: `TTS failed: ${ttsR.status}` });
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
     }
   });
 

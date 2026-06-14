@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import GlobeAvatar from "./GlobeAvatar";
 import { showToast } from "./Toast";
 import { AudioEngine } from "../lib/audio-engine";
+import { Volume2 } from "lucide-react";
 import Markdown from "./Markdown";
 
 interface VoicePreset {
@@ -168,6 +169,29 @@ export default function VoicePanel() {
     await engine.playBase64Audio(llmD.audio, llmD.sampleRate || 24000);
   }, [getEngine]);
 
+  const playSpecificText = useCallback(async (textToPlay: string) => {
+    try {
+      showToast("Generating voice...", "info");
+      const r = await fetch("/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: textToPlay, voice: activeVoice }),
+      });
+      if (!r.ok) {
+        showToast(`Failed to generate TTS: ${r.status}`, "error");
+        return;
+      }
+      const d = await r.json();
+      if (d.error) {
+        showToast(`TTS error: ${d.error}`, "error");
+        return;
+      }
+      await playAudioResponse(d);
+    } catch (err: any) {
+      showToast(`TTS failed: ${err.message}`, "error");
+    }
+  }, [activeVoice, playAudioResponse]);
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -274,7 +298,7 @@ export default function VoicePanel() {
         return;
       }
 
-      const replyText = llmD.reply || llmD.text || text;
+      const replyText = llmD.reply !== undefined ? (llmD.reply || "...") : (llmD.text || "...");
       const agentMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: "agent", text: replyText };
       setMessages((prev) => [...prev, agentMsg]);
 
@@ -582,9 +606,19 @@ export default function VoicePanel() {
                   {m.role === "user" ? (
                     <span style={{ color: "var(--mute)", lineHeight: 1.4 }}>{m.text}</span>
                   ) : (
-                    <div style={{ lineHeight: 1.4, overflow: "hidden", color: "var(--text)" }}>
+                    <div style={{ lineHeight: 1.4, overflow: "hidden", color: "var(--text)", flex: 1 }}>
                       <Markdown content={m.text} />
                     </div>
+                  )}
+                  {m.role === "agent" && (
+                    <button
+                      className="btn"
+                      onClick={() => playSpecificText(m.text)}
+                      title="Play Audio"
+                      style={{ padding: 4, height: "fit-content", background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <Volume2 size={14} style={{ color: "var(--accent)" }} />
+                    </button>
                   )}
                 </div>
               ))}

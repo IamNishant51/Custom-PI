@@ -414,7 +414,10 @@ async def synthesize(req: TTSRequest):
         logger.error(f"Kokoro inference error: {e}")
         raise HTTPException(500, f"Kokoro inference error: {e}")
     if not all_audio:
-        raise HTTPException(500, "No audio generated")
+        logger.warning(f"No audio generated for text: '{req.text}'. Returning 0.1s silence.")
+        silence = np.zeros(int(SAMPLE_RATE * 0.1), dtype=np.float32)
+        wav_bytes = _wav_from_pcm(silence, SAMPLE_RATE)
+        return {"audio": base64.b64encode(wav_bytes).decode(), "sampleRate": SAMPLE_RATE, "peak": 0}
 
     combined = np.concatenate(all_audio)
     logger.info(f"Kokoro raw: dtype={combined.dtype}, shape={combined.shape}, "
