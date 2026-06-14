@@ -6350,7 +6350,7 @@ export async function createApp() {
         }, {
           apiKey: auth.apiKey,
           headers: auth.headers,
-          reasoning: settings.defaultThinkingLevel || "off",
+          reasoning: "off",
           signal: AbortSignal.timeout(120000),
         });
       } catch (e) {
@@ -6525,7 +6525,7 @@ export async function createApp() {
             }, {
               apiKey: auth.apiKey,
               headers: auth.headers,
-              reasoning: settings.defaultThinkingLevel || "off",
+              reasoning: "off",
               signal: AbortSignal.timeout(120000),
             });
           } catch (e) {
@@ -6552,12 +6552,32 @@ export async function createApp() {
                 // Send text delta to frontend immediately so user sees typing
                 try { socket.send(JSON.stringify({ type: "text_delta", delta })); } catch {}
 
-                // Check for sentence end
-                // Find all sentences in buffer
-                const match = sentenceBuffer.match(/[^.!?\n]+[.!?\n]+(?=\s|$)/);
-                if (match) {
-                  const sentence = match[0].trim();
-                  sentenceBuffer = sentenceBuffer.slice(match.index + match[0].length);
+                // Eager clause-based splitting to dramatically reduce voice latency
+                let splitIndex = -1;
+                let splitLength = 0;
+
+                // 1. Highest priority: standard sentence endings
+                const sentenceMatch = sentenceBuffer.match(/[^.!?\n]+[.!?\n]+(?=\s|$)/);
+                if (sentenceMatch) {
+                  splitIndex = sentenceMatch.index;
+                  splitLength = sentenceMatch[0].length;
+                } else {
+                  // 2. Secondary priority: clause boundaries (commas, semicolons, colons, dashes)
+                  // Only split if the clause has enough words or length to be a meaningful segment
+                  const clauseMatch = sentenceBuffer.match(/[^,;:—\-]+[,;:—\-]+(?=\s|$)/);
+                  if (clauseMatch) {
+                    const clauseSegment = clauseMatch[0].trim();
+                    const wordCount = clauseSegment.split(/\s+/).length;
+                    if (wordCount >= 3 || clauseSegment.length >= 12) {
+                      splitIndex = clauseMatch.index;
+                      splitLength = clauseMatch[0].length;
+                    }
+                  }
+                }
+
+                if (splitIndex !== -1) {
+                  const sentence = sentenceBuffer.substring(splitIndex, splitIndex + splitLength).trim();
+                  sentenceBuffer = sentenceBuffer.slice(splitIndex + splitLength);
 
                   if (sentence) {
                     const currentSentence = sentence;
