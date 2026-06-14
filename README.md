@@ -325,7 +325,7 @@ custom-pi has evolved from a reactive coding assistant into a **proactive, self-
 
 * `generate_image` — **Free image generation** via Pollinations.ai (default, no key needed) or premium DesignAPI/OpenAI/Gemini/Grok. Generates 4 images, saves to asset gallery.
 * `request_asset_selection` — Shows generated images in a selection modal. User picks one, rest auto-deleted.
-* `text_to_speech` — Edge-tts CLI returning audio buffers.
+* `text_to_speech` — Edge-tts CLI returning audio buffers. Web UI also includes a full Voice Agent panel with STT (speech-to-text) and TTS (text-to-speech) via Kokoro TTS server, with voice selection (male/female presets), audio test tone, and a 3D animated particle globe avatar that reacts to speaking.
 * `render_mermaid` — Compiles Mermaid diagrams to SVG with ASCII fallback.
 
 ### Social & Broadcast
@@ -457,6 +457,7 @@ The React dashboard provides real-time control over all features:
 | **Social Accounts** | Connect/disconnect Twitter, Reddit, Bluesky, Discord, Telegram |
 | **Secrets Vault** | Encrypted credential management |
 | **Budget** | Token/cost tracking |
+| **Voice Agent** | Real-time voice chat with STT transcription and TTS playback. 3D particle globe avatar animates to speech and responds to hover. Multiple voice presets (male/female). Test tone and volume control. |
 
 ---
 
