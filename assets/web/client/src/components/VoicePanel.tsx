@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import AnimeAvatar from "./AnimeAvatar";
+import GlobeAvatar from "./GlobeAvatar";
 import { showToast } from "./Toast";
 import { AudioEngine } from "../lib/audio-engine";
 import Markdown from "./Markdown";
@@ -395,8 +395,6 @@ export default function VoicePanel() {
   };
 
   const grouped = groupVoices(voices);
-  const currentVoiceInfo = voices.find(v => v.id === activeVoice) || { gender: "female" };
-  const avatarGender = currentVoiceInfo.gender === "male" ? "male" : "female";
   const engine = getEngine();
   const analyserNode = engine.analyserNode;
   const needsMic = micStatus !== "granted";
@@ -418,7 +416,7 @@ export default function VoicePanel() {
       </div>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 16, overflow: "hidden", minHeight: 0 }}>
-        <AnimeAvatar state={state} analyserNode={analyserNode} size={320} gender={avatarGender} />
+        <GlobeAvatar state={state} analyserNode={analyserNode} size={320} />
 
         {!ttsConnected && (
           <div style={{ fontSize: 11, color: "var(--danger)", textAlign: "center", maxWidth: 280, lineHeight: 1.5, padding: "6px 12px", background: "rgba(255,59,48,0.06)", borderRadius: 6 }}>
