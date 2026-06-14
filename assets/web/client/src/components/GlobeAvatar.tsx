@@ -133,11 +133,12 @@ function BlackHoleScene({
       if (r < BH_RADIUS) {
         c.setRGB(0, 0, 0);
       } else {
-        // Vibrant pink / cyan / white mix
-        const roll = Math.random();
-        if (roll > 0.7) c.setHSL(0.53 + Math.random() * 0.08, 0.95, 0.7);       // Cyan
-        else if (roll > 0.35) c.setHSL(0.82 + Math.random() * 0.08, 0.95, 0.6);  // Magenta/pink
-        else c.setHSL(0, 0, 0.8 + Math.random() * 0.2);                           // White sparkle
+        // Vibrant Anime Pink/Cyan/Purple
+        if (Math.random() > 0.5) {
+          c.setHSL(0.5 + Math.random() * 0.1, 1.0, 0.7); // Cyan
+        } else {
+          c.setHSL(0.8 + Math.random() * 0.1, 1.0, 0.6); // Magenta
+        }
       }
       stars.col[i3] = c.r; stars.col[i3 + 1] = c.g; stars.col[i3 + 2] = c.b;
       stars.baseSize[i] = 0.04 + Math.random() * 0.07;
@@ -174,17 +175,14 @@ function BlackHoleScene({
       disk.vel[i] = 1 / Math.pow(rr / DISK_INNER, 1.5);
 
       const c = new THREE.Color();
-      if (t < 0.12) {
-        c.setHSL(0.85, 1.0, 0.85);   // Hot pink/white inner edge
-        c.multiplyScalar(3.5);
-      } else if (t < 0.35) {
-        c.setHSL(0.55, 1.0, 0.65);   // Electric cyan
-        c.multiplyScalar(2.5);
-      } else if (t < 0.65) {
-        c.setHSL(0.65, 0.9, 0.5);    // Blue-violet mid
-        c.multiplyScalar(1.8);
+      if (t < 0.15) {
+        c.setHSL(0.85, 1.0, 0.8);   // Hot pink inner edge
+        c.multiplyScalar(3.0);
+      } else if (t < 0.5) {
+        c.setHSL(0.55, 1.0, 0.6);   // Electric blue/cyan middle
+        c.multiplyScalar(2.0);
       } else {
-        c.setHSL(0.75, 0.8, 0.35);   // Deep purple/violet outer
+        c.setHSL(0.7, 1.0, 0.4);   // Deep violet outer
         c.multiplyScalar(1.2);
       }
       disk.col[i3] = c.r; disk.col[i3 + 1] = c.g; disk.col[i3 + 2] = c.b;
@@ -211,13 +209,13 @@ function BlackHoleScene({
         const distNorm = Math.abs(height) / 3.5;
         const c = new THREE.Color();
         if (distNorm < 0.15) {
-          c.setHSL(0.55, 1.0, 0.9);   // Bright white-cyan at base
+          c.setHSL(0.55, 1.0, 0.8);   // Bright cyan
           c.multiplyScalar(3.0);
         } else if (distNorm < 0.5) {
-          c.setHSL(0.7, 0.9, 0.6);    // Violet mid
+          c.setHSL(0.85, 1.0, 0.6);    // Hot pink mid
           c.multiplyScalar(2.0);
         } else {
-          c.setHSL(0.8, 0.8, 0.4);    // Fading magenta
+          c.setHSL(0.7, 1.0, 0.4);    // Deep violet
           c.multiplyScalar(1.0);
         }
         jet.col[i3] = c.r; jet.col[i3 + 1] = c.g; jet.col[i3 + 2] = c.b;

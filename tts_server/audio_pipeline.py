@@ -29,8 +29,8 @@ VOICE_PIPELINE = Pedalboard([
         release_ms=80.0,
     ),
     
-    # 5. Remove harsh frequencies above 12kHz (anti-alias)
-    LowpassFilter(cutoff_frequency_hz=14000),
+    # 5. Safe fallback cutoff
+    LowpassFilter(cutoff_frequency_hz=8000),
     
     # 6. Final makeup gain
     Gain(gain_db=1.5),
@@ -52,10 +52,26 @@ def process_audio(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     # Ensure float32
     audio = audio.astype(np.float32)
     
-    # Apply the Pedalboard effects chain
+    # Apply the Pedalboard effects chain dynamically adjusted for sample rate
     # Pedalboard expects shape (channels, samples) for mono: (1, N)
     try:
-        processed = VOICE_PIPELINE(
+        # Cutoff frequency must be strictly less than half of sample_rate (Nyquist limit)
+        lowpass_cutoff = min(14000.0, sample_rate * 0.45)
+        
+        board = Pedalboard([
+            HighpassFilter(cutoff_frequency_hz=80),
+            LowShelfFilter(cutoff_frequency_hz=250, gain_db=2.5),
+            Compressor(
+                threshold_db=-18.0,
+                ratio=3.0,
+                attack_ms=5.0,
+                release_ms=80.0,
+            ),
+            LowpassFilter(cutoff_frequency_hz=lowpass_cutoff),
+            Gain(gain_db=1.5),
+        ])
+        
+        processed = board(
             audio.reshape(1, -1), 
             sample_rate
         ).flatten()
@@ -69,9 +85,12 @@ def process_audio(audio: np.ndarray, sample_rate: int) -> np.ndarray:
         current_lufs = meter.integrated_loudness(processed)
         
         if not np.isinf(current_lufs) and not np.isnan(current_lufs):
-            processed = pyln.normalize.loudness(
-                processed, current_lufs, TARGET_LUFS
-            )
+            # Limit the loudness normalization gain to a max of +12dB boost / -12dB attenuation.
+            # This prevents silent/whispering frames from being scaled up to massive static/distortion.
+            gain_db = TARGET_LUFS - current_lufs
+            clamped_gain_db = min(max(gain_db, -12.0), 12.0)
+            gain_factor = 10.0 ** (clamped_gain_db / 20.0)
+            processed = processed * gain_factor
     except Exception as e:
         print(f"Error performing LUFS normalization: {e}")
     
