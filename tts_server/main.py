@@ -37,6 +37,7 @@ TTS_SEMAPHORE = asyncio.Semaphore(4)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_tts()
+    init_melo_voices()
     init_piper_voices()
     init_cloned_voices()
     voice_count = len(VOICES)
@@ -68,7 +69,10 @@ VOICE_PRESETS = {
     "bm_george":   {"name": "George",   "gender": "male",   "desc": "British male"},
 }
 
-# ── Piper voices (Indian accent + high-quality English + Hindi) ────
+# ── MeloTTS voices (lightweight, natural) ──────────────────────────
+MELO_VOICES = {}
+
+# ── Piper voices (Indian accent + high-quality English + Hindi, fallback) ────
 PIPER_VOICES = {
     "piper_indian": {
         "name": "Priya", "gender": "female",
@@ -246,6 +250,25 @@ def init_piper_voices():
             VOICES[vid] = {**vinfo, "type": "piper", "id": vid, "available": False}
             logger.info(f"Piper voice registered (needs download): {vinfo['name']} ({model_name})")
     _piper_installed = True
+
+# ── MeloTTS initialization ──────────────────────────────────────────
+_melo_engine = None
+
+def get_melo():
+    global _melo_engine
+    if _melo_engine is None:
+        from melo_engine import MeloTTSEngine, get_melo_voices
+        _melo_engine = MeloTTSEngine(device="cpu")
+        _melo_engine.load_model()
+    return _melo_engine
+
+def init_melo_voices():
+    global MELO_VOICES
+    from melo_engine import get_melo_voices
+    MELO_VOICES = get_melo_voices()
+    for vid, vinfo in MELO_VOICES.items():
+        VOICES[vid] = {**vinfo, "type": "melo", "id": vid, "available": True}
+        logger.info(f"MeloTTS voice registered: {vinfo['name']} ({vid})")
 
 def synthesize_piper(text: str, voice_id: str) -> tuple[bytes, int, int]:
     """Synthesize with Piper. Returns (WAV bytes, sample_rate, peak)."""
@@ -526,7 +549,27 @@ async def do_synthesize(text: str, voice: str) -> tuple[bytes, int, int]:
             voice = "af_bella"
             vinfo = VOICES[voice]
 
-    # 2. Piper voice
+    # 2. MeloTTS voice (lightweight, natural)
+    if vinfo["type"] == "melo":
+        try:
+            melo = get_melo()
+            if not melo.available:
+                raise RuntimeError("MeloTTS not installed")
+            raw_audio, sr = melo.synthesize(preprocessed_text, voice)
+            processed_audio = process_audio(raw_audio, sr)
+
+            wav_bytes = _wav_from_pcm(processed_audio, sr)
+            samples = np.frombuffer(wav_bytes[44:], dtype=np.int16)
+            peak_int = int(np.max(np.abs(samples))) if len(samples) > 0 else 0
+
+            tts_cache.set(preprocessed_text, voice, wav_bytes, sr, peak_int)
+            return wav_bytes, sr, peak_int
+        except Exception as e:
+            logger.error(f"MeloTTS synthesis failed: {e}. Falling back to default Kokoro voice.")
+            voice = "af_bella"
+            vinfo = VOICES[voice]
+
+    # 3. Piper voice (fallback)
     if vinfo["type"] == "piper":
         try:
             if not _piper_installed:
@@ -541,7 +584,7 @@ async def do_synthesize(text: str, voice: str) -> tuple[bytes, int, int]:
             voice = "af_bella"
             vinfo = VOICES[voice]
 
-    # 3. Kokoro voice (or Kokoro fallback)
+    # 4. Kokoro voice (or Kokoro fallback)
     if vinfo["type"] == "kokoro":
         try:
             pipeline = get_tts()

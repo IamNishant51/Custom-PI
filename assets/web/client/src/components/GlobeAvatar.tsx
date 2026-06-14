@@ -84,6 +84,8 @@ function BlackHoleScene({
   const starsRef = useRef<THREE.Points>(null);
   const glowRef = useRef<THREE.Points>(null);
   const diskRef = useRef<THREE.Points>(null);
+  const diskMatRef = useRef<THREE.PointsMaterial>(null);
+  const glowMatRef = useRef<THREE.PointsMaterial>(null);
   const jetTopRef = useRef<THREE.Points>(null);
   const jetBotRef = useRef<THREE.Points>(null);
   const ringRef = useRef<THREE.Mesh>(null);
@@ -247,22 +249,32 @@ function BlackHoleScene({
 
     // ── Audio analysis ──
     let rawAudio = 0;
+    let rawBass = 0;
     if (state === "speaking" && analyserNode) {
       const d = new Uint8Array(analyserNode.frequencyBinCount);
       analyserNode.getByteFrequencyData(d);
       let s = 0;
-      for (let i = 0; i < d.length; i++) s += d[i];
-      rawAudio = Math.min(1, (s / d.length / 255) * 4.5);
+      let bassSum = 0;
+      const bassBins = Math.min(6, d.length);
+      for (let i = 0; i < d.length; i++) {
+        s += d[i];
+        if (i < bassBins) bassSum += d[i];
+      }
+      const len = d.length;
+      rawAudio = Math.min(1, (s / len / 255) * 4.5);
+      rawBass = Math.min(1, (bassSum / bassBins / 255) * 5.0);
     } else if (state === "speaking") {
       rawAudio = 0.35 + 0.3 * Math.sin(t * 5.5);
+      rawBass = 0.3 + 0.25 * Math.sin(t * 4.0);
     }
     smoothAudio.current += (rawAudio - smoothAudio.current) * Math.min(1, dt * 18);
+    const bass = smoothAudio.current * 0.6 + (rawBass - smoothAudio.current * 0.6) * dt * 12;
 
     // ── Pulse target ──
     let pTarget = 0.12;
     if (state === "listening") pTarget = 0.35 + 0.2 * Math.sin(t * 2.0);
     else if (state === "thinking") pTarget = 0.3 + 0.25 * Math.sin(t * 10.0);
-    else if (state === "speaking") pTarget = 0.4 + 1.0 * smoothAudio.current;
+    else if (state === "speaking") pTarget = 0.4 + 1.0 * smoothAudio.current + bass * 0.6;
     smoothPulse.current += (pTarget - smoothPulse.current) * 0.12;
 
     // ── Thinking intensity (smooth ramp up/down) ──
@@ -270,9 +282,9 @@ function BlackHoleScene({
     thinkIntensity.current += (thinkTarget - thinkIntensity.current) * dt * 3;
     const thi = thinkIntensity.current;
 
-    // ── Disk rotation (Keplerian feel) ──
-    let diskRotSpeed = 0.15 + smoothAudio.current * 0.35;
-    diskRotSpeed += thi * 1.8; // Faster while thinking
+    // ── Disk rotation (Keplerian feel, bass-reactive) ──
+    let diskRotSpeed = 0.15 + smoothAudio.current * 0.25 + bass * 0.4;
+    diskRotSpeed += thi * 1.8;
     diskAngle.current += dt * diskRotSpeed;
 
     // ── Group rotations ──
@@ -284,24 +296,29 @@ function BlackHoleScene({
       starsRef.current.rotation.x = starRotX;
     }
     if (glowRef.current) {
-      glowRef.current.rotation.y = t * 0.035;
+      glowRef.current.rotation.y = t * 0.035 + bass * 0.06;
       glowRef.current.rotation.x = Math.sin(t * 0.008) * 0.015;
     }
     if (diskRef.current) {
       diskRef.current.rotation.y = diskAngle.current;
-      diskRef.current.rotation.x = 0.22 + Math.sin(t * 0.008) * 0.02;
+      diskRef.current.rotation.x = 0.22 + Math.sin(t * 0.008) * 0.02 + bass * 0.03;
     }
 
-    // ── Photon ring pulse ──
+    // ── Photon ring pulse (bass-reactive) ──
+    const ringGlow = smoothPulse.current + bass * 0.5;
     if (ringRef.current) {
       const ringMat = ringRef.current.material as THREE.MeshBasicMaterial;
-      ringMat.opacity = 0.4 + smoothPulse.current * 0.4 + thi * 0.2;
+      ringMat.opacity = Math.min(0.95, 0.4 + ringGlow * 0.4 + thi * 0.2);
+      const color = new THREE.Color(1, 1, 1).lerp(new THREE.Color(1, 0.4, 0.8), bass * 0.6);
+      ringMat.color = color;
       ringRef.current.rotation.x = 0.22 + Math.sin(t * 0.008) * 0.02;
       ringRef.current.rotation.y = diskAngle.current;
     }
     if (ring2Ref.current) {
       const ringMat = ring2Ref.current.material as THREE.MeshBasicMaterial;
-      ringMat.opacity = 0.2 + smoothPulse.current * 0.25 + thi * 0.15;
+      ringMat.opacity = Math.min(0.85, 0.2 + ringGlow * 0.3 + thi * 0.15);
+      const color2 = new THREE.Color(0.8, 0.5, 1).lerp(new THREE.Color(1, 0.3, 0.6), bass * 0.5);
+      ringMat.color = color2;
       ring2Ref.current.rotation.x = 0.22 + Math.sin(t * 0.008) * 0.02;
       ring2Ref.current.rotation.y = diskAngle.current;
     }
@@ -448,6 +465,16 @@ function BlackHoleScene({
     mark(starsRef.current);
     mark(glowRef.current);
     mark(diskRef.current);
+
+    // ── Material opacity modulation ──
+    const targetOpacity = state === "speaking" ? Math.min(1, 0.45 + smoothAudio.current * 0.55) : 0.45;
+    if (glowMatRef.current) {
+      glowMatRef.current.opacity += (targetOpacity - glowMatRef.current.opacity) * 0.1;
+    }
+    if (diskMatRef.current) {
+      const diskOpTarget = state === "speaking" ? Math.min(1, 0.85 + smoothAudio.current * 0.15) : 0.85;
+      diskMatRef.current.opacity += (diskOpTarget - diskMatRef.current.opacity) * 0.1;
+    }
   });
 
   const { stars, glow, disk, jetT, jetB } = data;
@@ -497,7 +524,7 @@ function BlackHoleScene({
           {/* @ts-ignore */}
           <bufferAttribute attach="attributes-size" count={DISK_COUNT} array={disk.size} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial map={starSprite} size={0.06} vertexColors transparent opacity={0.85} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial ref={diskMatRef} map={starSprite} size={0.06} vertexColors transparent opacity={0.85} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
       {/* Stars / Nebula */}
@@ -523,7 +550,7 @@ function BlackHoleScene({
           {/* @ts-ignore */}
           <bufferAttribute attach="attributes-size" count={GLOW_COUNT} array={glow.size} itemSize={1} />
         </bufferGeometry>
-        <pointsMaterial map={glowSprite} size={0.3} vertexColors transparent opacity={0.45} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+        <pointsMaterial ref={glowMatRef} map={glowSprite} size={0.3} vertexColors transparent opacity={0.45} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
       </points>
 
       {/* Relativistic jet (top) */}

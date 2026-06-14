@@ -9,3 +9,4 @@ piper-tts>=1.4.0
 pedalboard>=0.9.23
 pyloudnorm>=0.2.0
 noisereduce>=3.0.3
+melo-tts>=0.1.0

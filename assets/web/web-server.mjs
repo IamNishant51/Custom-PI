@@ -6539,17 +6539,9 @@ export async function createApp() {
         try { socket.send(JSON.stringify({ type: "status", status: "thinking" })); } catch {}
 
         const model = resolveModel();
-        let systemPrompt = loadSystemPrompt();
-        systemPrompt += `\n\nCRITICAL INSTRUCTION FOR VOICE MODE: You are currently operating in VOICE INTERFACE mode. The user is speaking to you, and your responses are being read aloud by a Text-To-Speech engine. Therefore, you MUST follow these strict rules:
-1. NO MARKDOWN: Do not use bold (**), italics (*), code blocks (\`\`\`), or list formatting (-). Speak in plain text.
-2. NO EMOJIS OR SYMBOLS: Emojis and special symbols cannot be pronounced properly.
-3. NO NARRATIVE ACTIONS: Do not include parenthetical actions or tones like "(Narrative Tone: Confident)" or "(smiles)".
-4. CONCISE & CONVERSATIONAL: Keep your responses highly conversational, natural, and relatively short. Do NOT generate long, multi-paragraph essays.
-5. SHORTER SENTENCES: Keep your sentences short and punchy. Avoid long compound sentences with clauses. Use periods often, as this allows our TTS system to stream and speak your response with zero latency.
-6. ACT HUMAN: Speak with feelings, warmth, and emotion. Use natural filler words occasionally (like "hmm", "well", "ah") and conversational pacing. Be a helpful, empathetic friend.`;
+        const systemPrompt = loadVoiceSystemPrompt();
         const tools = getActiveTools();
         const auth = getModelAuth(model);
-        const settings = loadSettings();
 
         voiceMessages.push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
         while (voiceMessages.length > MAX_VOICE_HISTORY) voiceMessages.shift();
