@@ -1,7 +1,6 @@
 {
   "name": "custom-pi",
   "version": "1.9.1",
-  "private": true,
   "description": "Autonomous AI coding agent with knowledge graph memory, DAG swarm orchestration, deployment pipelines, service health monitoring, and adaptive resource management",
   "main": "bin/cli.js",
   "bin": {
