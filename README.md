@@ -18,7 +18,48 @@
 
 ---
 
-## 🔥 What's New — Free AI Image Generation
+## 🔥 What's New — v1.9.1
+
+### 🖼️ Image Gallery — Preview, Upload & Delete
+- **Image preview** — Click any gallery image to see a full-size preview with loading states
+- **Delete with confirmation** — Red confirm dialog prevents accidental deletions
+- **Upload validation** — 10MB max file size, visual feedback during upload
+- **Error handling** — Toast notifications for upload/preview/delete failures
+
+### 🎨 Canvas Editor — Full Drawing Suite
+- **8 drawing tools**: Pen, Line, Arrow, Rect, Circle, Text, Eraser, Crop
+- **Fill mode** — Fill shapes with the selected color
+- **15-color palette + custom color picker** — Eyedropper-style selection
+- **Brush size slider** — 1–40px with live preview
+- **7 filters**: Grayscale, Sepia, Invert, Blur
+- **Undo/Redo** — 50-state history with keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z)
+- **Zoom & Pan** — 10–500% zoom slider, Fit/1:1 buttons, Space+drag to pan
+- **Rotate & Flip** — 90° CW/CCW, horizontal/vertical flip
+- **Canvas resize** — Modal dialog with custom width/height
+- **Aspect-ratio crop** — Free, 1:1, 4:3, 16:9, 3:2 with rule-of-thirds overlay
+- **Export** — PNG, JPEG, WebP with quality settings
+- **Text tool** — Font size selection (12–72px), position on click
+- **Gallery integration** — Load images directly from gallery
+- **Keyboard shortcuts** — Tool hotkeys (P/L/A/R/C/T/E/V/F), zoom (+/-/0), undo/redo
+
+### 📝 Document Editor — AI-Powered Writing
+- **AI Document Generation** — Type a topic ("teach me javascript") and get a full Markdown document with headings, code blocks, tables, and lists
+- **AI Document Editing** — "rewrite this in simpler language" or "add a section about error handling"
+- **Rich Markdown Preview** — Live split-pane preview with syntax highlighting for JS/TS, Python, JSON, HTML, CSS, Bash
+- **Multi-tab editing** — Create, rename, close documents with dirty-state indicators
+- **Document Library** — Save/load/delete documents (persisted in localStorage)
+- **Export** — Download documents as `.md` files
+- **Loading animations** — Pulse dots + shimmer bar during AI generation
+- **Error handling** — Inline error messages with timeout diagnostics
+- **Keyboard shortcuts** — Ctrl+Enter to apply AI edit, Escape to close
+
+### 🐛 Bug Fixes
+- **Dashboard crash** — Fixed `c.slice is not a function` error when models API returns an object instead of array
+- **LLM Chat completions** — New `/api/chat/completions` endpoint proxies to local LM Studio / Ollama with proper auth, 10-min timeout, and diagnostic error messages
+
+---
+
+## The Fusion
 
 **Generate stunning visuals for social media posts at zero cost — no API keys, no subscriptions, no hidden fees.**
 
@@ -447,7 +488,9 @@ The React dashboard provides real-time control over all features:
 | Tab | What you can do |
 |:---|:---|
 | **Swarm Commander** | Launch teams, view agent logs, select generated assets, approve posts |
-| **Asset Gallery** | Browse generated images, preview, copy paths, delete |
+| **Image Gallery** | Upload images, preview with lightbox, delete with confirmation, file size validation |
+| **Canvas Editor** | Full drawing suite: pen, line, arrow, rect, circle, text, eraser, crop. Filters, undo/redo, zoom/pan, rotate/flip, resize, export PNG/JPEG/WebP |
+| **Documents** | Multi-tab Markdown editor with AI generation & editing, live preview with syntax highlighting, document library |
 | **Chat** | Real-time streaming agent output |
 | **Dashboard** | System telemetry, budget, vault, MCP servers |
 | **Memory** | TF-IDF semantic search and storage |

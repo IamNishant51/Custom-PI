@@ -3614,35 +3614,94 @@ async function postToTwitter(text, mediaPath) {
 
 // ── Web Search ──────────────────────────────────────────────────────────────
 
-async function webSearch(query, count = 5) {
+async function searchWebRaw(query, count = 5) {
   const results = [];
 
-  // Try multiple free search providers as fallback chain
+  // Try multiple search providers as fallback chain
   const providers = [];
 
-  // 1. DuckDuckGo (free, no API key needed)
+  // 1. Tavily API (from vault or env)
+  providers.push(async () => {
+    const tavilyKey = process.env.TAVILY_API_KEY || vaultGet("TAVILY_API_KEY") || "";
+    if (!tavilyKey) return null;
+    try {
+      const res = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: tavilyKey, query, search_depth: "basic", max_results: count }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.results || []).map(r => ({
+        title: r.title || "Tavily Search Result",
+        url: r.url,
+        snippet: r.content || ""
+      }));
+    } catch { return null; }
+  });
+
+  // 2. Serper API (from vault or env)
+  providers.push(async () => {
+    const serperKey = process.env.SERPER_API_KEY || vaultGet("SERPER_API_KEY") || "";
+    if (!serperKey) return null;
+    try {
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "X-API-KEY": serperKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ q: query, num: count }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.organic || []).map(r => ({
+        title: r.title || "Google Search Result",
+        url: r.link,
+        snippet: r.snippet || ""
+      }));
+    } catch { return null; }
+  });
+
+  // 3. DuckDuckGo HTML parser
   providers.push(async () => {
     try {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; pi-custom-pack/1.0)" },
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
         signal: AbortSignal.timeout(10000),
       });
       const html = await res.text();
       const links = [];
       const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+      const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+      
       let m;
+      const snippets = [];
+      let sMatch;
+      while ((sMatch = snippetRegex.exec(html)) !== null) {
+        snippets.push(sMatch[1].replace(/<[^>]+>/g, "").trim());
+      }
+      
+      let idx = 0;
       while ((m = linkRegex.exec(html)) !== null && links.length < count) {
-        const href = m[1].replace(/\/\/duckduckgo\.com\/l\/\?uddg=/, "").replace(/&rut=.*$/, "");
+        let href = m[1];
+        if (href.includes("//duckduckgo.com/l/?uddg=")) {
+          href = href.replace(/\/\/duckduckgo\.com\/l\/\?uddg=/, "").replace(/&rut=.*$/, "");
+          href = decodeURIComponent(href);
+        }
         const title = m[2].replace(/<[^>]+>/g, "").trim();
-        if (href && title) links.push({ title, url: decodeURIComponent(href) });
+        const snippet = snippets[idx] || "";
+        if (href && title) {
+          links.push({ title, url: href, snippet });
+        }
+        idx++;
       }
       if (links.length) return links;
       throw new Error("No DDG results");
     } catch { return null; }
   });
 
-  // 2. HackerNews Algolia (free, reliable)
+  // 4. HackerNews Algolia (free, reliable)
   providers.push(async () => {
     try {
       const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&hitsPerPage=${count}`;
@@ -3656,7 +3715,7 @@ async function webSearch(query, count = 5) {
     } catch { return null; }
   });
 
-  // 3. Wikipedia API (free, useful for factual queries)
+  // 5. Wikipedia API (free, useful for factual queries)
   providers.push(async () => {
     try {
       const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=${count}`;
@@ -3678,8 +3737,12 @@ async function webSearch(query, count = 5) {
     }
   }
 
-  if (!results.length) return "Web search returned no results. Try a different query.";
+  return results;
+}
 
+async function webSearch(query, count = 5) {
+  const results = await searchWebRaw(query, count);
+  if (!results.length) return "Web search returned no results. Try a different query.";
   return results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet.slice(0, 200)}` : ""}`).join("\n\n");
 }
 
@@ -3859,7 +3922,7 @@ async function githubAction(args) {
         const pr = await githubApi(`/repos/${args.repo}/pulls/${args.number}`);
         const diffRes = await fetch(pr.diff_url, {
           headers: { Authorization: `Bearer ${githubToken()}` },
-          signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(120000),
         });
         const diff = await diffRes.text();
         return `PR #${args.number}: ${pr.title}\nState: ${pr.state}\nAuthor: ${pr.user?.login}\n\nDescription:\n${pr.body || "No description"}\n\nFiles changed: ${pr.changed_files}\n\nDiff:\n${diff.slice(0, 5000)}`;
@@ -7034,6 +7097,53 @@ export async function createApp() {
     return { votes: votes.length, rankings: ranked };
   });
 
+  app.post("/api/chat/completions", async (req) => {
+    const { model: reqModel, messages, stream, max_tokens } = req.body || {};
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return { error: "messages array is required" };
+    }
+    const model = resolveModel();
+    const baseUrl = model.baseUrl || "http://127.0.0.1:1234/v1";
+    const { apiKey } = getModelAuth(model);
+    const body = {
+      model: reqModel || model.id,
+      messages,
+      stream: !!stream,
+      max_tokens: max_tokens || 1024,
+    };
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 600000);
+      const r = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}) },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
+      if (!r.ok) {
+        const errText = await r.text().catch(() => "");
+        return { error: `Upstream error ${r.status}: ${errText.slice(0, 200)}` };
+      }
+      const data = await r.json();
+      if (data.choices?.[0]?.message) {
+        const msg = data.choices[0].message;
+        if (!msg.content && msg.reasoning_content) {
+          msg.content = msg.reasoning_content;
+        }
+      }
+      return data;
+    } catch (e) {
+      const tried = `${baseUrl}/chat/completions`;
+      if (e.name === "AbortError") {
+        return { error: `LLM at ${tried} timed out after 600s (10 min). The local model is slow for long documents. Try a narrower topic or check LM Studio GPU settings.` };
+      }
+      if (e.code === "ECONNREFUSED" || e.message?.includes("refused")) {
+        return { error: `Cannot connect to ${tried} — connection refused. Start your LLM server (LM Studio / Ollama).` };
+      }
+      return { error: `LLM request to ${tried} failed: ${e.message || e}` };
+    }
+  });
+
   // ── Vault with audit logging ─────────────────────────────────────────────
   const VAULT_AUDIT_FILE = path.join(PI_DIR, "vault-audit.jsonl");
   function vaultAudit(action, key, success) {
@@ -7386,27 +7496,30 @@ export async function createApp() {
     const depths = { quick: 2, moderate: 4, deep: 8 };
     const maxResults = depths[depth] || 4;
     try {
-      const results = [];
-      const seen = new Set();
-      for (let i = 0; i < maxResults; i++) {
-        const term = i === 0 ? query : `${query} ${i === 1 ? "analysis" : i === 2 ? "overview" : "details"}`;
+      const results = await searchWebRaw(query, maxResults);
+      let summary = "";
+      if (results.length > 0) {
         try {
-          const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(term)}&format=json&no_html=1`;
-          const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-          if (!res.ok) continue;
-          const data = await res.json();
-          const snippet = data.AbstractText || data.RelatedTopics?.[0]?.Text || "";
-          if (snippet && !seen.has(snippet)) {
-            seen.add(snippet);
-            results.push(snippet);
-          }
-        } catch {}
+          const findingsText = results.map((r, i) => `[Source ${i + 1}]: Title: ${r.title}\nSnippet: ${r.snippet}`).join("\n\n");
+          const systemPrompt = "You are a professional research summarizer. Synthesize the provided search snippets into a concise and informative executive summary. Cite sources in format [Source X] where appropriate.";
+          const userPrompt = `Research query: "${query}"\n\nSearch snippets:\n${findingsText}`;
+          summary = await getLLMCompletion(systemPrompt, userPrompt);
+        } catch (e) {
+          console.error("LLM summary generation failed:", e);
+        }
       }
-      const summary = results.slice(0, 3).join("\n") || `Research on "${query}" completed — ${maxResults} sources analyzed.`;
+      
+      if (!summary) {
+        summary = results.slice(0, 3).map(r => r.snippet || r.title).join("\n\n") || `Research on "${query}" completed — 0 sources analyzed.`;
+      }
+
       return {
         summary,
-        findings: results.map((r, i) => ({ title: `Source ${i + 1}`, content: r })),
-        sources: results.length > 0 ? [`https://duckduckgo.com/?q=${encodeURIComponent(query)}`] : [],
+        findings: results.map((r, i) => ({
+          title: r.title,
+          content: r.snippet ? `${r.snippet}\n\nLink: ${r.url}` : `Link: ${r.url}`
+        })),
+        sources: results.map(r => r.url),
         depth,
       };
     } catch (e) { return { error: e.message }; }
@@ -7810,7 +7923,7 @@ print(base64.b64encode(buf.getvalue()).decode())
     if (!name || !fs.existsSync(filePath)) { reply.status(404).send("Not found"); return; }
     const ext = path.extname(name).toLowerCase();
     reply.type(GALLERY_MIME[ext] || "application/octet-stream");
-    reply.send(fs.createReadStream(filePath));
+    reply.send(fs.readFileSync(filePath));
   });
   app.delete("/api/gallery/:filename", async (req) => {
     const name = path.basename(req.params.filename);

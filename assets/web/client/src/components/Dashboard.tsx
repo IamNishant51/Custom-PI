@@ -13,7 +13,7 @@ export default function Dashboard() {
   useEffect(() => {
     fetch("/api/budget/stats").then(r => r.json()).then(setStats).catch(() => {});
     fetch("/api/memory/stats").then(r => r.json()).then(setMemory).catch(() => {});
-    fetch("/api/models").then(r => r.json()).then(setModels).catch(() => {});
+    fetch("/api/models").then(r => r.json()).then(d => setModels(d.models || [])).catch(() => {});
     fetch("/api/vault/health").then(r => r.json()).then(d => {
       if (d.ok) setVaultHealth(d.message);
       else setVaultHealth("Locked / Key Required");
