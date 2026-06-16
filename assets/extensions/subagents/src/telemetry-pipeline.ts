@@ -90,7 +90,7 @@ export class TelemetryPipeline {
   }
 }
 
-let _activeSpans = new Map<string, { startTime: number; event: Omit<TelemetryEvent, "id" | "timestamp"> }>();
+const _activeSpans = new Map<string, { startTime: number; event: Omit<TelemetryEvent, "id" | "timestamp"> }>();
 
 export function startSpan(
   name: string,

@@ -76,7 +76,7 @@ export function validateCron(expression: string): string | null {
 }
 
 export function nextCronTick(cron: ParsedCron, after: Date): Date | null {
-  let current = new Date(after);
+  const current = new Date(after);
   current.setUTCSeconds(0, 0);
 
   const tryTime = (candidate: Date): boolean => {

@@ -1016,7 +1016,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
 
         const maxDepth = Math.min(6, Math.max(1, params.maxDepth ?? 3));
 
-        let treeLines: string[] = [];
+        const treeLines: string[] = [];
         function walkTree(dir: string, depth: number) {
           if (depth > maxDepth) return;
           try {

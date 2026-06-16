@@ -17,7 +17,7 @@ export interface ClusterIndex {
   assignments: Record<string, number>;
 }
 
-let clusterDrift = new Map<string, number>();
+const clusterDrift = new Map<string, number>();
 
 export function getClusterDrift(): Record<string, number> {
   const result: Record<string, number> = {};

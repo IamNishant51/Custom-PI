@@ -47,7 +47,7 @@ function estimateCost(provider: string, model: string, inputTokens: number, outp
 
 let cachedDailyCosts: CostEvent[] | null = null;
 let cachedDailyDate: string | null = null;
-let cachedSessionCosts: Map<string, CostEvent[]> = new Map();
+const cachedSessionCosts: Map<string, CostEvent[]> = new Map();
 
 function getDailyCost(): CostEvent[] {
   const today = new Date().toISOString().slice(0, 10);

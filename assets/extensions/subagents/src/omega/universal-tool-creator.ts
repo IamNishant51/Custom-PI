@@ -118,7 +118,7 @@ export class UniversalToolCreator {
       lines.push(`  async function ${fnName}(params = {}) {`);
       lines.push(`    try {`);
 
-      let url = endpoint.path;
+      const url = endpoint.path;
       if (pathParams.length > 0) {
         lines.push(`      let url = \`${endpoint.path}\`;`);
         lines.push(`      ${pathParams.map(p => `url = url.replace(\`:${p}\`, encodeURIComponent(params.${p}));`).join("\n      ")}`);
