@@ -354,6 +354,11 @@ function getOrCreateSession() {
   return globalSession;
 }
 
+// ── Standardized error response ────────────────────────────────────────────
+function sendError(reply, statusCode, message, code) {
+  return reply.status(statusCode).send({ error: message, code: code || `ERR_${statusCode}`, statusCode });
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const TEAMS_FILE = path.join(PI_DIR, "swarm-teams.json");
@@ -6070,26 +6075,26 @@ export async function createApp() {
   // Centralized error handler — logs full error server-side, returns sanitized message
   app.setErrorHandler((error, _req, reply) => {
     console.error("[Server Error]", error.stack || error.message);
-    reply.status(error.statusCode || 500).send({
-      error: process.env.NODE_ENV === "production" ? "Internal server error" : error.message,
-    });
+    sendError(reply, error.statusCode || 500,
+      process.env.NODE_ENV === "production" ? "Internal server error" : error.message,
+      "INTERNAL_ERROR");
   });
 
   // Rate limiting for sensitive endpoints
   app.addHook("onRequest", async (req, reply) => {
     if (req.url.startsWith("/api/vault/") && req.method === "POST") {
       if (!(await vaultRateLimiter.consume())) {
-        return reply.status(429).send({ error: "Too many requests — vault rate limit exceeded" });
+        return sendError(reply, 429, "Too many requests — vault rate limit exceeded", "RATE_LIMIT");
       }
     }
     if (req.url.startsWith("/api/settings") && req.method === "POST") {
       if (!(await settingsRateLimiter.consume())) {
-        return reply.status(429).send({ error: "Too many requests — settings rate limit exceeded" });
+        return sendError(reply, 429, "Too many requests — settings rate limit exceeded", "RATE_LIMIT");
       }
     }
     if (req.url.startsWith("/api/social/") && req.method === "POST") {
       if (!(await socialRateLimiter.consume())) {
-        return reply.status(429).send({ error: "Too many requests — social rate limit exceeded" });
+        return sendError(reply, 429, "Too many requests — social rate limit exceeded", "RATE_LIMIT");
       }
     }
   });
@@ -6103,11 +6108,11 @@ export async function createApp() {
     if (apiKey) {
       const auth = req.headers.authorization;
       if (!auth || !auth.startsWith("Bearer ")) {
-        return reply.status(401).send({ error: "Unauthorized — provide Bearer token via Authorization header or set PI_API_KEY" });
+        return sendError(reply, 401, "Unauthorized — provide Bearer token via Authorization header or set PI_API_KEY", "UNAUTHORIZED");
       }
       const token = auth.slice(7);
       if (token.length !== apiKey.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(apiKey))) {
-        return reply.status(401).send({ error: "Unauthorized — invalid token" });
+        return sendError(reply, 401, "Unauthorized — invalid token", "UNAUTHORIZED");
       }
     }
     done();
@@ -6172,7 +6177,7 @@ export async function createApp() {
     if (AUTH_KEY) {
       const key = req.headers["x-api-key"];
       if (!key || key.length !== AUTH_KEY.length || !crypto.timingSafeEqual(Buffer.from(key), Buffer.from(AUTH_KEY))) {
-        return reply.code(401).send({ error: "Unauthorized" });
+        return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
       }
     }
   });
@@ -6376,7 +6381,7 @@ export async function createApp() {
     // triggers another 404 handler and causes "Trying to send a NotFound
     // error inside a 404 handler")
     if (req.url.startsWith("/api") || req.url.startsWith("/ws")) {
-      return reply.status(404).send({ error: "Not found", path: req.url });
+      return sendError(reply, 404, `Not found: ${req.url}`, "NOT_FOUND");
     }
 
     // Try to serve the file from dist/ (handles assets/*.js, *.css, etc.)
@@ -6390,7 +6395,7 @@ export async function createApp() {
     if (fs.existsSync(indexPath)) {
       reply.type("text/html").send(fs.readFileSync(indexPath, "utf8"));
     } else {
-      reply.status(404).send("Not found");
+      sendError(reply, 404, "Not found", "NOT_FOUND");
     }
   });
 
