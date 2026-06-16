@@ -8,6 +8,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ThemeProvider } from "./context/ThemeContext";
 import { ModalProvider } from "./context/ModalContext";
 import ModalContainer from "./components/ModalContainer";
+import KeyboardShortcuts from "./components/KeyboardShortcuts";
 
 const Dashboard = lazy(() => import("./components/Dashboard"));
 const VaultPanel = lazy(() => import("./components/VaultPanel"));
@@ -72,6 +73,7 @@ export default function App() {
 function AppContent() {
   const [activeView, setActiveView] = useState<View>(hashToView);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { ws, connected } = useChat();
 
   const navigate = useCallback((view: View) => {
@@ -84,6 +86,16 @@ function AppContent() {
     const onHash = () => setActiveView(hashToView());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setShortcutsOpen((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
@@ -141,6 +153,7 @@ function AppContent() {
           </div>
         </div>
       </div>
+      <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </ErrorBoundary>
   );
 }

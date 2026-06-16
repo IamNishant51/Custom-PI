@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { View } from "../App";
 import {
   AsciiChat, AsciiDashboard, AsciiVault, AsciiBudget, AsciiMemory,
@@ -45,13 +46,48 @@ const NAV_ITEMS: { view: View; icon: typeof AsciiChat; label: string }[] = [
 ];
 
 export default function Sidebar({ activeView, onNavigate, wsConnected }: SidebarProps) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return NAV_ITEMS;
+    const q = search.toLowerCase();
+    return NAV_ITEMS.filter(
+      (item) =>
+        item.label.toLowerCase().includes(q) || item.view.toLowerCase().includes(q)
+    );
+  }, [search]);
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
         <AsciiBanner />
       </div>
+      <div className="sidebar-search">
+        <input
+          className="sidebar-search-input"
+          type="text"
+          placeholder="Search views..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search sidebar views"
+        />
+        {search && (
+          <button
+            className="sidebar-search-clear"
+            onClick={() => setSearch("")}
+            aria-label="Clear search"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {search && filtered.length < NAV_ITEMS.length && (
+        <div className="sidebar-search-count">
+          {filtered.length} / {NAV_ITEMS.length} matches
+        </div>
+      )}
       <div className="sidebar-nav">
-        {NAV_ITEMS.map((item) => {
+        {filtered.map((item) => {
           const Icon = item.icon;
           return (
             <button
@@ -64,6 +100,11 @@ export default function Sidebar({ activeView, onNavigate, wsConnected }: Sidebar
             </button>
           );
         })}
+        {filtered.length === 0 && (
+          <div style={{ padding: "16px", color: "var(--mute)", fontSize: 12, textAlign: "center", fontFamily: "var(--font-mono)" }}>
+            No matches
+          </div>
+        )}
       </div>
       <div style={{ padding: "8px 16px", borderTop: "1px solid var(--hairline)", fontSize: 11, color: "var(--mute)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
