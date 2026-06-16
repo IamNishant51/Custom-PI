@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "./Toast";
 import { useChat } from "../context/ChatContext";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface TeamSlot {
   id: string;
@@ -286,6 +287,7 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
   const [teams, setTeams] = useState<Team[]>([]);
   const [knownAgents, setKnownAgents] = useState<DiscoveredAgent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [runTeam, setRunTeam] = useState<Team | null>(null);
   const { toast } = useToast();
@@ -308,18 +310,20 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
   }
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadError(null);
     try {
       const [teamsRes, agentsRes] = await Promise.all([
         fetch("/api/teams"),
         fetch("/api/agents/discover"),
       ]);
+      if (!teamsRes.ok) throw new Error(`HTTP ${teamsRes.status}`);
+      if (!agentsRes.ok) throw new Error(`HTTP ${agentsRes.status}`);
       const teamsData = await teamsRes.json();
       const agentsData = await agentsRes.json();
       setTeams((teamsData.teams || []).map(normalizeTeam));
       setKnownAgents(agentsData.agents || []);
-    } catch {
-      toast("Failed to load teams", "error");
+    } catch (e: any) {
+      setLoadError(e.message || "Failed to load teams");
     } finally {
       setLoading(false);
     }
@@ -384,6 +388,9 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
     if (onNavigate) onNavigate("agents");
   }, [runTeam, ws, onNavigate]);
 
+  if (loading) return <PanelLoadingSpinner message="Loading teams..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
+
   return (
     <div className="team-panel">
       {runTeam && <RunTeamModal team={runTeam} onClose={() => setRunTeam(null)} onRun={handleRunTeam} />}
@@ -391,21 +398,14 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
       <div className="team-panel-topbar">
         <div className="team-panel-topbar-left">
           <h2 className="team-panel-title">Teams</h2>
-          {!loading && <span className="team-panel-count">{teams.length}</span>}
+          <span className="team-panel-count">{teams.length}</span>
         </div>
         <button className="btn btn-small" onClick={() => setShowCreate(true)}>+ New Team</button>
       </div>
 
       {showCreate && <CreateTeamForm knownAgents={knownAgents} onClose={() => setShowCreate(false)} onCreated={loadData} />}
 
-      {loading && (
-        <div className="team-panel-loading">
-          <div className="loading-spinner" />
-          <span>Loading teams...</span>
-        </div>
-      )}
-
-      {!loading && teams.length === 0 && (
+      {teams.length === 0 && (
         <div className="team-panel-empty">
           <div className="team-panel-empty-icon">👥</div>
           <div className="team-panel-empty-title">No Teams Yet</div>
@@ -414,7 +414,7 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
         </div>
       )}
 
-      {!loading && teams.map(team => (
+      {teams.map(team => (
         <TeamCard key={team.id} team={team} onDelete={deleteTeam} onAddAgent={addAgent} onRemoveAgent={removeAgent} onRunTeam={openRunModal} knownAgents={knownAgents} />
       ))}
     </div>

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 type ToastMsg = { text: string; type: "success" | "error" } | null;
 
@@ -6,6 +7,7 @@ export default function ImageGalleryPanel() {
   const [images, setImages] = useState<string[]>([]);
   const [viewing, setViewing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -18,21 +20,22 @@ export default function ImageGalleryPanel() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const load = async () => {
+  const loadData = useCallback(async () => {
+    setLoading(true); setLoadError(null);
     try {
-      setLoading(true);
       const r = await fetch("/api/gallery");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       setImages(d.images || []);
       setPreviewError(new Set());
-    } catch {
-      showToast("Failed to load images", "error");
+    } catch (e: any) {
+      setLoadError(e.message || "Failed to load");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -60,7 +63,7 @@ export default function ImageGalleryPanel() {
         throw new Error(text || "Upload failed");
       }
       showToast("Image uploaded", "success");
-      await load();
+      await loadData();
     } catch (err: any) {
       showToast(err.message || "Upload failed", "error");
     } finally {
@@ -77,7 +80,7 @@ export default function ImageGalleryPanel() {
       if (!r.ok) throw new Error("Delete failed");
       showToast("Image deleted", "success");
       if (viewing === name) setViewing(null);
-      await load();
+      await loadData();
     } catch (err: any) {
       showToast(err.message || "Delete failed", "error");
     } finally {
@@ -111,10 +114,9 @@ export default function ImageGalleryPanel() {
         </div>
       </div>
       {loading ? (
-        <div style={{ padding: 40, textAlign: "center", color: "var(--mute)" }}>
-          <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
-          Loading images...
-        </div>
+        <PanelLoadingSpinner message="Loading images..." />
+      ) : loadError ? (
+        <PanelErrorCard message={loadError} onRetry={loadData} />
       ) : images.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-marker">~</div>

@@ -1,10 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 export default function DeepResearchPanel() {
   const [query, setQuery] = useState("");
   const [depth, setDepth] = useState("moderate");
   const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
   const [result, setResult] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setLoadError(null);
+    try {
+      // No initial data fetch
+    } catch (e: any) { setLoadError(e.message || "Failed to load"); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const run = async () => {
     if (!query.trim()) return;
@@ -27,6 +40,9 @@ export default function DeepResearchPanel() {
       <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{content}</p>
     </div>
   );
+
+  if (loading) return <PanelLoadingSpinner message="Loading research..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div className="panel" style={{ padding: 16 }}>

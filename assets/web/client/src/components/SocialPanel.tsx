@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { showToast } from "./Toast";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface SocialStatus {
   ok: boolean;
@@ -41,6 +42,7 @@ export default function SocialPanel() {
   const [social, setSocial] = useState<SocialStatus | null>(null);
   const [email, setEmail] = useState<EmailStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeConnect, setActiveConnect] = useState<"twitter" | "reddit" | "email" | "linkedin" | "bluesky" | "discord" | "telegram" | null>(null);
 
   const [formUser, setFormUser] = useState("");
@@ -64,17 +66,25 @@ export default function SocialPanel() {
   const [drafts, setDrafts] = useState<QueueItem[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
 
-  async function fetchStatus() {
+  const fetchStatus = useCallback(async () => {
+    setLoading(true); setLoadError(null);
     try {
-      const [s, e] = await Promise.all([
-        fetch("/api/social/status").then(r => r.json()).catch(() => ({ ok: false })),
-        fetch("/api/social/email/status").then(r => r.json()).catch(() => ({ ok: false })),
+      const [sRes, eRes] = await Promise.all([
+        fetch("/api/social/status"),
+        fetch("/api/social/email/status"),
       ]);
+      if (!sRes.ok) throw new Error(`HTTP ${sRes.status}`);
+      if (!eRes.ok) throw new Error(`HTTP ${eRes.status}`);
+      const s = await sRes.json();
+      const e = await eRes.json();
       setSocial(s);
       setEmail(e);
-    } catch {}
-    setLoading(false);
-  }
+    } catch (err: any) {
+      setLoadError(err.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const fetchQueue = useCallback(async () => {
     setQueueLoading(true);
@@ -200,7 +210,8 @@ export default function SocialPanel() {
     } catch { showToast("Failed to reject draft", "error"); }
   }
 
-  if (loading) return <div className="social-empty"><div className="loading-spinner" /></div>;
+  if (loading) return <PanelLoadingSpinner message="Loading social..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={fetchStatus} />;
 
   const platforms = social?.platforms;
   const twitterOk = platforms?.twitter?.configured;

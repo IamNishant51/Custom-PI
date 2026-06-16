@@ -1,19 +1,35 @@
-import { useState, useEffect } from "react";
-import { showToast } from "./Toast";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 export default function PipelinePanel() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/pipeline/status").then(r => r.json()).then(setData).catch(() => showToast("Failed to load pipeline status", "error")).finally(() => setLoading(false));
+  const loadData = useCallback(async () => {
+    setLoading(true); setLoadError(null);
+    try {
+      const r = await fetch("/api/pipeline/status");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setData(d);
+    } catch (e: any) {
+      setLoadError(e.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  if (loading) return <PanelLoadingSpinner message="Loading pipeline..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="card">
         <div className="card-header">Deployment Pipeline</div>
-        {loading ? <div style={{ padding: 20, textAlign: "center" }}>Loading...</div> : !data?.deployments?.length ? (
+        {!data?.deployments?.length ? (
           <div style={{ padding: 20, textAlign: "center", color: "var(--mute)" }}>No deployments yet</div>
         ) : (
           <table className="data-table">

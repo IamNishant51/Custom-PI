@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 export default function CalendarPanel() {
   const [events, setEvents] = useState<any[]>([]);
@@ -7,26 +8,38 @@ export default function CalendarPanel() {
   const [caldavUrl, setCaldavUrl] = useState("");
   const [caldavUser, setCaldavUser] = useState("");
   const [caldavPass, setCaldavPass] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = async () => {
-    try { const r = await fetch("/api/calendar/events"); const d = await r.json(); setEvents(d.events || []); } catch {}
-  };
-  useEffect(() => { load(); }, []);
+  const loadData = useCallback(async () => {
+    setLoading(true); setLoadError(null);
+    try {
+      const r = await fetch("/api/calendar/events");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setEvents(d.events || []);
+    } catch (e: any) { setLoadError(e.message || "Failed to load"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const addEvent = async () => {
     if (!form.title || !form.start) return;
     await fetch("/api/calendar/events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, start: new Date(form.start).getTime(), end: form.end ? new Date(form.end).getTime() : undefined }) });
-    setForm({ title: "", start: "", end: "", description: "", location: "" }); setShowForm(false); load();
+    setForm({ title: "", start: "", end: "", description: "", location: "" }); setShowForm(false); loadData();
   };
 
-  const delEvent = async (id: string) => { await fetch(`/api/calendar/events/${id}`, { method: "DELETE" }); load(); };
+  const delEvent = async (id: string) => { await fetch(`/api/calendar/events/${id}`, { method: "DELETE" }); loadData(); };
 
   const syncCaldav = async () => {
     await fetch("/api/calendar/caldav/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverUrl: caldavUrl, username: caldavUser, password: caldavPass }) });
-    load();
+    loadData();
   };
 
   const formatDate = (ts: number) => new Date(ts).toLocaleString();
+
+  if (loading) return <PanelLoadingSpinner message="Loading calendar..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div className="panel" style={{ padding: 16 }}>

@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface ModelInfo {
   id: string; provider: string; size?: string; quantization?: string;
@@ -8,19 +9,35 @@ export default function CookbookPanel() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/models")
-      .then(r => r.json())
-      .then(d => setModels(d.models || []))
-      .catch(() => {});
-    fetch("/api/model-providers")
-      .then(r => r.json())
-      .then(d => setProviders(d.providers || []))
-      .catch(() => {});
+  const loadData = useCallback(async () => {
+    setLoading(true); setLoadError(null);
+    try {
+      const [mRes, pRes] = await Promise.all([
+        fetch("/api/models"),
+        fetch("/api/model-providers"),
+      ]);
+      if (!mRes.ok) throw new Error(`HTTP ${mRes.status}`);
+      if (!pRes.ok) throw new Error(`HTTP ${pRes.status}`);
+      const mData = await mRes.json();
+      const pData = await pRes.json();
+      setModels(mData.models || []);
+      setProviders(pData.providers || []);
+    } catch (e: any) {
+      setLoadError(e.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  useEffect(() => { loadData(); }, [loadData]);
+
   const filtered = models.filter(m => !search || m.id.toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <PanelLoadingSpinner message="Loading cookbook..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div className="panel" style={{ padding: 16 }}>
