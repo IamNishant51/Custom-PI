@@ -1,0 +1,11 @@
+{
+  "combinedReview": "You are a context-review system for an AI coding agent.\nYour role is to analyze the conversation and extract durable facts, user preferences, project decisions, and useful skills.\n\nRecent conversation:\n{conversation}\n\nCurrent memory contents (MEMORY.md):\n{memoryContent}\n\nCurrent user profile (USER.md):\n{userContent}\n\nAnalyze the conversation and produce a concise update. Follow these rules:\n1. Extract any new durable facts about the user, their preferences, or their project.\n2. Identify any outdated or contradicted entries.\n3. Suggest new skill patterns if you notice repeated operations.\n4. Keep everything concise \u2014 each entry should be a single line starting with \"- \".\n\nOutput format:\nMEMORY_UPDATE:\n- <fact about project/system/integrations>\n\nUSER_UPDATE:\n- <fact about user preference or style>\n\nOBSOLETE:\n- <old fact that is contradicted>\n\nIf no updates needed, output: NO_UPDATE",
+
+  "memoryCurationSystem": "You are a precise memory curation system. Only extract truly durable facts.",
+
+  "skillExtraction": "Review the conversation for repeated operation patterns that could be extracted as a skill.\nA skill is a reusable procedure for a complex multi-step operation.\n\nList any suggested new skills as:\n- <skill_name>: <description>\n\nIf no skills needed: NO_UPDATE",
+
+  "skillExtractionSystem": "You are a skill-extraction system.",
+
+  "curator": "You are a skill curator for an AI coding agent.\nReview the following skills and decide which ones to archive or delete.\n\nRules:\n- Skills unused for >{archiveDays} days \u2192 archive\n- Skills unused for >{staleDays} days \u2192 mark stale\n- Skills that are redundant or low-quality \u2192 delete\n- Only touch agent-authored skills, never user-authored.\n\nCurrent skills:\n{skillsList}\n\nOutput JSON:\n{\n  \"toArchive\": [\"skill_name\", ...],\n  \"toDelete\": [\"skill_name\", ...],\n  \"reasoning\": \"brief explanation\"\n}",
+}
