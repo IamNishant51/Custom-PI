@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
 import { useToast } from "./Toast";
 import { AsciiEye, AsciiTrash, AsciiRefresh } from "./Icons";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 export default function VaultPanel() {
   const [keys, setKeys] = useState<string[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [revealed, setRevealed] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
+  const [storing, setStoring] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { toast } = useToast();
 
   const refreshKeys = () => {
@@ -17,11 +20,26 @@ export default function VaultPanel() {
       .catch(() => toast("Failed to load secrets", "error"));
   };
 
-  useEffect(() => { refreshKeys(); }, []);
+  const loadKeys = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/vault/list");
+      const d = await res.json();
+      setKeys(d.keys || []);
+    } catch {
+      setLoadError("Failed to load secrets");
+      toast("Failed to load secrets", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadKeys(); }, []);
 
   const addSecret = async () => {
     if (!newKey || !newValue) return;
-    setLoading(true);
+    setStoring(true);
     try {
       const res = await fetch("/api/vault/set", {
         method: "POST",
@@ -35,7 +53,7 @@ export default function VaultPanel() {
         refreshKeys();
       }
     } catch { toast("Failed to store secret", "error"); }
-    setLoading(false);
+    setStoring(false);
   };
 
   const revealSecret = async (key: string) => {
@@ -65,67 +83,75 @@ export default function VaultPanel() {
 
   return (
     <div>
-      <div className="vault-grid">
-        <div className="card">
-          <div className="card-header">Add Secret</div>
-          <div className="vault-add-form">
-            <input type="text" placeholder="Key (e.g., MY_API_KEY)" value={newKey} onChange={e => setNewKey(e.target.value)} />
-            <input type="password" placeholder="Value" value={newValue} onChange={e => setNewValue(e.target.value)} />
-            <button className="btn btn-primary" onClick={addSecret} disabled={loading}>
-              {loading ? "Storing..." : "Store Secret"}
-            </button>
-          </div>
-        </div>
+      {loading ? (
+        <PanelLoadingSpinner message="Loading secrets..." />
+      ) : loadError ? (
+        <PanelErrorCard message={loadError} onRetry={loadKeys} />
+      ) : (
+        <>
+          <div className="vault-grid">
+            <div className="card">
+              <div className="card-header">Add Secret</div>
+              <div className="vault-add-form">
+                <input type="text" placeholder="Key (e.g., MY_API_KEY)" value={newKey} onChange={e => setNewKey(e.target.value)} />
+                <input type="password" placeholder="Value" value={newValue} onChange={e => setNewValue(e.target.value)} />
+                <button className="btn btn-primary" onClick={addSecret} disabled={storing}>
+                  {storing ? "Storing..." : "Store Secret"}
+                </button>
+              </div>
+            </div>
 
-        <div className="card">
-          <div className="card-header">Vault Health</div>
-          <div style={{ fontSize: 13 }}>
-            <div style={{ marginBottom: 8 }}>Keys stored: <strong>{keys.length}</strong></div>
-            <button className="btn btn-ghost" onClick={refreshKeys} style={{ display: "flex", alignItems: "center", gap: 4 }}><AsciiRefresh size={14} /> refresh</button>
+            <div className="card">
+              <div className="card-header">Vault Health</div>
+              <div style={{ fontSize: 13 }}>
+                <div style={{ marginBottom: 8 }}>Keys stored: <strong>{keys.length}</strong></div>
+                <button className="btn btn-ghost" onClick={refreshKeys} style={{ display: "flex", alignItems: "center", gap: 4 }}><AsciiRefresh size={14} /> refresh</button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div className="card">
-        <div className="card-header">Stored Secrets</div>
-        {keys.length === 0 ? (
-          <div className="empty-state" style={{ padding: 20 }}>
-            <div className="empty-state-desc">No secrets stored. Use the form above to add one.</div>
+          <div className="card">
+            <div className="card-header">Stored Secrets</div>
+            {keys.length === 0 ? (
+              <div className="empty-state" style={{ padding: 20 }}>
+                <div className="empty-state-desc">No secrets stored. Use the form above to add one.</div>
+              </div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr><th>Key</th><th>Value</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {keys.map(key => (
+                    <tr key={key}>
+                      <td style={{ fontWeight: 600 }}>{key}</td>
+                      <td>
+                        {revealed[key] ? (
+                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--ink)" }}>{revealed[key]}</span>
+                        ) : (
+                          <span style={{ color: "var(--muted-soft)" }}>********</span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button className="btn btn-ghost" onClick={() => revealSecret(key)} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <AsciiEye size={14} />
+                            {revealed[key] ? "hide" : "show"}
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => deleteSecret(key)} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--danger)" }}>
+                            <AsciiTrash size={14} />
+                            del
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr><th>Key</th><th>Value</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {keys.map(key => (
-                <tr key={key}>
-                  <td style={{ fontWeight: 600 }}>{key}</td>
-                  <td>
-                    {revealed[key] ? (
-                      <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--ink)" }}>{revealed[key]}</span>
-                    ) : (
-                      <span style={{ color: "var(--muted-soft)" }}>********</span>
-                    )}
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-ghost" onClick={() => revealSecret(key)} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <AsciiEye size={14} />
-                        {revealed[key] ? "hide" : "show"}
-                      </button>
-                      <button className="btn btn-ghost" onClick={() => deleteSecret(key)} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--danger)" }}>
-                        <AsciiTrash size={14} />
-                        del
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "./Toast";
 import { AsciiRefresh, AsciiEye } from "./Icons";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface DiscoveredAgent {
   name: string;
@@ -45,19 +46,19 @@ function AgentCard({ agent }: { agent: DiscoveredAgent }) {
 export default function AgentsPanel() {
   const [agents, setAgents] = useState<DiscoveredAgent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { toast } = useToast();
 
   const fetchAgents = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const r = await fetch("/api/agents/discover");
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       setAgents(d.agents || []);
     } catch (e: any) {
-      setError(e.message || "Failed to discover agents");
+      setLoadError(e.message || "Failed to discover agents");
       toast("Failed to discover agents", "error");
     } finally {
       setLoading(false);
@@ -86,22 +87,11 @@ export default function AgentsPanel() {
         </div>
       </div>
 
-      {error && (
-        <div className="card card-error" style={{ marginBottom: 16 }}>
-          <div className="card-body">
-            <span style={{ color: "var(--danger)" }}>Failed to discover agents: {error}</span>
-          </div>
-        </div>
-      )}
-
-      {loading && (
-        <div style={{ padding: 32, textAlign: "center" }}>
-          <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
-          <div style={{ fontSize: 13, color: "var(--mute)" }}>Checking installed CLI agents...</div>
-        </div>
-      )}
-
-      {!loading && !error && (
+      {loading ? (
+        <PanelLoadingSpinner message="Checking installed CLI agents..." />
+      ) : loadError ? (
+        <PanelErrorCard message={loadError} onRetry={fetchAgents} />
+      ) : (
         <>
           {available.length > 0 && (
             <>
