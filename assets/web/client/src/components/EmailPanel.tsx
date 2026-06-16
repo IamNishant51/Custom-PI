@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface EmailAccount { id: string; email: string; host: string; }
 interface EmailMessage { id: string; from: string; subject: string; date: string; body?: string; }
@@ -7,6 +8,8 @@ export default function EmailPanel() {
   const [view, setView] = useState<"inbox" | "compose" | "accounts">("inbox");
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [emails, setEmails] = useState<EmailMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<EmailMessage | null>(null);
   const [summary, setSummary] = useState("");
   const [summarizing, setSummarizing] = useState(false);
@@ -25,7 +28,13 @@ export default function EmailPanel() {
     try { const r = await fetch("/api/email/accounts"); const d = await r.json(); setAccounts(d.accounts || []); } catch {}
   };
   const loadEmails = async () => {
-    try { const r = await fetch("/api/email/fetch"); const d = await r.json(); setEmails(d.emails || []); } catch {}
+    setLoading(true); setLoadError(null);
+    try {
+      const r = await fetch("/api/email/fetch");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json(); setEmails(d.emails || []);
+    } catch (e: any) { setLoadError(e.message || "Failed to load emails"); }
+    setLoading(false);
   };
   useEffect(() => { loadAccounts(); loadEmails(); }, []);
 
@@ -180,6 +189,10 @@ export default function EmailPanel() {
                 </div>
               )}
             </div>
+          ) : loading ? (
+            <PanelLoadingSpinner message="Loading emails..." />
+          ) : loadError ? (
+            <PanelErrorCard message={loadError} onRetry={loadEmails} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {emails.length === 0 ? (

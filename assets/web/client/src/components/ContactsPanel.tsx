@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface Contact {
   id: string; name: string; email: string; phone: string;
@@ -7,12 +8,22 @@ interface Contact {
 
 export default function ContactsPanel() {
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", organization: "", notes: "" });
   const [editId, setEditId] = useState<string | null>(null);
 
   const load = async () => {
-    try { const r = await fetch("/api/contacts"); const d = await r.json(); setContacts(d.contacts || []); } catch {}
+    setLoading(true); setLoadError(null);
+    try {
+      const r = await fetch("/api/contacts");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json(); setContacts(d.contacts || []);
+    } catch (e: any) {
+      setLoadError(e.message || "Failed to load contacts");
+    }
+    setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
@@ -46,7 +57,11 @@ export default function ContactsPanel() {
           <button className="btn" onClick={save}>{editId ? "Update" : "Create"}</button>
         </div>
       )}
-      {contacts.length === 0 ? (
+      {loading ? (
+        <PanelLoadingSpinner message="Loading contacts..." />
+      ) : loadError ? (
+        <PanelErrorCard message={loadError} onRetry={load} />
+      ) : contacts.length === 0 ? (
         <div style={{ padding: 32, textAlign: "center", color: "var(--mute)" }}>No contacts yet.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
