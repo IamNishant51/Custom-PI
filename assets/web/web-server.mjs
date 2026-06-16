@@ -20,6 +20,8 @@ import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 
 import { parse as parseYaml } from "yaml";
+import { initMigrations, getMigrationStatus } from "./migrations.mjs";
+import { loadFlags, getFlags, setFlag, isFlagEnabled } from "./flags.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PI_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -6055,6 +6057,9 @@ function validateEnv() {
 
 export async function createApp() {
   const app = Fastify({ logger: { level: "warn" } });
+  const stateDb = getOrCreateDb(path.join(PI_DIR, "session-state.db"));
+  initMigrations(stateDb);
+  loadFlags();
 
   // API version prefix rewrite — /api/v1/* → /api/* for backward compatibility
   app.addHook("onRequest", async (req, reply) => {
@@ -6487,6 +6492,16 @@ export async function createApp() {
   app.get("/api/health", async () => ({
     status: "ok", version: "1.0.0", timestamp: new Date().toISOString(),
   }));
+
+  app.get("/api/migrations/status", async () => getMigrationStatus());
+
+  app.get("/api/flags", async () => getFlags());
+  app.post("/api/flags", async (req) => {
+    const { key, value, description } = req.body || {};
+    if (!key || !value) return { error: "key and value required" };
+    setFlag(key, value, description);
+    return { ok: true };
+  });
 
   // ── Voice Agent API ────────────────────────────────────────────────
   const TTS_SERVER = process.env.TTS_SERVER || "http://127.0.0.1:8000";

@@ -1,0 +1,22 @@
+{
+  "undo-redo": {
+    "value": "off",
+    "description": "Enable undo/redo for destructive actions"
+  },
+  "search-command-palette": {
+    "value": "on",
+    "description": "Enable Cmd+K command palette search"
+  },
+  "optimistic-updates": {
+    "value": "on",
+    "description": "Immediate UI updates before API response"
+  },
+  "notification-center": {
+    "value": "off",
+    "description": "Persistent notification center with read/unread"
+  },
+  "pwa-offline": {
+    "value": "on",
+    "description": "Service worker offline caching"
+  }
+}

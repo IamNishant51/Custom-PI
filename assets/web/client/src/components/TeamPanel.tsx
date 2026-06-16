@@ -214,10 +214,14 @@ function CreateTeamForm({
   knownAgents,
   onClose,
   onCreated,
+  onCreating,
+  onCreateError,
 }: {
   knownAgents: DiscoveredAgent[];
   onClose: () => void;
   onCreated: () => void;
+  onCreating?: (data: { name: string; workspace: string; leaderAgentId: string }) => string | undefined;
+  onCreateError?: (tempId: string) => void;
 }) {
   const [form, setForm] = useState({ name: "", workspace: "default", leaderAgentId: "" });
   const [saving, setSaving] = useState(false);
@@ -229,6 +233,7 @@ function CreateTeamForm({
     if (!form.name.trim()) { toast("Team name is required", "error"); return; }
     if (!form.leaderAgentId) { toast("Select a leader agent", "error"); return; }
     setSaving(true);
+    const tempId = onCreating?.({ name: form.name.trim(), workspace: form.workspace || "default", leaderAgentId: form.leaderAgentId });
     try {
       const r = await fetch("/api/teams", {
         method: "POST",
@@ -240,11 +245,12 @@ function CreateTeamForm({
       onCreated();
       onClose();
     } catch (e: any) {
+      if (tempId) onCreateError?.(tempId);
       toast(e.message || "Failed to create team", "error");
     } finally {
       setSaving(false);
     }
-  }, [form, onClose, onCreated]);
+  }, [form, onClose, onCreated, onCreating, onCreateError]);
 
   return (
     <div className="create-team-overlay" onClick={onClose}>
@@ -331,7 +337,30 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
 
   useEffect(() => { loadData(); }, []);
 
+  const handleCreating = useCallback((data: { name: string; workspace: string; leaderAgentId: string }) => {
+    const tempId = `temp-${Date.now()}`;
+    const tempTeam: Team = {
+      id: tempId,
+      name: data.name,
+      workspace: data.workspace,
+      leaderAgentId: data.leaderAgentId,
+      slots: [],
+      createdAt: new Date().toISOString(),
+    };
+    setTeams(prev => [tempTeam, ...prev]);
+    return tempId;
+  }, []);
+
+  const handleCreateError = useCallback((tempId: string) => {
+    setTeams(prev => prev.filter(t => t.id !== tempId));
+  }, []);
+
   const deleteTeam = useCallback(async (teamId: string) => {
+    let removedTeam: Team | undefined;
+    setTeams(prev => {
+      removedTeam = prev.find(t => t.id === teamId);
+      return prev.filter(t => t.id !== teamId);
+    });
     try {
       const r = await fetch("/api/teams/delete", {
         method: "POST",
@@ -340,11 +369,11 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
       });
       if (!r.ok) throw new Error(await r.text());
       toast("Team deleted", "success");
-      loadData();
     } catch (e: any) {
+      if (removedTeam) setTeams(prev => [removedTeam!, ...prev]);
       toast(e.message || "Failed to delete team", "error");
     }
-  }, [loadData]);
+  }, [toast]);
 
   const addAgent = useCallback(async (teamId: string, agentId: string) => {
     if (!agentId) return;
@@ -403,7 +432,7 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
         <button className="btn btn-small" onClick={() => setShowCreate(true)}>+ New Team</button>
       </div>
 
-      {showCreate && <CreateTeamForm knownAgents={knownAgents} onClose={() => setShowCreate(false)} onCreated={loadData} />}
+      {showCreate && <CreateTeamForm knownAgents={knownAgents} onClose={() => setShowCreate(false)} onCreated={loadData} onCreating={handleCreating} onCreateError={handleCreateError} />}
 
       {teams.length === 0 && (
         <div className="team-panel-empty">
