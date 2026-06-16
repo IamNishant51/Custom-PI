@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "./Toast";
 import { AsciiPlus, AsciiCheck, AsciiX, AsciiPlay, AsciiTrash } from "./Icons";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface McpServer {
   name: string;
@@ -16,14 +17,26 @@ export default function MCPPanel() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState<McpServer>({ name: "", command: "", args: [], enabled: true, description: "" });
   const [testOutput, setTestOutput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetch("/api/mcp/config")
-      .then(r => r.json())
-      .then(d => setServers(d.servers || []))
-      .catch(() => toast("Failed to load MCP config", "error"));
-  }, []);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const r = await fetch("/api/mcp/config");
+      const d = await r.json();
+      setServers(d.servers || []);
+    } catch {
+      setLoadError("Failed to load MCP config");
+      toast("Failed to load MCP config", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const save = useCallback(async () => {
     await fetch("/api/mcp/config", {
@@ -67,6 +80,9 @@ export default function MCPPanel() {
     setServers(prev => prev.map(s => s.name === name ? { ...s, enabled: !s.enabled } : s));
     setDirty(true);
   };
+
+  if (loading) return <PanelLoadingSpinner message="Loading MCP configuration..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div>

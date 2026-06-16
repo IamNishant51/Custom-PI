@@ -5,6 +5,7 @@ import { showToast } from "./Toast";
 import { AudioEngine } from "../lib/audio-engine";
 import { Volume2, Plus, X } from "lucide-react";
 import Markdown from "./Markdown";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface VoicePreset {
   id: string;
@@ -70,6 +71,8 @@ export default function VoicePanel() {
   const [micStatus, setMicStatus] = useState<MicStatus>("prompt");
   const [micStatusText, setMicStatusText] = useState("");
   const [textInput, setTextInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem("voiceAgentVolume");
     return saved ? Number(saved) : 40;
@@ -122,6 +125,8 @@ export default function VoicePanel() {
     
     mountedRef.current = true;
     const fetchVoices = async () => {
+      setLoading(true);
+      setLoadError(null);
       try {
         const r = await fetch("/api/voice/voices");
         const d = await r.json();
@@ -132,7 +137,12 @@ export default function VoicePanel() {
         }
         setTtsConnected(true);
       } catch {
-        if (mountedRef.current) setTtsConnected(false);
+        if (mountedRef.current) {
+          setTtsConnected(false);
+          setLoadError("Failed to load voice profiles");
+        }
+      } finally {
+        if (mountedRef.current) setLoading(false);
       }
     };
     fetchVoices();
@@ -595,6 +605,9 @@ export default function VoicePanel() {
       </div>
     );
   };
+
+  if (loading) return <PanelLoadingSpinner message="Loading voice settings..." />;
+  if (loadError) return <PanelErrorCard message={loadError} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", padding: 0, height: "100%" }}>

@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
@@ -9,20 +10,50 @@ export default function Dashboard() {
   const [mcpConfig, setMcpConfig] = useState<any>(null);
   const [swarmTeams, setSwarmTeams] = useState<any[]>([]);
   const [workProducts, setWorkProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/budget/stats").then(r => r.json()).then(setStats).catch(() => {});
-    fetch("/api/memory/stats").then(r => r.json()).then(setMemory).catch(() => {});
-    fetch("/api/models").then(r => r.json()).then(d => setModels(d.models || [])).catch(() => {});
-    fetch("/api/vault/health").then(r => r.json()).then(d => {
-      if (d.ok) setVaultHealth(d.message);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [
+        statsRes, memoryRes, modelsRes,
+        vaultHealthRes, vaultListRes, mcpRes,
+        swarmRes, workRes,
+      ] = await Promise.all([
+        fetch("/api/budget/stats"),
+        fetch("/api/memory/stats"),
+        fetch("/api/models"),
+        fetch("/api/vault/health"),
+        fetch("/api/vault/list"),
+        fetch("/api/mcp/config"),
+        fetch("/api/swarm/teams"),
+        fetch("/api/work-products"),
+      ]);
+      const [statsData, memoryData, modelsData, vaultHealthData, vaultListData, mcpData, swarmData, workData] =
+        await Promise.all([
+          statsRes.json(), memoryRes.json(), modelsRes.json(),
+          vaultHealthRes.json(), vaultListRes.json(), mcpRes.json(),
+          swarmRes.json(), workRes.json(),
+        ]);
+      setStats(statsData);
+      setMemory(memoryData);
+      setModels(modelsData.models || []);
+      if (vaultHealthData.ok) setVaultHealth(vaultHealthData.message);
       else setVaultHealth("Locked / Key Required");
-    }).catch(() => {});
-    fetch("/api/vault/list").then(r => r.json()).then(d => setVaultKeys(d.keys || [])).catch(() => {});
-    fetch("/api/mcp/config").then(r => r.json()).then(setMcpConfig).catch(() => {});
-    fetch("/api/swarm/teams").then(r => r.json()).then(d => setSwarmTeams(d.teams || [])).catch(() => {});
-    fetch("/api/work-products").then(r => r.json()).then(d => setWorkProducts(d.products || [])).catch(() => {});
+      setVaultKeys(vaultListData.keys || []);
+      setMcpConfig(mcpData);
+      setSwarmTeams(swarmData.teams || []);
+      setWorkProducts(workData.products || []);
+    } catch {
+      setLoadError("Failed to load dashboard data");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const getRelativeTime = (timestamp: string) => {
     try {
@@ -57,6 +88,9 @@ export default function Dashboard() {
     read: { bg: "rgba(100, 116, 139, 0.08)", fg: "#94a3b8" },
     delete: { bg: "rgba(239, 68, 68, 0.08)", fg: "#f87171" },
   };
+
+  if (loading) return <PanelLoadingSpinner message="Loading dashboard..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-lg)" }}>

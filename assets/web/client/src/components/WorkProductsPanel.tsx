@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Markdown from "./Markdown";
 import { showToast } from "./Toast";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface WorkProduct {
   id: string;
@@ -15,17 +16,30 @@ export default function WorkProductsPanel() {
   const [products, setProducts] = useState<WorkProduct[]>([]);
   const [summary, setSummary] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "summary">("list");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/work-products")
-      .then(r => r.json())
-      .then(d => setProducts(d.products || []))
-      .catch(() => showToast("Failed to load work products", "error"));
-    fetch("/api/work-products?summary=true")
-      .then(r => r.json())
-      .then(d => setSummary(d.summary || ""))
-      .catch(() => showToast("Failed to load work summary", "error"));
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [productsRes, summaryRes] = await Promise.all([
+        fetch("/api/work-products"),
+        fetch("/api/work-products?summary=true"),
+      ]);
+      const productsData = await productsRes.json();
+      const summaryData = await summaryRes.json();
+      setProducts(productsData.products || []);
+      setSummary(summaryData.summary || "");
+    } catch {
+      setLoadError("Failed to load work products");
+      showToast("Failed to load work products", "error");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const actionColors: Record<string, string> = {
     create: "var(--success)",
@@ -33,6 +47,9 @@ export default function WorkProductsPanel() {
     read: "var(--charcoal)",
     delete: "var(--danger)",
   };
+
+  if (loading) return <PanelLoadingSpinner message="Loading work products..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div>

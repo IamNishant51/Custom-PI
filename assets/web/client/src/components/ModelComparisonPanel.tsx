@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface ModelOption { id: string; provider: string; }
 interface ModelResult { model: string; provider: string; response: string; latencyMs: number; error?: string; }
@@ -12,14 +13,30 @@ export default function ModelComparisonPanel() {
   const [blindMode, setBlindMode] = useState(false);
   const [promptId, setPromptId] = useState(0);
   const [voteStats, setVoteStats] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/models").then(r => r.json()).then(d => {
-      const all = (d.models || []).map((m: any) => ({ id: m.id, provider: m.api || "unknown" }));
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [modelsRes, voteRes] = await Promise.all([
+        fetch("/api/models"),
+        fetch("/api/models/vote-stats"),
+      ]);
+      const modelsData = await modelsRes.json();
+      const voteData = await voteRes.json();
+      const all = (modelsData.models || []).map((m: any) => ({ id: m.id, provider: m.api || "unknown" }));
       setModels(all);
-    }).catch(() => {});
-    fetch("/api/models/vote-stats").then(r => r.json()).then(d => setVoteStats(d.rankings || [])).catch(() => {});
+      setVoteStats(voteData.rankings || []);
+    } catch {
+      setLoadError("Failed to load models");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const toggle = (id: string) => {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -57,6 +74,9 @@ export default function ModelComparisonPanel() {
     const d = await fetch("/api/models/vote-stats").then(r => r.json());
     setVoteStats(d.rankings || []);
   };
+
+  if (loading) return <PanelLoadingSpinner message="Loading models..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div className="panel" style={{ padding: 16 }}>

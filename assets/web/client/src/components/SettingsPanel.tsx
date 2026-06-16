@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "./Toast";
 import ThemeSwitcher from "./ThemeSwitcher";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 export default function SettingsPanel() {
   const [settings, setSettings] = useState<any>({});
@@ -8,31 +9,42 @@ export default function SettingsPanel() {
   const [detectedProviders, setDetectedProviders] = useState<any[]>([]);
   const [detecting, setDetecting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { toast } = useToast();
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then(r => r.json())
-      .then(d => {
-        setSettings(d);
-        setForm({
-          defaultModel: d.defaultModel || "",
-          defaultProvider: d.defaultProvider || "",
-          defaultThinkingLevel: d.defaultThinkingLevel || "off",
-        });
-      })
-      .catch(() => toast("Failed to load settings", "error"));
-    fetch("/api/models")
-      .then(r => r.json())
-      .then(d => setModels(Array.isArray(d) ? d : []))
-      .catch(() => toast("Failed to load models", "error"));
-  }, []);
 
   const [form, setForm] = useState({
     defaultModel: "",
     defaultProvider: "",
     defaultThinkingLevel: "off",
   });
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [settingsRes, modelsRes] = await Promise.all([
+        fetch("/api/settings"),
+        fetch("/api/models"),
+      ]);
+      const settingsData = await settingsRes.json();
+      const modelsData = await modelsRes.json();
+      setSettings(settingsData);
+      setForm({
+        defaultModel: settingsData.defaultModel || "",
+        defaultProvider: settingsData.defaultProvider || "",
+        defaultThinkingLevel: settingsData.defaultThinkingLevel || "off",
+      });
+      setModels(Array.isArray(modelsData) ? modelsData : []);
+    } catch {
+      setLoadError("Failed to load settings");
+      toast("Failed to load settings", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const detectModels = useCallback(async () => {
     setDetecting(true);
@@ -67,6 +79,9 @@ export default function SettingsPanel() {
     }
     setSaving(false);
   }, [form, toast]);
+
+  if (loading) return <PanelLoadingSpinner message="Loading settings..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div>

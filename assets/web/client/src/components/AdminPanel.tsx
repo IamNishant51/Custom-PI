@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 type AdminTab = "logs" | "performance" | "auth";
 
@@ -11,6 +12,8 @@ export default function AdminPanel() {
   const [me, setMe] = useState<any>(null);
   const [tokens, setTokens] = useState<Token[]>([]);
   const [tokenName, setTokenName] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchLogs = async () => {
     try { const r = await fetch("/api/admin/logs"); const d = await r.json(); setLogs(d.logs || []); } catch {}
@@ -25,11 +28,21 @@ export default function AdminPanel() {
     try { const r = await fetch("/api/auth/tokens"); const d = await r.json(); setTokens(d.tokens || []); } catch {}
   };
 
-  useEffect(() => {
-    if (tab === "logs") fetchLogs();
-    else if (tab === "performance") fetchPerf();
-    else { fetchMe(); fetchTokens(); }
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      if (tab === "logs") await fetchLogs();
+      else if (tab === "performance") await fetchPerf();
+      else { await Promise.all([fetchMe(), fetchTokens()]); }
+    } catch {
+      setLoadError("Failed to load data");
+    } finally {
+      setLoading(false);
+    }
   }, [tab]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const createToken = async () => {
     if (!tokenName.trim()) return;
@@ -47,6 +60,9 @@ export default function AdminPanel() {
     { key: "performance", label: "Performance" },
     { key: "auth", label: "Auth" },
   ];
+
+  if (loading) return <PanelLoadingSpinner message="Loading admin data..." />;
+  if (loadError) return <PanelErrorCard message={loadError} onRetry={loadData} />;
 
   return (
     <div className="panel" style={{ padding: 16 }}>

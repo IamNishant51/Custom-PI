@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
 interface Triplet {
   id: string;
@@ -24,6 +25,7 @@ export default function KnowledgeGraphPanel() {
   const [triplets, setTriplets] = useState<Triplet[]>([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [minConf, setMinConf] = useState(0.5);
   const [error, setError] = useState("");
   const [selectedEntity, setSelectedEntity] = useState<EntityDetail | null>(null);
@@ -31,17 +33,24 @@ export default function KnowledgeGraphPanel() {
 
   const fetchTriplets = async () => {
     setLoading(true);
+    setLoadError(null);
     setError("");
     try {
       const res = await fetch(`/api/knowledge/triplets?minConfidence=${minConf}&limit=100`);
       const d = await res.json();
       if (d.error) { setError(d.error); setTriplets([]); setCount(0); }
       else { setTriplets(d.triplets || []); setCount(d.count || 0); }
-    } catch { setError("Failed to fetch triplets"); }
+    } catch {
+      setLoadError("Failed to fetch triplets");
+    }
     setLoading(false);
   };
 
-  useEffect(() => { fetchTriplets(); }, []);
+  const loadData = useCallback(async () => {
+    await fetchTriplets();
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const fetchEntity = async (id: string) => {
     setEntityLoading(true);
@@ -88,7 +97,7 @@ export default function KnowledgeGraphPanel() {
 
       {error && <div style={{ color: "var(--danger)", fontSize: 12, padding: 8 }}>{error}</div>}
 
-      {selectedEntity ? (
+      {loading ? <PanelLoadingSpinner message="Loading knowledge graph..." /> : loadError ? <PanelErrorCard message={loadError} onRetry={fetchTriplets} /> : selectedEntity ? (
         <div className="card" style={{ marginBottom: 8 }}>
           <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>
@@ -140,10 +149,9 @@ export default function KnowledgeGraphPanel() {
         </div>
       ) : null}
 
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>
-        ) : triplets.length === 0 ? (
+      {!loading && !loadError && (
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {triplets.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", color: "var(--mute)", fontSize: 12 }}>
             No triplets found. The knowledge graph is empty.
           </div>
@@ -197,8 +205,9 @@ export default function KnowledgeGraphPanel() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
