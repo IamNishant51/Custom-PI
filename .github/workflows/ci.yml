@@ -85,6 +85,24 @@ jobs:
           key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ needs.install-and-cache.outputs.cache-key }}
       - if: steps.cache-node-restore-test.outputs.cache-hit != 'true'
         run: npm ci
+      - run: npx vitest run --reporter verbose
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: install-and-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache/restore@v4
+        id: cache-node-restore-cov
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-22-${{ needs.install-and-cache.outputs.cache-key }}
+      - if: steps.cache-node-restore-cov.outputs.cache-hit != 'true'
+        run: npm ci
       - run: npx vitest run --reporter verbose --coverage.enabled --coverage.reporter=lcov --coverage.reporter=text-summary
 
   validate:
