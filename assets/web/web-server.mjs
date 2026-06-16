@@ -87,7 +87,7 @@ const ALLOWED_BASH_COMMANDS = [
   "jq", "yq", "awk", "sed", "env", "printenv", "xargs",
   "test", "[", "true", "false", "exit", "sleep", "timeout",
   "tee", "rev", "fold", "column", "pr", "nl", "od", "hexdump",
-  "sudo"
+  // "sudo" intentionally excluded — use PolicyValidator deny list
 ];
 const ALLOWED_BASH_SET = new Set(ALLOWED_BASH_COMMANDS);
 
@@ -115,12 +115,12 @@ let _approvalEnabled = false;
 // Simple mutex for swarm state mutations
 let swarmLock = Promise.resolve();
 async function withSwarmLock(fn) {
-  let release;
   const prev = swarmLock;
+  let release;
   swarmLock = new Promise(resolve => { release = resolve; });
   await prev;
   try {
-    return await Promise.resolve().then(() => fn());
+    return await fn();
   } finally {
     release();
   }
@@ -715,23 +715,39 @@ function trackCost(sessionId, agent, provider, modelId, inputTokens, outputToken
   return event;
 }
 
+const costSummaryCache = { data: null, timestamp: 0, ttl: 5000 };
+
 function getCostSummary() {
+  const now = Date.now();
+  if (costSummaryCache.data && now - costSummaryCache.timestamp < costSummaryCache.ttl) {
+    return costSummaryCache.data;
+  }
   ensureCostDir();
   if (!fs.existsSync(COST_FILE)) {
+    const result = { totalSessions: 0, totalTokens: 0, totalCostUsd: 0, dailyTokens: 0, dailyCostUsd: 0, today: new Date().toISOString().slice(0, 10) };
+    costSummaryCache.data = result;
+    costSummaryCache.timestamp = now;
+    return result;
+  }
+  try {
+    const lines = fs.readFileSync(COST_FILE, "utf8").trim().split("\n").filter(Boolean);
+    const all = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const today = new Date().toISOString().slice(0, 10);
+    const daily = all.filter(e => e.timestamp.startsWith(today));
+    const result = {
+      totalSessions: new Set(all.map(e => e.sessionId)).size,
+      totalTokens: all.reduce((s, e) => s + e.totalTokens, 0),
+      totalCostUsd: all.reduce((s, e) => s + e.costUsd, 0),
+      dailyTokens: daily.reduce((s, e) => s + e.totalTokens, 0),
+      dailyCostUsd: daily.reduce((s, e) => s + e.costUsd, 0),
+      today,
+    };
+    costSummaryCache.data = result;
+    costSummaryCache.timestamp = now;
+    return result;
+  } catch {
     return { totalSessions: 0, totalTokens: 0, totalCostUsd: 0, dailyTokens: 0, dailyCostUsd: 0, today: new Date().toISOString().slice(0, 10) };
   }
-  const lines = fs.readFileSync(COST_FILE, "utf8").trim().split("\n").filter(Boolean);
-  const all = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  const today = new Date().toISOString().slice(0, 10);
-  const daily = all.filter(e => e.timestamp.startsWith(today));
-  return {
-    totalSessions: new Set(all.map(e => e.sessionId)).size,
-    totalTokens: all.reduce((s, e) => s + e.totalTokens, 0),
-    totalCostUsd: all.reduce((s, e) => s + e.costUsd, 0),
-    dailyTokens: daily.reduce((s, e) => s + e.totalTokens, 0),
-    dailyCostUsd: daily.reduce((s, e) => s + e.costUsd, 0),
-    today,
-  };
 }
 
 function getCostDetails() {

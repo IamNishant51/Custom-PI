@@ -213,9 +213,7 @@ export function initializeAscension(config: AscensionConfig = {}): void {
     });
   });
 
-  console.log("[Ascension] All subsystems initialized and connected.");
-  console.log(`[Ascension] ${graph.countNodes()} nodes, ${graph.countEdges()} edges in state graph.`);
-  console.log(`[Ascension] Daemon: ${daemon.getState()}, ${daemon.getTasks().length} registered tasks.`);
+  // Ascension startup complete
 }
 
 export function shutdownAscension(): void {

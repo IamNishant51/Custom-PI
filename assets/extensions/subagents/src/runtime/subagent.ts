@@ -1,18 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import chalk from "chalk";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { C } from "../tui-colors";
-import { getSpinner, getGlobalFrame, STATUS_VERBS, getGlobalVerbIndex, activeTrackers, startGlobalAnimation, stopGlobalAnimation } from "../animations";
+import { getSpinner, activeTrackers, startGlobalAnimation, stopGlobalAnimation } from "../animations";
 import { gateguard, policyValidator } from "../gateguard";
 import { runVerification } from "../verification-engine";
 import { trackCost } from "../cost-tracker";
 import { recordWorkProduct } from "../work-products";
 import { contextMonitor } from "../context-monitor";
 import { LocalStorageDriver, type StorageDriver } from "../storage-driver";
-import { TuiManager, SPACING as TUI_SPACING } from "../tui";
+import { TuiManager } from "../tui";
 import { localGrep } from "../tools/grep";
 import { AGENTS_DIR_GLOBAL, loadAgents, parseMarkdownAgent } from "./agent-config";
 import { resolveModel, resolveFastModel, SUBAGENT_TOOLS } from "./tool-registry";
@@ -45,8 +45,8 @@ export class SubAgentRuntime {
   public tuiManager: TuiManager | null = null;
 
   constructor(
-    private ctx: any,
-    private config: AgentConfig,
+  private ctx: any,
+  private config: any,
     private trackerId: string,
     private signal?: AbortSignal,
     private parentName = "ceo"
@@ -262,7 +262,29 @@ export class SubAgentRuntime {
           }
           const policyResult = policyValidator.validate({ type: "run_command", command, workdir: this.ctx.cwd });
           if (!policyResult.allowed) return `Error: ${policyResult.reason}`;
-          const result = execSync(command, { cwd: this.ctx.cwd, encoding: "utf8", timeout: 45000 });
+          const result = await new Promise<string>((resolve, reject) => {
+            const child = spawn("sh", ["-c", command], {
+              cwd: this.ctx.cwd,
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+            let stdout = "";
+            let stderr = "";
+            const timer = setTimeout(() => {
+              child.kill("SIGTERM");
+              resolve(`Error: Command timed out after 45s:\n${stdout.slice(-2000)}`);
+            }, 45000);
+            child.stdout?.on("data", (data: Buffer) => { stdout += data.toString(); });
+            child.stderr?.on("data", (data: Buffer) => { stderr += data.toString(); });
+            child.on("close", (code) => {
+              clearTimeout(timer);
+              if (code === 0) resolve(stdout);
+              else resolve(`Exit code ${code}:\n${stderr || stdout}`);
+            });
+            child.on("error", (err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+          });
           return result.length > MAX_OUT ? result.slice(0, MAX_OUT) + `\n...[Output truncated to ${Math.round(MAX_OUT / 1000)}KB]` : result;
         }
         case "grep": {
@@ -413,6 +435,7 @@ export class SubAgentRuntime {
   private async callWithRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
     let lastError: Error | null = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (this.signal?.aborted) throw new Error("Aborted by user.");
       try {
         return await fn();
       } catch (e: any) {
@@ -445,7 +468,7 @@ export class SubAgentRuntime {
     const messages: any[] = [{ role: "user", content: task }];
     const allowedTools = this.config.tools || [];
     const tools = allowedTools
-      .map(name => SUBAGENT_TOOLS[name as keyof typeof SUBAGENT_TOOLS])
+      .map((name: string) => SUBAGENT_TOOLS[name as keyof typeof SUBAGENT_TOOLS])
       .filter(Boolean);
 
     const { MAX_TURNS } = SubAgentRuntime;
@@ -469,7 +492,7 @@ export class SubAgentRuntime {
         }, {
           apiKey: auth.apiKey,
           headers: auth.headers,
-          reasoning: typeof this.config.thinking === "string" ? this.config.thinking : undefined,
+          reasoning: this.config.thinking,
         });
       });
 

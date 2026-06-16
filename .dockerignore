@@ -1,0 +1,17 @@
+node_modules/
+npm-debug.log
+.git/
+.gitignore
+.env
+.env.*
+*.md
+docs/
+tests/
+scripts/
+*.test.ts
+*.test.tsx
+__tests__/
+.DS_Store
+agency-website/
+draft-twitter/
+examples/

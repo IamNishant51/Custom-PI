@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=%i
+DynamicUser=yes
 WorkingDirectory=/opt/pi-custom-pack
-ExecStart=/usr/bin/node /opt/pi-custom-pack/assets/web/web-server.mjs
+ExecStart=/usr/bin/node /opt/pi-custom-pack/bin/web.js
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -18,6 +18,8 @@ Environment=PI_DIR=/var/lib/pi-custom-pack
 NoNewPrivileges=true
 ProtectSystem=full
 PrivateTmp=true
+StateDirectory=pi-custom-pack
+CacheDirectory=pi-custom-pack
 
 [Install]
 WantedBy=multi-user.target

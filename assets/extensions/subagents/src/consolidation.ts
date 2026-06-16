@@ -3,6 +3,12 @@ import { cosineSimilarity } from "./memory-embedding";
 import { loadEntries, saveAllEntries, withWriteLock, computeAdaptiveTTL } from "./core-store";
 import { loadClusters, nearestCentroid, reclusterCentroids } from "./ann-cluster";
 
+const SIMILARITY_MERGE_THRESHOLD = 0.88;
+const MAX_COMPARISONS = 2000;
+const PRUNE_TTL_DAYS = 7;
+const LOW_IMPORTANCE_THRESHOLD = 3;
+const LOW_ACCESS_THRESHOLD = 2;
+const CROSS_CLUSTER_EARLY_BREAK = 500;
 let lastConsolidationTime = 0;
 const CONSOLIDATION_COOLDOWN_MS = 120_000;
 
@@ -23,19 +29,19 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
     const clusters = loadClusters();
     const compared = new Set<string>();
     for (let i = 0; i < active.length; i++) {
-      if (compared.size >= 2000) break;
+      if (compared.size >= MAX_COMPARISONS) break;
       const ei = active[i];
       const ci = clusters.centroids.length > 0 ? nearestCentroid(ei.embedding, clusters.centroids) : 0;
       for (let j = i + 1; j < active.length; j++) {
-        if (compared.size >= 2000) break;
+        if (compared.size >= MAX_COMPARISONS) break;
         const key = `${Math.min(i, j)}-${Math.max(i, j)}`;
         if (compared.has(key)) continue;
         compared.add(key);
         const ej = active[j];
         const cj = clusters.centroids.length > 0 ? nearestCentroid(ej.embedding, clusters.centroids) : 0;
-        if (ci !== cj && compared.size > 500) continue;
+        if (ci !== cj && compared.size > CROSS_CLUSTER_EARLY_BREAK) continue;
         const sim = cosineSimilarity(active[i].embedding, active[j].embedding);
-        if (sim > 0.88) {
+        if (sim > SIMILARITY_MERGE_THRESHOLD) {
           const keeper = active[i].importance >= active[j].importance ? active[i] : active[j];
           const dropper = keeper === active[i] ? active[j] : active[i];
           keeper.tags = [...new Set([...keeper.tags, ...dropper.tags])];
@@ -55,7 +61,7 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
           }
           dropper.deprecated = true;
           dropper.correctedById = keeper.id;
-          dropper.ttl = new Date(now + 7 * 86_400_000).toISOString();
+          dropper.ttl = new Date(now + PRUNE_TTL_DAYS * 86_400_000).toISOString();
           merged++;
         }
       }
@@ -65,9 +71,9 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
       if (entry.deprecated) continue;
       const ttlTime = new Date(entry.ttl).getTime();
       if (ttlTime < now) {
-        if (entry.importance < 3 || entry.accessCount < 2) {
+        if (entry.importance < LOW_IMPORTANCE_THRESHOLD || entry.accessCount < LOW_ACCESS_THRESHOLD) {
           entry.deprecated = true;
-          entry.ttl = new Date(now + 7 * 86_400_000).toISOString();
+          entry.ttl = new Date(now + PRUNE_TTL_DAYS * 86_400_000).toISOString();
           pruned++;
         } else {
           const newDays = computeAdaptiveTTL(entry.importance, entry.accessCount);

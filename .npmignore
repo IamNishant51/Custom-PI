@@ -11,3 +11,10 @@ docs/
 tests/
 scripts/
 node_modules/
+tts_server/
+agency-website/
+draft-twitter/
+examples/
+docker-compose.gpu.yml
+pi-custom-pack.service
+store-twitter-creds.sh

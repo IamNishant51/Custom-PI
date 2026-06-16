@@ -62,6 +62,144 @@ import { AGENTS_DIR_GLOBAL, AGENTS_DIR_LOCAL, loadAgents, invalidateAgentCache }
 import { resolveModel, resolveFastModel } from "./runtime/tool-registry";
 import { SubAgentRuntime } from "./runtime/subagent";
 
+const CHECKPOINT_STALE_MS = 3600_000;
+const MAX_BACKGROUND_TOOL_CALLS = 3;
+const MIN_SKILL_TOOL_CALLS = 5;
+const COMPACT_RESERVE_RATIO = 0.12;
+const COMPACT_KEEP_RATIO = 0.40;
+const MEMORY_TTL_DAYS = 180;
+const SKILL_TTL_DAYS = 365;
+const SUBAGENT_RETRY_DELAY_BASE = 2;
+
+interface McpServerConfig {
+  name: string;
+  command: string;
+  args?: string[];
+  enabled: boolean;
+  description?: string;
+}
+
+class McpCliConnection {
+  cfg: McpServerConfig;
+  proc: any;
+  tools: any[];
+  pendingRequests: Map<number, { resolve: Function; reject: Function }>;
+  nextRequestId: number;
+  initialized: boolean;
+
+  constructor(cfg: McpServerConfig) {
+    this.cfg = cfg;
+    this.proc = null;
+    this.tools = [];
+    this.pendingRequests = new Map();
+    this.nextRequestId = 1;
+    this.initialized = false;
+  }
+
+  async start() {
+    return new Promise<void>((resolve, reject) => {
+      try {
+        this.proc = spawn(this.cfg.command, this.cfg.args || [], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: process.platform === 'win32'
+        });
+
+        this.proc.on('error', (err: any) => {
+          reject(err);
+        });
+
+        this.proc.on('exit', () => {
+          this.cleanup();
+        });
+
+        const rl = readline.createInterface({ input: this.proc.stdout });
+        rl.on('line', (line) => {
+          this.handleMessage(line);
+        });
+
+        if (this.proc.stderr) {
+          const rlErr = readline.createInterface({ input: this.proc.stderr });
+          rlErr.on('line', (line) => {
+            logger.debug(`[MCP Server ${this.cfg.name} Stderr] ${line}`);
+          });
+        }
+
+        this.initializeHandshake().then(() => {
+          resolve();
+        }).catch(reject);
+
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  cleanup() {
+    this.initialized = false;
+    this.tools = [];
+    for (const req of this.pendingRequests.values()) {
+      req.reject(new Error("MCP server connection closed"));
+    }
+    this.pendingRequests.clear();
+    if (this.proc) {
+      try { this.proc.kill(); } catch {}
+      this.proc = null;
+    }
+  }
+
+  sendRequest(method: string, params: any) {
+    return new Promise<any>((resolve, reject) => {
+      if (!this.proc) return reject(new Error("MCP server not running"));
+      const id = this.nextRequestId++;
+      const req = { jsonrpc: "2.0", id, method, params };
+      this.pendingRequests.set(id, { resolve, reject });
+      this.proc.stdin.write(JSON.stringify(req) + "\n");
+    });
+  }
+
+  sendNotification(method: string, params: any) {
+    if (!this.proc) return;
+    const notification = { jsonrpc: "2.0", method, params };
+    this.proc.stdin.write(JSON.stringify(notification) + "\n");
+  }
+
+  handleMessage(line: string) {
+    try {
+      const msg = JSON.parse(line);
+      if (msg.id !== undefined) {
+        const pending = this.pendingRequests.get(msg.id);
+        if (pending) {
+          this.pendingRequests.delete(msg.id);
+          if (msg.error) {
+            pending.reject(new Error(msg.error.message || "Unknown MCP error"));
+          } else {
+            pending.resolve(msg.result);
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  async initializeHandshake() {
+    await this.sendRequest("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "custom-pi-client", version: "1.0.0" }
+    });
+
+    this.sendNotification("notifications/initialized", {});
+    this.initialized = true;
+
+    const toolsResult = await this.sendRequest("tools/list", {});
+    this.tools = toolsResult.tools || [];
+  }
+
+  async callTool(name: string, args: any) {
+    const res = await this.sendRequest("tools/call", { name, arguments: args });
+    return res;
+  }
+}
+
 let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 let appMode: "agent" | "plan" = "agent";
 let unsubTabHandler: (() => void) | null = null;
@@ -118,7 +256,7 @@ function applyRuntimePatches() {
   
   try {
     AgentSession = req("@earendil-works/pi-coding-agent").AgentSession;
-  } catch {}
+  } catch { /* AgentSession is optional — warning suppressed */ }
   
   try {
     AgentClass = req("@earendil-works/pi-agent-core").Agent;
@@ -127,11 +265,14 @@ function applyRuntimePatches() {
       const piCodingAgentPath = path.dirname(req.resolve("@earendil-works/pi-coding-agent"));
       const nestedPath = path.join(piCodingAgentPath, "node_modules", "@earendil-works", "pi-agent-core");
       AgentClass = req(nestedPath).Agent;
-    } catch {
+    } catch (err2: any) {
       try {
-        const globalPath = "/home/nishant/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core";
+        const globalPrefix = process.env.PI_GLOBAL_PREFIX || path.join(os.homedir(), ".npm-global");
+        const globalPath = path.join(globalPrefix, "lib", "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "@earendil-works", "pi-agent-core");
         AgentClass = req(globalPath).Agent;
-      } catch {}
+      } catch {
+        logger.warn("[Patch] Could not resolve pi-agent-core from any location");
+      }
     }
   }
 
@@ -188,21 +329,13 @@ export default function (pi: ExtensionAPI) {
   const PI_DIR_GLOBAL = path.join(os.homedir(), ".pi", "agent");
   const MCP_CONFIG_FILE_GLOBAL = path.join(PI_DIR_GLOBAL, "mcp-servers.json");
 
-  interface McpServerConfig {
-    name: string;
-    command: string;
-    args?: string[];
-    enabled: boolean;
-    description?: string;
-  }
-
   function loadMcpConfigGlobal(): McpServerConfig[] {
     let config: McpServerConfig[] = [];
     try {
       if (fs.existsSync(MCP_CONFIG_FILE_GLOBAL)) {
         config = JSON.parse(fs.readFileSync(MCP_CONFIG_FILE_GLOBAL, "utf8"));
       }
-    } catch {}
+    } catch (err: any) { logger.warn(`MCP config init failed: ${err.message}`); }
 
     // Guarantee sequential-thinking exists and is enabled
     const seqThinkingName = "sequential-thinking";
@@ -241,134 +374,13 @@ export default function (pi: ExtensionAPI) {
       if (changed) {
         try {
           fs.writeFileSync(MCP_CONFIG_FILE_GLOBAL, JSON.stringify(config, null, 2));
-        } catch {}
+        } catch (err: any) { logger.warn(`MCP config update failed: ${err.message}`); }
       }
     }
     return config;
   }
 
   const activeCliMcpServers = new Map<string, any>();
-
-  class McpCliConnection {
-    cfg: McpServerConfig;
-    proc: any;
-    tools: any[];
-    pendingRequests: Map<number, { resolve: Function; reject: Function }>;
-    nextRequestId: number;
-    initialized: boolean;
-
-    constructor(cfg: McpServerConfig) {
-      this.cfg = cfg;
-      this.proc = null;
-      this.tools = [];
-      this.pendingRequests = new Map();
-      this.nextRequestId = 1;
-      this.initialized = false;
-    }
-
-    async start() {
-      return new Promise<void>((resolve, reject) => {
-        try {
-          this.proc = spawn(this.cfg.command, this.cfg.args || [], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            shell: process.platform === 'win32'
-          });
-
-          this.proc.on('error', (err: any) => {
-            reject(err);
-          });
-
-          this.proc.on('exit', () => {
-            this.cleanup();
-          });
-
-          const rl = readline.createInterface({ input: this.proc.stdout });
-          rl.on('line', (line) => {
-            this.handleMessage(line);
-          });
-
-          if (this.proc.stderr) {
-            const rlErr = readline.createInterface({ input: this.proc.stderr });
-            rlErr.on('line', (line) => {
-              logger.debug(`[MCP Server ${this.cfg.name} Stderr] ${line}`);
-            });
-          }
-
-          this.initializeHandshake().then(() => {
-            resolve();
-          }).catch(reject);
-
-        } catch (err) {
-          reject(err);
-        }
-      });
-    }
-
-    cleanup() {
-      this.initialized = false;
-      this.tools = [];
-      for (const req of this.pendingRequests.values()) {
-        req.reject(new Error("MCP server connection closed"));
-      }
-      this.pendingRequests.clear();
-      if (this.proc) {
-        try { this.proc.kill(); } catch {}
-        this.proc = null;
-      }
-    }
-
-    sendRequest(method: string, params: any) {
-      return new Promise<any>((resolve, reject) => {
-        if (!this.proc) return reject(new Error("MCP server not running"));
-        const id = this.nextRequestId++;
-        const req = { jsonrpc: "2.0", id, method, params };
-        this.pendingRequests.set(id, { resolve, reject });
-        this.proc.stdin.write(JSON.stringify(req) + "\n");
-      });
-    }
-
-    sendNotification(method: string, params: any) {
-      if (!this.proc) return;
-      const notification = { jsonrpc: "2.0", method, params };
-      this.proc.stdin.write(JSON.stringify(notification) + "\n");
-    }
-
-    handleMessage(line: string) {
-      try {
-        const msg = JSON.parse(line);
-        if (msg.id !== undefined) {
-          const pending = this.pendingRequests.get(msg.id);
-          if (pending) {
-            this.pendingRequests.delete(msg.id);
-            if (msg.error) {
-              pending.reject(new Error(msg.error.message || "Unknown MCP error"));
-            } else {
-              pending.resolve(msg.result);
-            }
-          }
-        }
-      } catch (e) {}
-    }
-
-    async initializeHandshake() {
-      await this.sendRequest("initialize", {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "custom-pi-client", version: "1.0.0" }
-      });
-
-      this.sendNotification("notifications/initialized", {});
-      this.initialized = true;
-
-      const toolsResult = await this.sendRequest("tools/list", {});
-      this.tools = toolsResult.tools || [];
-    }
-
-    async callTool(name: string, args: any) {
-      const res = await this.sendRequest("tools/call", { name, arguments: args });
-      return res;
-    }
-  }
 
   // Load and register MCP tools
   const servers = loadMcpConfigGlobal();
@@ -604,7 +616,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
             activeAgentName: params.agentId,
             lastToolResult: null,
           });
-        } catch { /* checkpoint must never crash execution */ }
+        } catch (err: any) { logger.warn(`Checkpoint save failed: ${err.message}`); }
 
         // Stop animation and clean up if abort signal fires
         if (signal) {
@@ -629,7 +641,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
           } catch (err: any) {
             lastError = err;
             if (attempt < MAX_RETRIES && err.message?.includes("rate limit") || err.message?.includes("timeout") || err.message?.includes("ECONNRESET")) {
-              const delay = Math.pow(2, attempt) * 1000;
+              const delay = Math.pow(SUBAGENT_RETRY_DELAY_BASE, attempt) * 1000;
               await new Promise(r => setTimeout(r, delay));
               context.ui.notify(`Retrying sub-agent (attempt ${attempt + 2}/${MAX_RETRIES + 1})...`, "info");
               continue;
@@ -733,7 +745,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
           activeAgentName: null,
           lastToolResult: null,
         });
-      } catch { /* checkpoint must never crash execution */ }
+        } catch (err: any) { logger.warn(`Parallel checkpoint save failed: ${err.message}`); }
 
       // Stop animation and clean up if abort signal fires
       if (signal) {
@@ -1024,8 +1036,8 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
                 treeLines.push(`${indent}📄 ${entry.name} (${size})`);
               }
             }
-          } catch {}
-        }
+      } catch (err: any) { logger.warn(`MCP config write failed: ${err.message}`); }
+    }
 
         const entries = fs.readdirSync(cloneDir, { withFileTypes: true });
         for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -2150,7 +2162,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         ctx.ui.notify("No checkpoint found to resume from.", "error");
         return;
       }
-      if (Date.now() - cp.timestamp > 3600_000) {
+      if (Date.now() - cp.timestamp > CHECKPOINT_STALE_MS) {
         ctx.ui.notify("Latest checkpoint is over 1 hour old. Too stale to resume.", "error");
         return;
       }
@@ -2176,6 +2188,24 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
   // (no /tui fullscreen command — all enhancements apply directly to the default TUI)
 
+  // ── Help Command ─────────────────────────────────────────────────────────────
+  pi.registerCommand("help-ext", {
+    description: "Show custom-pi extension commands and tools",
+    handler(_args, ctx) {
+      const helpText = [
+        "Custom-PI Extension Commands:",
+        "  /checkpoint   — Resume from last checkpoint",
+        "  /help-ext     — Show this help",
+        "",
+        "Available tools are listed in the tool dropdown.",
+      ].join("\n");
+      ctx.ui.notify(helpText, "info");
+    },
+    execute(_args, ctx) {
+      ctx.ui.notify("Custom-PI Extension Commands: /checkpoint, /help-ext", "info");
+    },
+  });
+
   // Event Hook: Setup HUD on session start, run consolidation for crash recovery
   pi.on("session_start", async (_event, ctx) => {
     logger.info("session_start", { cwd: ctx.cwd });
@@ -2185,8 +2215,8 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       const contextWindow = (ctx as any).model?.contextWindow
         ?? (ctx as any).sessionManager?.model?.contextWindow
         ?? 131072;
-      const reserveTokens = Math.max(4096, Math.floor(contextWindow * 0.12));
-      const keepRecentTokens = Math.max(8192, Math.floor(contextWindow * 0.40));
+      const reserveTokens = Math.max(4096, Math.floor(contextWindow * COMPACT_RESERVE_RATIO));
+      const keepRecentTokens = Math.max(8192, Math.floor(contextWindow * COMPACT_KEEP_RATIO));
       const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
       if (fs.existsSync(settingsPath)) {
         const curr = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
@@ -2197,7 +2227,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           logger.info(`[Compaction] Updated: reserve=${reserveTokens} keepRecent=${keepRecentTokens} (contextWindow=${contextWindow})`);
         }
       }
-    } catch {} // must never crash session_start
+    } catch (err: any) { logger.warn(`Compaction config failed: ${err.message}`); }
 
     // Tab key listener to toggle between Agent mode and Plan mode
     try {
@@ -2209,7 +2239,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           return { consume: true };
         }
       });
-    } catch {}
+    } catch (err: any) { logger.warn(`Tab listener setup failed: ${err.message}`); }
 
     // Invalidate subagent config cache when files change
     try {
@@ -2245,14 +2275,14 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     // Check for recovery checkpoint on startup
     try {
       const latest = getLatestCheckpoint();
-      if (latest && Date.now() - latest.timestamp < 3600_000) {
+      if (latest && Date.now() - latest.timestamp < CHECKPOINT_STALE_MS) {
         const age = Math.round((Date.now() - latest.timestamp) / 1000);
         ctx.ui.notify(
           `Recovery checkpoint found from ${age}s ago (task: "${latest.goal.slice(0, 60)}"). Resume? Use /checkpoint to continue.`,
           "info"
         );
       }
-    } catch { /* checkpoint check must never crash startup */ }
+    } catch (err: any) { logger.warn(`Checkpoint check failed: ${err.message}`); }
 
     // Proactive workflow suggestions on session start
     try {
@@ -2267,7 +2297,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           });
         }
       }
-    } catch { /* workflow suggestions must never crash startup */ }
+    } catch (err: any) { logger.warn(`Workflow suggestions failed: ${err.message}`); }
 
     // Listen for abort signal (Escape key) to stop animation and clear working state
     if (ctx.signal) {
@@ -2331,15 +2361,15 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           try {
             if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
             fs.copyFileSync(skillFile, targetFile);
-          } catch { /* silent — skill install must never crash startup */ }
+          } catch (err: any) { logger.warn(`Skill install failed: ${err.message}`); }
         }
       }
     }
 
     try {
       const result = await consolidateMemory();
-    } catch (e) {
-      // silent — consolidation should never crash startup
+    } catch (e: any) {
+      logger.warn(`Consolidation failed on startup: ${e.message}`);
     }
 
     // Start background cron jobs
@@ -2759,7 +2789,7 @@ If nothing to report, return: {}`;
       }, {
         apiKey: auth.apiKey,
         headers: auth.headers,
-        reasoning: "off" as any
+          reasoning: undefined
       });
 
       const responseText = response.content
@@ -2768,17 +2798,23 @@ If nothing to report, return: {}`;
         .join("\n");
 
       const cleanJson = responseText.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(cleanJson);
+      let parsed: any;
+      try {
+        parsed = JSON.parse(cleanJson);
+      } catch {
+        logger.warn("Failed to parse background JSON from LLM output");
+        return;
+      }
       if (!parsed || typeof parsed !== "object") return;
 
       if (parsed.taskState && stateFile) {
         try {
           fs.writeFileSync(stateFile, JSON.stringify(parsed.taskState, null, 2), "utf8");
-        } catch {}
+        } catch (err: any) { logger.warn(`Task state write failed: ${err.message}`); }
       }
 
       // Pre-compression flush: save important facts before context gets summarized
-      if (totalToolCalls > 3) {
+      if (totalToolCalls > MAX_BACKGROUND_TOOL_CALLS) {
         try {
           const flushMessages = messages.slice(-5).map((m: any) => {
             let s = typeof m.content === "string" ? m.content : "";
@@ -2786,7 +2822,7 @@ If nothing to report, return: {}`;
             return `${m.role.toUpperCase()}: ${s.slice(0, 500)}`;
           }).join("\n\n");
           await runPreCompressionFlush(model, { apiKey: auth.apiKey, headers: auth.headers }, flushMessages);
-        } catch {}
+        } catch (err: any) { logger.warn(`Pre-compression flush failed: ${err.message}`); }
       }
 
       if (parsed.memory && parsed.memory.content) {
@@ -2795,14 +2831,14 @@ If nothing to report, return: {}`;
         const tags = parsed.memory.tags || [];
         const validTypes = ["fact", "decision", "preference", "pattern", "skill"];
         if (validTypes.includes(type)) {
-          const newId = await storeMemory(parsed.memory.content, type, importance, project, tags, 180);
+          const newId = await storeMemory(parsed.memory.content, type, importance, project, tags, MEMORY_TTL_DAYS);
           if (parsed.memory.contradicts) {
             await markContradicted(parsed.memory.contradicts, newId);
           }
         }
       }
 
-      if (parsed.skill && parsed.skill.content && totalToolCalls >= 5) {
+      if (parsed.skill && parsed.skill.content && totalToolCalls >= MIN_SKILL_TOOL_CALLS) {
         const tags = [...(parsed.skill.tags || []), "skill", parsed.skill.problemType || "general"].filter(Boolean);
         const importance = Math.min(10, Math.max(1, parsed.skill.complexityScore ?? 5));
         const skillMeta = {
@@ -2812,7 +2848,7 @@ If nothing to report, return: {}`;
           complexityScore: parsed.skill.complexityScore || 5,
           successCount: 1,
         };
-        await storeMemory(parsed.skill.content, "skill", importance + 2, project, tags, 365, skillMeta);
+        await storeMemory(parsed.skill.content, "skill", importance + 2, project, tags, SKILL_TTL_DAYS, skillMeta);
       }
     } catch (e: any) {
       try {
@@ -2859,7 +2895,7 @@ If nothing to report, return: {}`;
           reason: "Tool '" + event.toolName + "' is blocked in PLAN MODE. DO NOT retry this tool. Tell the user: \"I am in PLAN MODE. Please press Tab to switch to AGENT MODE, then I can make changes.\"",
         };
       }
-    } catch {}
+    } catch (err: any) { logger.warn(`Session ensure failed: ${err.message}`); }
   });
 
   // ─────────────────────────────────────────────────────────────────────────

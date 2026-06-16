@@ -1,6 +1,6 @@
 {
   "name": "custom-pi",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "Autonomous AI coding agent with knowledge graph memory, DAG swarm orchestration, deployment pipelines, service health monitoring, and adaptive resource management",
   "main": "bin/cli.js",
   "bin": {
@@ -64,7 +64,10 @@
   },
   "preferGlobal": true,
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.5.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.61.1",
     "vitest": "^4.1.7"
   }
 }

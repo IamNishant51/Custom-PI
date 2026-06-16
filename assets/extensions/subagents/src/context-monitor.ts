@@ -10,6 +10,7 @@ const WARNING_THRESHOLDS = [0.80, 0.90, 0.95];
 const WARNING_COOLDOWN_MS = 60_000;
 const TOOL_LOOP_WINDOW = 5;
 const MAX_DECISION_TRACES = 200;
+const MAX_FILE_MODIFICATIONS = 500;
 
 // ── Decision Trace ─────────────────────────────────────────────────────────
 
@@ -106,6 +107,10 @@ export class ContextMonitor {
   }
 
   recordFileModification(filePath: string): void {
+    if (this.fileModifications.size >= MAX_FILE_MODIFICATIONS) {
+      const entries = Array.from(this.fileModifications);
+      this.fileModifications = new Set(entries.slice(-Math.floor(MAX_FILE_MODIFICATIONS / 2)));
+    }
     this.fileModifications.add(filePath);
   }
 

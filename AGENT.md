@@ -142,16 +142,22 @@ All items below are **already implemented**. Do not regress them:
 ## 🧹 Code Quality Conventions
 
 ### Empty Catch Blocks
-- Intentional cleanup catches: add `// eslint-disable-next-line @typescript-eslint/no-empty-function`
+- **Never** leave bare `catch {}` — always log or handle
+- Safe catches (non-critical path): `catch (err: any) { logger.warn(...) }`
+- Intentional no-ops: comment explaining why (`// telemetry write must never crash`)
 - Catch blocks that may hide bugs: add `logger.warn()` at minimum
 
 ### Magic Numbers
 - Extract named constants with descriptive names
 - Keep as `const` at module scope
+- See `index.ts`: `CHECKPOINT_STALE_MS`, `COMPACT_RESERVE_RATIO`, `COMPACT_KEEP_RATIO`, `MEMORY_TTL_DAYS`, `SKILL_TTL_DAYS`
+- See `consolidation.ts`: `SIMILARITY_MERGE_THRESHOLD`, `MAX_COMPARISONS`, `LOW_IMPORTANCE_THRESHOLD`
+- See `context-monitor.ts`: `MAX_FILE_MODIFICATIONS`
 
 ### Lock Pattern
 - `withSwarmLock()` is the ONLY way to mutate `currentSwarmState`
 - Never mutate `currentSwarmState.xxx` directly outside the lock
+- The lock acquire/release sequence: save prev, create new promise with release, await prev, execute, finally release
 
 ### Daemon Persistence
 - SQLite is the primary store (`store.kvSet` + `store.kvGet`)

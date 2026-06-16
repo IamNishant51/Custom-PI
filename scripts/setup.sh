@@ -21,27 +21,17 @@ fi
 
 echo "Node $(node -v) — OK"
 
-# Install pnpm if not present
-if ! command -v pnpm &>/dev/null; then
-  echo "Installing pnpm..."
-  npm install -g pnpm
-fi
-
-echo "pnpm $(pnpm -v) — OK"
-
 # Install dependencies
 echo "Installing project dependencies..."
-pnpm install
+npm install
 
 # Install web client dependencies
 echo "Installing web client dependencies..."
-cd assets/web/client
-pnpm install
-cd ../../..
+cd assets/web/client && npm install && cd ../..
 
 # Build web client
 echo "Building web client..."
-pnpm build:web
+npm run build:web
 
 # Create config
 if [ ! -f .env ]; then
