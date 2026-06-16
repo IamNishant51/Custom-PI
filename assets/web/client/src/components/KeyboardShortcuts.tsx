@@ -34,17 +34,18 @@ export default function KeyboardShortcuts({
     <div
       className="shortcuts-overlay"
       onClick={onClose}
-      role="dialog"
-      aria-label="Keyboard shortcuts"
+      role="presentation"
     >
       <div
         className="shortcuts-modal"
         onClick={(e) => e.stopPropagation()}
-        role="document"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
       >
         <div className="shortcuts-header">
           Keyboard Shortcuts
-          <button className="shortcuts-close" onClick={onClose}>
+          <button className="shortcuts-close" onClick={onClose} aria-label="Close keyboard shortcuts">
             ✕
           </button>
         </div>

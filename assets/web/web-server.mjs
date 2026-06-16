@@ -6267,7 +6267,12 @@ export async function createApp() {
     return { notes: rows.map(r => ({ ...r, tags: JSON.parse(r.tags || "[]") })) };
   });
 
-  app.post("/api/notes", async (req) => {
+  app.post("/api/notes", {
+    schema: {
+      body: { type: "object", properties: { title: { type: "string" }, content: { type: "string" }, color: { type: "string" }, tags: { type: "array", items: { type: "string" } } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const db = getNotesDb();
     if (!db) return { error: "Database unavailable" };
     const { title, content, color, tags } = req.body || {};
@@ -6308,7 +6313,12 @@ export async function createApp() {
     return { tasks: rows };
   });
 
-  app.post("/api/tasks", async (req) => {
+  app.post("/api/tasks", {
+    schema: {
+      body: { type: "object", properties: { title: { type: "string" }, priority: { type: "string", enum: ["low", "medium", "high"] }, dueDate: { type: "number" }, noteId: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const db = getNotesDb();
     if (!db) return { error: "Database unavailable" };
     const { title, priority, dueDate, noteId } = req.body || {};
@@ -7016,7 +7026,9 @@ export async function createApp() {
   });
 
   app.get("/api/settings", async () => loadSettings());
-  app.post("/api/settings", async (req) => {
+  app.post("/api/settings", {
+    schema: { body: { type: "object" }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } },
+  }, async (req) => {
     const current = loadSettings();
     const safeBody = JSON.parse(JSON.stringify(req.body || {}));
     const updated = { ...current, ...safeBody };
@@ -7225,7 +7237,9 @@ export async function createApp() {
     } catch {}
   }
 
-  app.post("/api/vault/set", async (req) => {
+  app.post("/api/vault/set", {
+    schema: { body: { type: "object", required: ["key", "value"], properties: { key: { type: "string" }, value: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" } } } } },
+  }, async (req) => {
     const err = validateBody(req.body, ["key", "value"]);
     if (err) return { ok: false, error: err };
     try { vaultSet(req.body.key, req.body.value); vaultAudit("set", req.body.key, true); return { ok: true }; }
@@ -7274,7 +7288,12 @@ export async function createApp() {
     if (!db) return { contacts: [] };
     return { contacts: db.prepare("SELECT * FROM contacts ORDER BY name ASC LIMIT 200").all() };
   });
-  app.post("/api/contacts", async (req) => {
+  app.post("/api/contacts", {
+    schema: {
+      body: { type: "object", required: ["name"], properties: { name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, organization: { type: "string" }, notes: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const db = getContactsDb(); if (!db) return { error: "Unavailable" };
     const { name, email, phone, organization, notes } = req.body || {};
     if (!name) return { error: "name required" };
@@ -7519,7 +7538,12 @@ export async function createApp() {
     const now = Date.now();
     return { events: events.filter(e => !e.end || e.end > now).sort((a, b) => (a.start || 0) - (b.start || 0)).slice(0, 100) };
   });
-  app.post("/api/calendar/events", async (req) => {
+  app.post("/api/calendar/events", {
+    schema: {
+      body: { type: "object", required: ["title", "start"], properties: { title: { type: "string" }, start: { type: "number" }, end: { type: "number" }, description: { type: "string" }, location: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, event: { type: "object" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const { title, start, end, description, location } = req.body || {};
     if (!title || !start) return { error: "title and start required" };
     const events = loadCalendarEvents();
@@ -7837,7 +7861,9 @@ export async function createApp() {
 
   // Memory
   app.post("/api/memory/search", async (req) => ({ results: memorySearch(req.body.query, req.body.k ?? 5) }));
-  app.post("/api/memory/store", async (req) => {
+  app.post("/api/memory/store", {
+    schema: { body: { type: "object", required: ["content"], properties: { content: { type: "string" }, type: { type: "string", enum: ["fact", "decision", "preference", "pattern", "skill"] }, importance: { type: "number" }, tags: { type: "array", items: { type: "string" } } } } },
+  }, async (req) => {
     const project = path.basename(process.cwd()) || "global";
     const id = memoryStore(req.body.content, req.body.type, req.body.importance ?? 5, project, req.body.tags || []);
     return { id };

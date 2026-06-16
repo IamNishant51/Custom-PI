@@ -112,7 +112,7 @@ function AppContent() {
 
   return (
     <ErrorBoundary>
-      <div className="layout">
+      <div className="layout" role="application" aria-label="Custom-PI Web Client">
         <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
         <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           <Sidebar activeView={activeView} onNavigate={navigate} wsConnected={connected} />

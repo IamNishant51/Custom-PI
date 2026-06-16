@@ -69,7 +69,7 @@ export default function Sidebar({ activeView, onNavigate, wsConnected }: Sidebar
           placeholder="Search views..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search sidebar views"
+          aria-label="Search sidebar"
         />
         {search && (
           <button
@@ -86,7 +86,7 @@ export default function Sidebar({ activeView, onNavigate, wsConnected }: Sidebar
           {filtered.length} / {NAV_ITEMS.length} matches
         </div>
       )}
-      <div className="sidebar-nav">
+      <div className="sidebar-nav" role="navigation" aria-label="Main navigation">
         {filtered.map((item) => {
           const Icon = item.icon;
           return (
@@ -94,6 +94,7 @@ export default function Sidebar({ activeView, onNavigate, wsConnected }: Sidebar
               key={item.view}
               className={`nav-item ${activeView === item.view ? "active" : ""}`}
               onClick={() => onNavigate(item.view)}
+              aria-label={item.label}
             >
               <span className="nav-marker">{activeView === item.view ? "[x]" : "[ ]"}</span>
               <span>{item.label}</span>
