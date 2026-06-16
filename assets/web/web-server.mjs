@@ -185,6 +185,8 @@ const dagRateLimiter = new TokenBucket(5, 1, 1000); // 5 burst, 1/sec refill
 const vaultRateLimiter = new TokenBucket(10, 2, 1000); // 10 burst, 2/sec
 const settingsRateLimiter = new TokenBucket(5, 1, 1000); // 5 burst, 1/sec
 const socialRateLimiter = new TokenBucket(3, 1, 5000); // 3 burst, 1/5sec
+const mutationRateLimiter = new TokenBucket(10, 2, 1000); // 10 burst, 2/sec — generic mutation endpoints
+const chatRateLimiter = new TokenBucket(5, 1, 2000); // 5 burst, 1/2sec — chat completions
 
   // ── Security Helpers ─────────────────────────────────────────────────────────
 
@@ -6104,6 +6106,21 @@ export async function createApp() {
     if (req.url.startsWith("/api/social/") && req.method === "POST") {
       if (!(await socialRateLimiter.consume())) {
         return sendError(reply, 429, "Too many requests — social rate limit exceeded", "RATE_LIMIT");
+      }
+    }
+    // Generic mutation rate limiter for: notes, tasks, reminders, contacts, calendar, sessions, teams, agents, gallery, voice, auth, ssh, companion, webhooks
+    const MUTATION_PREFIXES = ["/api/notes", "/api/tasks", "/api/reminders", "/api/contacts", "/api/calendar", "/api/sessions", "/api/swarm", "/api/teams", "/api/agents", "/api/gallery", "/api/voice/", "/api/auth/", "/api/ssh/", "/api/companion/", "/api/webhooks/"];
+    if (req.method === "POST" || req.method === "PUT" || req.method === "DELETE") {
+      if (MUTATION_PREFIXES.some(p => req.url.startsWith(p))) {
+        if (!(await mutationRateLimiter.consume())) {
+          return sendError(reply, 429, "Too many requests — rate limit exceeded", "RATE_LIMIT");
+        }
+      }
+    }
+    // Chat completions rate limiter
+    if (req.url.startsWith("/api/chat/completions") && req.method === "POST") {
+      if (!(await chatRateLimiter.consume())) {
+        return sendError(reply, 429, "Too many requests — chat rate limit exceeded", "RATE_LIMIT");
       }
     }
   });
