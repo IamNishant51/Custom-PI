@@ -1,4 +1,5 @@
 import { useState, useEffect, Suspense, lazy, memo, useCallback } from "react";
+import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import ChatView from "./components/ChatView";
 import { ToasterProvider } from "./components/Toast";
@@ -38,22 +39,59 @@ const LoginPanel = lazy(() => import("./components/LoginPanel"));
 const AdminPanel = lazy(() => import("./components/AdminPanel"));
 const VoicePanel = lazy(() => import("./components/VoicePanel"));
 
-export type View = "chat" | "dashboard" | "vault" | "budget" | "memory" | "knowledge-graph" | "pipeline" | "health" | "work-products" | "agents" | "agent-discovery" | "mcp" | "teams" | "settings" | "social" | "notes" | "contacts" | "cookbook" | "research" | "compare" | "gallery" | "documents" | "email" | "canvas-editor" | "theme" | "login" | "admin" | "voice";
-
-const ALL_VIEWS: View[] = ["chat", "dashboard", "vault", "budget", "voice", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin"];
-
-function hashToView(): View {
-  const raw = window.location.hash.replace(/^#\/?/, "").toLowerCase();
-  if (ALL_VIEWS.includes(raw as View)) return raw as View;
-  return "chat";
-}
-
-function viewToHash(v: View) {
-  const hash = `#/${v}`;
-  if (window.location.hash !== hash) window.location.hash = hash;
-}
+export type View = string;
 
 const PANELFallback = <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
+
+function ViewWrapper({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={PANELFallback}>{children}</Suspense>;
+}
+
+function ViewRouter() {
+  return (
+    <Routes>
+      <Route path="/" element={<ViewWrapper><ChatView /></ViewWrapper>} />
+      <Route path="/chat" element={<ViewWrapper><ChatView /></ViewWrapper>} />
+      <Route path="/dashboard" element={<ViewWrapper><Dashboard /></ViewWrapper>} />
+      <Route path="/vault" element={<ViewWrapper><VaultPanel /></ViewWrapper>} />
+      <Route path="/budget" element={<ViewWrapper><BudgetPanel /></ViewWrapper>} />
+      <Route path="/memory" element={<ViewWrapper><MemoryPanel /></ViewWrapper>} />
+      <Route path="/knowledge-graph" element={<ViewWrapper><KnowledgeGraphPanel /></ViewWrapper>} />
+      <Route path="/pipeline" element={<ViewWrapper><PipelinePanel /></ViewWrapper>} />
+      <Route path="/health" element={<ViewWrapper><HealthPanel /></ViewWrapper>} />
+      <Route path="/work-products" element={<ViewWrapper><WorkProductsPanel /></ViewWrapper>} />
+      <Route path="/agents" element={<ViewWrapper><SubAgentPanelWithWs /></ViewWrapper>} />
+      <Route path="/agent-discovery" element={<ViewWrapper><AgentsPanel /></ViewWrapper>} />
+      <Route path="/teams" element={<ViewWrapper><TeamPanelWithNav /></ViewWrapper>} />
+      <Route path="/mcp" element={<ViewWrapper><MCPPanel /></ViewWrapper>} />
+      <Route path="/settings" element={<ViewWrapper><SettingsPanel /></ViewWrapper>} />
+      <Route path="/social" element={<ViewWrapper><SocialPanel /></ViewWrapper>} />
+      <Route path="/notes" element={<ViewWrapper><NotesPanel /></ViewWrapper>} />
+      <Route path="/contacts" element={<ViewWrapper><ContactsPanel /></ViewWrapper>} />
+      <Route path="/cookbook" element={<ViewWrapper><CookbookPanel /></ViewWrapper>} />
+      <Route path="/research" element={<ViewWrapper><DeepResearchPanel /></ViewWrapper>} />
+      <Route path="/compare" element={<ViewWrapper><ModelComparisonPanel /></ViewWrapper>} />
+      <Route path="/gallery" element={<ViewWrapper><ImageGalleryPanel /></ViewWrapper>} />
+      <Route path="/documents" element={<ViewWrapper><DocumentEditorPanel /></ViewWrapper>} />
+      <Route path="/email" element={<ViewWrapper><EmailPanel /></ViewWrapper>} />
+      <Route path="/canvas-editor" element={<ViewWrapper><CanvasEditorPanel /></ViewWrapper>} />
+      <Route path="/theme" element={<ViewWrapper><ThemeEditorPanel /></ViewWrapper>} />
+      <Route path="/login" element={<ViewWrapper><LoginPanel /></ViewWrapper>} />
+      <Route path="/admin" element={<ViewWrapper><AdminPanel /></ViewWrapper>} />
+      <Route path="/voice" element={<ViewWrapper><VoicePanel /></ViewWrapper>} />
+    </Routes>
+  );
+}
+
+function SubAgentPanelWithWs() {
+  const { ws } = useChat();
+  return <SubAgentPanel ws={ws} />;
+}
+
+function TeamPanelWithNav() {
+  const navigate = useNavigate();
+  return <TeamPanel onNavigate={(v) => navigate(`/${v}`)} />;
+}
 
 export default function App() {
   return (
@@ -71,22 +109,18 @@ export default function App() {
 }
 
 function AppContent() {
-  const [activeView, setActiveView] = useState<View>(hashToView);
+  const navigate = useNavigate();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { ws, connected } = useChat();
 
-  const navigate = useCallback((view: View) => {
-    setActiveView(view);
-    viewToHash(view);
-    setSidebarOpen(false);
-  }, []);
+  const activeView = location.pathname.replace(/^\//, "") || "chat";
 
-  useEffect(() => {
-    const onHash = () => setActiveView(hashToView());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
+  const onNavigate = useCallback((view: string) => {
+    navigate(`/${view}`);
+    setSidebarOpen(false);
+  }, [navigate]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -103,7 +137,7 @@ function AppContent() {
     const handler = (e: MessageEvent) => {
       try {
         const d = JSON.parse(e.data);
-        if (d.type === "swarm_recovery") navigate("agents");
+        if (d.type === "swarm_recovery") navigate("/agents");
       } catch {}
     };
     ws.addEventListener("message", handler);
@@ -115,41 +149,12 @@ function AppContent() {
       <div className="layout" role="application" aria-label="Custom-PI Web Client">
         <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
         <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-          <Sidebar activeView={activeView} onNavigate={navigate} wsConnected={connected} />
+          <Sidebar activeView={activeView} onNavigate={onNavigate} wsConnected={connected} />
         </div>
         <div className="main-area">
           <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
           <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""} ${activeView === "voice" ? "content-area-voice" : ""}`}>
-            <Suspense fallback={PANELFallback}>
-              {activeView === "chat" && <ChatView />}
-              {activeView === "dashboard" && <Dashboard />}
-              {activeView === "vault" && <VaultPanel />}
-              {activeView === "budget" && <BudgetPanel />}
-              {activeView === "memory" && <MemoryPanel />}
-              {activeView === "knowledge-graph" && <KnowledgeGraphPanel />}
-              {activeView === "pipeline" && <PipelinePanel />}
-              {activeView === "health" && <HealthPanel />}
-              {activeView === "work-products" && <WorkProductsPanel />}
-              {activeView === "agents" && <SubAgentPanel ws={ws} />}
-              {activeView === "agent-discovery" && <AgentsPanel />}
-              {activeView === "teams" && <TeamPanel onNavigate={navigate} />}
-              {activeView === "mcp" && <MCPPanel />}
-              {activeView === "settings" && <SettingsPanel />}
-              {activeView === "social" && <SocialPanel />}
-              {activeView === "notes" && <NotesPanel />}
-              {activeView === "contacts" && <ContactsPanel />}
-              {activeView === "cookbook" && <CookbookPanel />}
-              {activeView === "research" && <DeepResearchPanel />}
-              {activeView === "compare" && <ModelComparisonPanel />}
-              {activeView === "gallery" && <ImageGalleryPanel />}
-              {activeView === "documents" && <DocumentEditorPanel />}
-              {activeView === "email" && <EmailPanel />}
-              {activeView === "canvas-editor" && <CanvasEditorPanel />}
-              {activeView === "theme" && <ThemeEditorPanel />}
-              {activeView === "login" && <LoginPanel />}
-              {activeView === "admin" && <AdminPanel />}
-              {activeView === "voice" && <VoicePanel />}
-            </Suspense>
+            <ViewRouter />
           </div>
         </div>
       </div>
