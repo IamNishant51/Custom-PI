@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import { fastifyWebsocket } from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import compress from "@fastify/compress";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import { streamSimple, getEnvApiKey } from "@earendil-works/pi-ai";
 import path from "node:path";
 import fs from "node:fs";
@@ -6052,6 +6054,13 @@ function validateEnv() {
 export async function createApp() {
   const app = Fastify({ logger: { level: "warn" } });
 
+  // API version prefix rewrite — /api/v1/* → /api/* for backward compatibility
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url.startsWith("/api/v1/")) {
+      req.url = req.url.replace("/api/v1", "/api");
+    }
+  });
+
   // Raw binary parser for WAV audio uploads (STT)
   app.addContentTypeParser("audio/wav", function (_req, payload, done) {
     const chunks = [];
@@ -6135,6 +6144,22 @@ export async function createApp() {
 
   await app.register(fastifyWebsocket);
   await app.register(compress, { global: true, threshold: 1024 });
+
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: "Custom-PI API",
+        description: "Autonomous AI coding agent — full-stack API",
+        version: "1.11.0",
+      },
+      servers: [{ url: `http://127.0.0.1:${PORT}` }],
+    },
+  });
+
+  await app.register(swaggerUi, {
+    routePrefix: "/docs",
+    uiConfig: { docExpansion: "list", defaultModelsExpandDepth: 1 },
+  });
 
   // Security headers applied to all HTTP responses
   app.addHook("onRequest", async (req, reply) => {
@@ -6982,7 +7007,11 @@ export async function createApp() {
     try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
     return { ok: true };
   });
-  app.get("/api/models", async () => {
+  app.get("/api/models", {
+    schema: {
+      response: { 200: { type: "object", properties: { models: { type: "array" }, providers: { type: "array" } } } },
+    },
+  }, async () => {
     const modelsPath = path.join(PI_DIR, "models.json");
     try {
       const res = await fetch("http://127.0.0.1:1234/v1/models", { signal: AbortSignal.timeout(2000) });
@@ -7118,7 +7147,12 @@ export async function createApp() {
     return { votes: votes.length, rankings: ranked };
   });
 
-  app.post("/api/chat/completions", async (req) => {
+  app.post("/api/chat/completions", {
+    schema: {
+      body: { type: "object", required: ["messages"], properties: { model: { type: "string" }, messages: { type: "array", items: { type: "object" } }, stream: { type: "boolean" }, max_tokens: { type: "number" } } },
+      response: { 200: { type: "object", properties: { choices: { type: "array" }, usage: { type: "object" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const { model: reqModel, messages, stream, max_tokens } = req.body || {};
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return { error: "messages array is required" };
@@ -7196,7 +7230,9 @@ export async function createApp() {
     vaultAudit("delete", req.body.key, result);
     return { ok: result };
   });
-  app.get("/api/vault/list", async () => ({ keys: vaultList() }));
+  app.get("/api/vault/list", {
+    schema: { response: { 200: { type: "object", properties: { keys: { type: "array", items: { type: "string" } } } } } },
+  }, async () => ({ keys: vaultList() }));
   app.get("/api/vault/health", async () => vaultHealth());
   app.get("/api/vault/export", async () => {
     const vault = readVault();
@@ -7553,7 +7589,9 @@ export async function createApp() {
     setBudgetConfig(req.body);
     return { ok: true };
   });
-  app.get("/api/budget/stats", async () => getCostSummary());
+  app.get("/api/budget/stats", {
+    schema: { response: { 200: { type: "object", properties: { totalSessions: { type: "number" }, totalTokens: { type: "number" }, totalCostUsd: { type: "number" }, dailyTokens: { type: "number" }, dailyCostUsd: { type: "number" }, today: { type: "string" } } } } },
+  }, async () => getCostSummary());
   app.get("/api/budget/details", async () => getCostDetails());
 
   // Telemetry
@@ -7568,7 +7606,12 @@ export async function createApp() {
   });
 
   // Work products
-  app.get("/api/work-products", async (req) => {
+  app.get("/api/work-products", {
+    schema: {
+      querystring: { type: "object", properties: { sessionId: { type: "string" }, summary: { type: "string" } } },
+      response: { 200: { type: "object", properties: { products: { type: "array" }, summary: { type: "string" } } } },
+    },
+  }, async (req) => {
     const url = new URL(req.url, `http://${req.hostname}`);
     const sessionId = url.searchParams.get("sessionId") || undefined;
     if (url.searchParams.get("summary") === "true") return { summary: getWorkProductSummary(sessionId) };
@@ -7576,7 +7619,9 @@ export async function createApp() {
   });
 
 
-  app.get("/api/mcp/config", async () => ({ servers: loadMcpConfig() }));
+  app.get("/api/mcp/config", {
+    schema: { response: { 200: { type: "object", properties: { servers: { type: "array" } } } } },
+  }, async () => ({ servers: loadMcpConfig() }));
   app.post("/api/mcp/config", async (req) => {
     saveMcpConfig(req.body.servers || []);
     startMcpServers().catch(err => console.error("[MCP] Error restarting servers:", err));
@@ -7720,7 +7765,9 @@ export async function createApp() {
   });
 
   // Swarm Teams Storage
-  app.get("/api/swarm/teams", async () => ({ teams: loadSwarmTeams() }));
+  app.get("/api/swarm/teams", {
+    schema: { response: { 200: { type: "object", properties: { teams: { type: "array" } } } } },
+  }, async () => ({ teams: loadSwarmTeams() }));
   app.post("/api/swarm/teams", async (req) => {
     const { name, goal, agents } = req.body;
     if (!name || !agents || !Array.isArray(agents)) {
@@ -7778,7 +7825,9 @@ export async function createApp() {
     const id = memoryStore(req.body.content, req.body.type, req.body.importance ?? 5, project, req.body.tags || []);
     return { id };
   });
-  app.get("/api/memory/stats", async () => memoryStats());
+  app.get("/api/memory/stats", {
+    schema: { response: { 200: { type: "object", properties: { totalEntries: { type: "number" }, byType: { type: "object" }, byProject: { type: "object" }, averageImportance: { type: "string" } } } } },
+  }, async () => memoryStats());
 
   // ── Auto-Memory Extraction ──────────────────────────────────────────
   app.post("/api/memory/auto-extract", async (req) => {
@@ -8217,7 +8266,9 @@ print(base64.b64encode(buf.getvalue()).decode())
     } catch { return { cpu: { percent: 0, cores: 0 }, memory: { total: 0, used: 0, percent: 0 } }; }
   });
 
-  app.get("/api/system/rate-limits", async () => {
+  app.get("/api/system/rate-limits", {
+    schema: { response: { 200: { type: "object", properties: { limits: { type: "array" } } } } },
+  }, async () => {
     try {
       const db = getOrCreateDb(STATE_DB_PATH);
       if (!db) return { limits: [] };
@@ -8418,7 +8469,9 @@ print(base64.b64encode(buf.getvalue()).decode())
   }
 
   // ── Social Bridge Status ──────────────────────────────────────────────────
-  app.get("/api/social/status", async () => {
+  app.get("/api/social/status", {
+    schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, platforms: { type: "object" }, error: { type: "string" } } } } },
+  }, async () => {
     try {
       const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => ({ platforms: {} }));
       const email = await proxyToBridge(EMAIL_BRIDGE, "/status", "GET").catch(() => ({ configured: false }));
