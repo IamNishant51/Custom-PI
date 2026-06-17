@@ -18,15 +18,15 @@
 
 ---
 
-## 🔥 What's New — v1.9.1
+## What's New — v1.9.1
 
-### 🖼️ Image Gallery — Preview, Upload & Delete
+### Image Gallery — Preview, Upload & Delete
 - **Image preview** — Click any gallery image to see a full-size preview with loading states
 - **Delete with confirmation** — Red confirm dialog prevents accidental deletions
 - **Upload validation** — 10MB max file size, visual feedback during upload
 - **Error handling** — Toast notifications for upload/preview/delete failures
 
-### 🎨 Canvas Editor — Full Drawing Suite
+### Canvas Editor — Full Drawing Suite
 - **8 drawing tools**: Pen, Line, Arrow, Rect, Circle, Text, Eraser, Crop
 - **Fill mode** — Fill shapes with the selected color
 - **15-color palette + custom color picker** — Eyedropper-style selection
@@ -42,7 +42,7 @@
 - **Gallery integration** — Load images directly from gallery
 - **Keyboard shortcuts** — Tool hotkeys (P/L/A/R/C/T/E/V/F), zoom (+/-/0), undo/redo
 
-### 📝 Document Editor — AI-Powered Writing
+### Document Editor — AI-Powered Writing
 - **AI Document Generation** — Type a topic ("teach me javascript") and get a full Markdown document with headings, code blocks, tables, and lists
 - **AI Document Editing** — "rewrite this in simpler language" or "add a section about error handling"
 - **Rich Markdown Preview** — Live split-pane preview with syntax highlighting for JS/TS, Python, JSON, HTML, CSS, Bash
@@ -53,7 +53,7 @@
 - **Error handling** — Inline error messages with timeout diagnostics
 - **Keyboard shortcuts** — Ctrl+Enter to apply AI edit, Escape to close
 
-### 🐛 Bug Fixes
+### Bug Fixes
 - **Dashboard crash** — Fixed `c.slice is not a function` error when models API returns an object instead of array
 - **LLM Chat completions** — New `/api/chat/completions` endpoint proxies to local LM Studio / Ollama with proper auth, 10-min timeout, and diagnostic error messages
 
@@ -84,12 +84,12 @@ graph LR
 
 | Feature | Description |
 |:---|:---|
-| **🎨 Free Generation** | Generate images via Pollinations.ai — Flux, GPT Image, Seedream models. Zero cost, unlimited use. |
-| **🔑 No API Keys** | Defaults to free provider. No signup, no credit card, no configuration. |
-| **🖼️ Batch Generation** | Creates 4 images by default with different seeds — more variety, better picks. |
-| **👆 Visual Selection** | AssetSelector modal shows all generated images in a grid — click to pick, rest auto-deleted. |
-| **📁 Asset Gallery** | All generated images saved to `~/.pi/assets/` with preview, copy-path, and delete controls. |
-| **📱 Post Integration** | Selected image attaches directly to social media posts in the approval preview. |
+| ** Free Generation** | Generate images via Pollinations.ai — Flux, GPT Image, Seedream models. Zero cost, unlimited use. |
+| ** No API Keys** | Defaults to free provider. No signup, no credit card, no configuration. |
+| ** Batch Generation** | Creates 4 images by default with different seeds — more variety, better picks. |
+| ** Visual Selection** | AssetSelector modal shows all generated images in a grid — click to pick, rest auto-deleted. |
+| ** Asset Gallery** | All generated images saved to `~/.pi/assets/` with preview, copy-path, and delete controls. |
+| ** Post Integration** | Selected image attaches directly to social media posts in the approval preview. |
 | **⚡ Premium Option** | Set `provider: "designapi"` with a `DESIGN_API_KEY` for Flux Pro, DALL-E 3, Recraft, Ideogram. |
 
 ---
@@ -116,7 +116,7 @@ custom-pi is a premium engineering extension suite for the Pi Coding Agent. It e
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Installation
 
@@ -146,7 +146,7 @@ custom-pi-web      # Web dashboard at http://localhost:4321
 
 ---
 
-## 🎨 Free Image Generation — In Action
+## Free Image Generation — In Action
 
 ### Agent Workflow
 
@@ -183,7 +183,7 @@ Set `provider: "designapi"` and add a `DESIGN_API_KEY` to your vault for access 
 
 ---
 
-## 📱 Social Media Automation
+## Social Media Automation
 
 custom-pi automates the entire social media workflow — research, draft, generate visuals, approve, publish.
 
@@ -285,7 +285,7 @@ graph TB
 
 ---
 
-## 🧠 Ascension Engine
+## Ascension Engine
 
 custom-pi has evolved from a reactive coding assistant into a **proactive, self-aware, self-evolving AI system** with 26+ interconnected subsystems organized in 9 phases. All subsystems communicate through a quantum event bus and persist state in a unified property graph database.
 
