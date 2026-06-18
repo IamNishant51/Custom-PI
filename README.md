@@ -16,6 +16,8 @@
 ![Swarm](https://img.shields.io/badge/Swarm-Hive%20Mind-af00ff.svg?style=for-the-badge)
 ![Self-Evolving](https://img.shields.io/badge/Self-Evolving-True-ffaa00.svg?style=for-the-badge)
 
+> 🌐 **Landing Page**: [custom-pi-ai.vercel.app](https://custom-pi-ai.vercel.app/) — Interactive product showcase with live demo, voice synthesis preview, and documentation
+
 ---
 
 ## What's New — v1.9.1
