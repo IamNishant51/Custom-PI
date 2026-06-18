@@ -377,6 +377,8 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
 
   const addAgent = useCallback(async (teamId: string, agentId: string) => {
     if (!agentId) return;
+    const tempSlot: TeamSlot = { id: `temp-${Date.now()}`, agentId, role: "teammate", status: "idle" };
+    setTeams(prev => prev.map(t => t.id === teamId ? { ...t, slots: [...t.slots, tempSlot] } : t));
     try {
       const r = await fetch("/api/teams/add-agent", {
         method: "POST",
@@ -387,11 +389,18 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
       toast("Agent added to team", "success");
       loadData();
     } catch (e: any) {
+      setTeams(prev => prev.map(t => t.id === teamId ? { ...t, slots: t.slots.filter(s => s.id !== tempSlot.id) } : t));
       toast(e.message || "Failed to add agent", "error");
     }
   }, [loadData]);
 
   const removeAgent = useCallback(async (teamId: string, slotId: string) => {
+    let removedSlot: TeamSlot | undefined;
+    setTeams(prev => {
+      const team = prev.find(t => t.id === teamId);
+      removedSlot = team?.slots.find(s => s.id === slotId);
+      return prev.map(t => t.id === teamId ? { ...t, slots: t.slots.filter(s => s.id !== slotId) } : t);
+    });
     try {
       const r = await fetch("/api/teams/remove-agent", {
         method: "POST",
@@ -402,6 +411,7 @@ export default function TeamPanel({ onNavigate }: { onNavigate?: (view: any) => 
       toast("Agent removed", "success");
       loadData();
     } catch (e: any) {
+      if (removedSlot) setTeams(prev => prev.map(t => t.id === teamId ? { ...t, slots: [...t.slots, removedSlot!] } : t));
       toast(e.message || "Failed to remove agent", "error");
     }
   }, [loadData]);

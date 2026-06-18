@@ -25,7 +25,7 @@ export default function HealthPanel() {
       ]);
       setServices(servicesData.services || []);
       setMetrics(metricsData);
-      setRateLimits(limitsData.limits || []);
+      setRateLimits(Array.isArray(limitsData?.limits) ? limitsData.limits : []);
     } catch {
       setLoadError("Failed to load health data");
       showToast("Failed to load health data", "error");

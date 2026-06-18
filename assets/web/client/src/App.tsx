@@ -10,6 +10,10 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { ModalProvider } from "./context/ModalContext";
 import ModalContainer from "./components/ModalContainer";
 import KeyboardShortcuts from "./components/KeyboardShortcuts";
+import CommandPalette from "./components/CommandPalette";
+import NotificationBell from "./components/NotificationBell";
+import UndoBar from "./components/UndoBar";
+import OnboardingTour from "./components/OnboardingTour";
 
 const Dashboard = lazy(() => import("./components/Dashboard"));
 const VaultPanel = lazy(() => import("./components/VaultPanel"));
@@ -159,6 +163,9 @@ function AppContent() {
         </div>
       </div>
       <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <CommandPalette onToggleSidebar={() => setSidebarOpen(o => !o)} />
+      <UndoBar />
+      <OnboardingTour />
     </ErrorBoundary>
   );
 }
@@ -178,6 +185,7 @@ const TopBar = memo(function TopBar({ activeView, wsConnected, onMenuClick }: { 
       <button className="hamburger" onClick={onMenuClick}><AsciiMenu /></button>
       <span className="topbar-title">{labels[activeView] || activeView}</span>
       <div className="topbar-status">
+        <NotificationBell />
         <div id="topbar-actions" style={{ display: "flex", gap: "12px", alignItems: "center", marginRight: "12px" }}></div>
         <div className={`status-dot ${wsConnected ? "pulse" : ""}`} style={{ background: wsConnected ? "var(--success)" : "var(--danger)" }} />
         <span>{wsConnected ? "Connected" : "Disconnected"}</span>
