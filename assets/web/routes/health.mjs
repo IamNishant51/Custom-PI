@@ -8,7 +8,7 @@ const { PI_DIR } = SHARED_PATHS;
 const STATE_DB_PATH = path.join(PI_DIR, "session-state.db");
 
 export default function registerHealth(app, { sendError }) {
-  app.get("/api/health/services", { schema: { response: { 200: { type: "object", properties: { services: { type: "array" } } } } } }, async () => {
+  app.get("/api/health/services", { schema: { response: { 200: { type: "object", properties: { services: { type: "array", items: { type: "object" } } } } } }, async () => {
     try {
       const db = getOrCreateDb(STATE_DB_PATH);
       if (!db) return { services: [] };
@@ -17,7 +17,7 @@ export default function registerHealth(app, { sendError }) {
     } catch { return { services: [] }; }
   });
 
-  app.get("/api/health/endpoints", { schema: { response: { 200: { type: "object", properties: { endpoints: { type: "array" } } } } } }, async () => {
+  app.get("/api/health/endpoints", { schema: { response: { 200: { type: "object", properties: { endpoints: { type: "array", items: { type: "object" } } } } } }, async () => {
     const endpoints = [
       { name: "llm-anthropic", url: "https://api.anthropic.com/v1/health", method: "GET" },
       { name: "llm-openai", url: "https://api.openai.com/v1/health", method: "GET" },
@@ -52,7 +52,7 @@ export default function registerHealth(app, { sendError }) {
     } catch (e) { return { error: e.message }; }
   });
 
-  app.get("/api/pipeline/status", { schema: { response: { 200: { type: "object", properties: { current: { type: "object", nullable: true }, history: { type: "array" } } } } } }, async () => {
+  app.get("/api/pipeline/status", { schema: { response: { 200: { type: "object", properties: { current: { type: "object", nullable: true }, history: { type: "array", items: { type: "object" } } } } } }, async () => {
     const data = readPipeline();
     return { current: data.current, history: data.deployments.slice(-20) };
   });
@@ -78,7 +78,7 @@ export default function registerHealth(app, { sendError }) {
     } catch (e) { return { error: e.message }; }
   });
 
-  app.get("/api/system/rate-limits", { schema: { response: { 200: { type: "object", properties: { limits: { type: "array" } } } } } }, async () => {
+  app.get("/api/system/rate-limits", { schema: { response: { 200: { type: "object", properties: { limits: { type: "array", items: { type: "object" } } } } } }, async () => {
     const limits = [];
     for (const [name, bucket] of Object.entries(rateLimiters)) {
       limits.push({

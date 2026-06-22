@@ -223,13 +223,16 @@ export default function ChatView() {
     if (!files) return;
     for (const file of Array.from(files)) {
       if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-        alert(`File "${file.name}" exceeds the 10MB size limit.`);
+        showToast(`File "${file.name}" exceeds the 10MB size limit.`, "error");
         continue;
       }
       const reader = new FileReader();
+      reader.onerror = () => { showToast(`Failed to read file: ${file.name}`, "error"); };
       if (file.type.startsWith("image/")) {
         reader.onloadend = () => {
+          if (!reader.result) { showToast(`Failed to read image: ${file.name}`, "error"); return; }
           const base64Data = (reader.result as string).split(",")[1];
+          if (!base64Data) { showToast(`Failed to decode image: ${file.name}`, "error"); return; }
           setAttachments(prev => [...prev, {
             name: file.name,
             type: file.type,
@@ -238,8 +241,9 @@ export default function ChatView() {
           }]);
         };
         reader.readAsDataURL(file);
-      } else {
+      } else if (file.type.startsWith("text/") || file.name.match(/\.(md|txt|json|xml|yaml|yml|toml|ini|cfg|log|ts|js|jsx|tsx|css|html|sh|py|rb|go|rs|java|cpp|c|h|sql|env|gitignore|editorconfig)$/i)) {
         reader.onloadend = () => {
+          if (!reader.result) { showToast(`Failed to read file: ${file.name}`, "error"); return; }
           setAttachments(prev => [...prev, {
             name: file.name,
             type: file.type,
@@ -247,6 +251,8 @@ export default function ChatView() {
           }]);
         };
         reader.readAsText(file);
+      } else {
+        showToast(`File type not supported: ${file.type || file.name}`, "error");
       }
     }
     e.target.value = "";

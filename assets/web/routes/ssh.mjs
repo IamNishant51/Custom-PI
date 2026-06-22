@@ -10,7 +10,7 @@ export default function registerSsh(app, { PI_DIR, sendError }) {
     fs.writeFileSync(SSH_CONFIG_FILE, JSON.stringify(machines, null, 2));
   }
 
-  app.get("/api/ssh/machines", { schema: { response: { 200: { type: "object", properties: { machines: { type: "array" } } } } } }, async () => {
+  app.get("/api/ssh/machines", { schema: { response: { 200: { type: "object", properties: { machines: { type: "array", items: { type: "object" } } } } } }, async () => {
     return { machines: loadSshMachines().map(m => ({ ...m, password: "***" })) };
   });
 

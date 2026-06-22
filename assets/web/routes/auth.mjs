@@ -27,7 +27,7 @@ export default function registerAuth(app, { sendError }) {
     return { success: true };
   });
 
-  app.get("/api/auth/tokens", { schema: { response: { 200: { type: "object", properties: { tokens: { type: "array" } } } } } }, async () => ({ tokens: loadTokens().map(t => ({ ...t, key: t.key.slice(0, 8) + "..." })) }));
+  app.get("/api/auth/tokens", { schema: { response: { 200: { type: "object", properties: { tokens: { type: "array", items: { type: "object" } } } } } }, async () => ({ tokens: loadTokens().map(t => ({ ...t, key: t.key.slice(0, 8) + "..." })) }));
   app.post("/api/auth/tokens", { schema: { body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, role: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, token: { type: "string" }, id: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { name, role } = req.body || {};
     if (!name) return { error: "name required" };
@@ -64,7 +64,7 @@ export default function registerAuth(app, { sendError }) {
   }
   function saveSessions(sessions) { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2)); }
 
-  app.get("/api/auth/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array" } } } } } }, async () => {
+  app.get("/api/auth/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array", items: { type: "object" } } } } } }, async () => {
     const active = loadSessions().filter(s => s.expiresAt > Date.now());
     return { sessions: active.map(s => ({ id: s.id, device: s.device || "Unknown", createdAt: s.createdAt, expiresAt: s.expiresAt })) };
   });

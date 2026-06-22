@@ -47,7 +47,7 @@ export default function registerUndoRedo(app, { PI_DIR }) {
     return { ok: true, id };
   });
 
-  app.get("/api/undo/history", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, actions: { type: "array" } } } } } }, async (req) => {
+  app.get("/api/undo/history", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, actions: { type: "array", items: { type: "object" } } } } } }, async (req) => {
     const db = getDb();
     if (!db) return { ok: false, actions: [] };
     const limit = Math.min(Number(req.query?.limit) || 50, 200);

@@ -30,7 +30,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   }
 
   app.get("/api/notes", {
-    schema: { response: { 200: { type: "object", properties: { notes: { type: "array" } } } } },
+    schema: { response: { 200: { type: "object", properties: { notes: { type: "array", items: { type: "object" } } } } },
   }, async () => {
     const db = getNotesDb();
     if (!db) return { notes: [] };
@@ -85,7 +85,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   });
 
   app.get("/api/tasks", {
-    schema: { response: { 200: { type: "object", properties: { tasks: { type: "array" } } } } },
+    schema: { response: { 200: { type: "object", properties: { tasks: { type: "array", items: { type: "object" } } } } },
   }, async () => {
     const db = getNotesDb();
     if (!db) return { tasks: [] };
@@ -144,7 +144,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   function saveReminders(reminders) { fs.writeFileSync(REMINDERS_FILE, JSON.stringify(reminders, null, 2)); }
 
   app.get("/api/reminders", {
-    schema: { response: { 200: { type: "object", properties: { reminders: { type: "array" } } } } },
+    schema: { response: { 200: { type: "object", properties: { reminders: { type: "array", items: { type: "object" } } } } } },
   }, async () => ({ reminders: loadReminders() }));
   app.post("/api/reminders", {
     schema: {
@@ -180,7 +180,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   function saveScheduled(actions) { fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(actions, null, 2)); }
 
   app.get("/api/scheduled-actions", {
-    schema: { response: { 200: { type: "object", properties: { actions: { type: "array" } } } } },
+    schema: { response: { 200: { type: "object", properties: { actions: { type: "array", items: { type: "object" } } } } } },
   }, async () => ({ actions: loadScheduled() }));
   app.post("/api/scheduled-actions", {
     schema: {

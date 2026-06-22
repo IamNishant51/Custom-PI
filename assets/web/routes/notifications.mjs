@@ -39,7 +39,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
     } catch {}
   }
 
-  app.get("/api/notifications", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, notifications: { type: "array" } } } } } }, async (req) => {
+  app.get("/api/notifications", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, notifications: { type: "array", items: { type: "object" } } } } } }, async (req) => {
     const db = getDb();
     if (!db) return { ok: false, notifications: [] };
     const unreadFirst = req.query?.unread_first !== "false";

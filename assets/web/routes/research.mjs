@@ -1,7 +1,7 @@
 import { searchWebRaw } from "../services/web-search.mjs";
 
 export default function registerResearch(app, { sendError, getLLMCompletion }) {
-  app.post("/api/research", { schema: { body: { type: "object", additionalProperties: true, properties: { query: { type: "string" }, depth: { type: "string" } } }, response: { 200: { type: "object", properties: { summary: { type: "string" }, findings: { type: "array" }, sources: { type: "array" }, depth: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
+  app.post("/api/research", { schema: { body: { type: "object", additionalProperties: true, properties: { query: { type: "string" }, depth: { type: "string" } } }, response: { 200: { type: "object", properties: { summary: { type: "string" }, findings: { type: "array", items: { type: "object" } }, sources: { type: "array", items: { type: "object" } }, depth: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { query, depth } = req.body || {};
     if (!query) return { error: "query required" };
     const depths = { quick: 2, moderate: 4, deep: 8 };

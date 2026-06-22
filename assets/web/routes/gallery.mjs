@@ -23,7 +23,7 @@ export default function registerGallery(app, { sendError }) {
         200: {
           type: "object",
           properties: {
-            assets: { type: "array" },
+            assets: { type: "array", items: { type: "object" } },
           },
         },
       },
@@ -69,7 +69,7 @@ export default function registerGallery(app, { sendError }) {
         200: {
           type: "object",
           properties: {
-            images: { type: "array" },
+            images: { type: "array", items: { type: "object" } },
           },
         },
       },

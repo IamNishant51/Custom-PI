@@ -51,7 +51,7 @@ export default function registerModelDownload(app, { sendError }) {
         200: {
           type: "object",
           properties: {
-            downloads: { type: "array" },
+            downloads: { type: "array", items: { type: "object" } },
           },
         },
       },
@@ -98,7 +98,7 @@ export default function registerModelDownload(app, { sendError }) {
         200: {
           type: "object",
           properties: {
-            votes: { type: "array" },
+            votes: { type: "array", items: { type: "object" } },
           },
         },
       },
@@ -112,7 +112,7 @@ export default function registerModelDownload(app, { sendError }) {
           type: "object",
           properties: {
             votes: { type: "number" },
-            rankings: { type: "array" },
+            rankings: { type: "array", items: { type: "object" } },
           },
         },
       },

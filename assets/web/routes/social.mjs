@@ -640,7 +640,7 @@ export default function registerSocial(app, { sendError, broadcast }) {
     return addToQueue(text, platforms, scheduled_at, { title, subreddit, mediaPath: media_path });
   });
 
-  app.get("/api/social/queue", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, items: { type: "array" }, error: { type: "string" } } } } } }, async () => {
+  app.get("/api/social/queue", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, items: { type: "array", items: { type: "object" } }, error: { type: "string" } } } } } }, async () => {
     if (!queueDb) return { ok: false, error: "Queue database not available", items: [] };
     const rows = queueDb.prepare("SELECT * FROM social_queue ORDER BY scheduled_at ASC").all();
     return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };
@@ -780,7 +780,7 @@ Return a JSON array. Each item:
   }
 
   // Drafts API
-  app.get("/api/social/drafts", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, items: { type: "array" } } } } } }, async () => {
+  app.get("/api/social/drafts", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, items: { type: "array", items: { type: "object" } } } } } }, async () => {
     if (!queueDb) return { ok: false, items: [] };
     const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'draft' ORDER BY created_at DESC").all();
     return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };

@@ -48,6 +48,10 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   });
   const colResize = useRef<{ startX: number; startW: number } | null>(null);
   const ceoResize = useRef<{ startY: number; startH: number } | null>(null);
+  const leftColWRef = useRef(leftColW);
+  const ceoHRef = useRef(ceoH);
+  useEffect(() => { leftColWRef.current = leftColW; }, [leftColW]);
+  useEffect(() => { ceoHRef.current = ceoH; }, [ceoH]);
   const gridRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ceoEndRef = useRef<HTMLDivElement | null>(null);
@@ -56,10 +60,15 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
   useEffect(() => { ceoEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ceoLogs]);
 
+  const pausedRef = useRef(paused);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
   useEffect(() => {
     if (swarmStatus !== "idle" && swarmStatus !== "done" && swarmStatus !== "error") {
       setElapsedTime(0);
-      timerRef.current = setInterval(() => setElapsedTime(prev => prev + 1), 1000);
+      timerRef.current = setInterval(() => {
+        if (!pausedRef.current) setElapsedTime(prev => prev + 1);
+      }, 1000);
     } else {
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     }
@@ -278,7 +287,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
   const onColDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    colResize.current = { startX: e.clientX, startW: leftColW };
+    colResize.current = { startX: e.clientX, startW: leftColWRef.current };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     const onMove = (ev: MouseEvent) => {
@@ -289,7 +298,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     };
     const onUp = () => {
       if (colResize.current) {
-        localStorage.setItem("subagent-lcw", String(leftColW));
+        localStorage.setItem("subagent-lcw", String(leftColWRef.current));
         colResize.current = null;
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
@@ -299,11 +308,11 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  }, [leftColW]);
+  }, []);
 
   const onCeoDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    ceoResize.current = { startY: e.clientY, startH: ceoH };
+    ceoResize.current = { startY: e.clientY, startH: ceoHRef.current };
     document.body.style.cursor = "row-resize";
     document.body.style.userSelect = "none";
     const onMove = (ev: MouseEvent) => {
@@ -314,7 +323,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     };
     const onUp = () => {
       if (ceoResize.current) {
-        localStorage.setItem("subagent-ceoh", String(ceoH));
+        localStorage.setItem("subagent-ceoh", String(ceoHRef.current));
         ceoResize.current = null;
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
@@ -324,7 +333,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  }, [ceoH]);
+  }, []);
 
   const startSwarm = useCallback(() => {
     if (!goal.trim() || !ws || swarmStatus === "running" || swarmStatus === "planning") return;

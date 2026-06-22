@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { showToast } from "./Toast";
 import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
@@ -39,6 +39,10 @@ const ALL_PLATFORMS = ["twitter", "reddit", "linkedin", "bluesky", "discord", "t
 const PLATFORM_LABELS: Record<string, string> = { twitter: "Twitter", reddit: "Reddit", linkedin: "LinkedIn", bluesky: "Bluesky", discord: "Discord", telegram: "Telegram" };
 
 export default function SocialPanel() {
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    return () => { timeoutsRef.current.forEach(clearTimeout); timeoutsRef.current = []; };
+  }, []);
   const [social, setSocial] = useState<SocialStatus | null>(null);
   const [email, setEmail] = useState<EmailStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,7 +140,7 @@ export default function SocialPanel() {
       }
       if (r.ok) {
         setFormMsg({ text: "Connected", ok: true });
-        setTimeout(() => { setActiveConnect(null); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(null); }, 1200);
+        timeoutsRef.current.push(setTimeout(() => { setActiveConnect(null); setFormUser(""); setFormPass(""); setFormName(""); setFormMsg(null); }, 1200));
         fetchStatus();
       } else {
         setFormMsg({ text: r.error || r.message || "Failed", ok: false });
@@ -166,7 +170,7 @@ export default function SocialPanel() {
         body: JSON.stringify({
           text: scheduleText,
           platforms: schedulePlatforms,
-          scheduled_at: new Date(scheduleTime).getTime() / 1000,
+          scheduled_at: (() => { const t = new Date(scheduleTime).getTime(); return Number.isNaN(t) ? Date.now() / 1000 + 3600 : t / 1000; })(),
           title: schedulePlatforms.includes("reddit") ? scheduleTitle || undefined : undefined,
           subreddit: schedulePlatforms.includes("reddit") ? scheduleSubreddit || undefined : undefined,
         }),
@@ -180,7 +184,7 @@ export default function SocialPanel() {
         setScheduleSubreddit("");
         setScheduleTitle("");
         fetchQueue();
-        setTimeout(() => setScheduleMsg(null), 2000);
+        timeoutsRef.current.push(setTimeout(() => setScheduleMsg(null), 2000));
       } else {
         setScheduleMsg({ text: d.error || "Failed to schedule", ok: false });
       }

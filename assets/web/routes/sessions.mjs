@@ -36,7 +36,7 @@ function getSessionsDb() {
 }
 
 export default function registerSessions(app, { sendError }) {
-  app.get("/api/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array" } } } } } }, async (req) => {
+  app.get("/api/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array", items: { type: "object" } } } } } }, async (req) => {
     const db = getSessionsDb();
     if (!db) return { sessions: [] };
     const includeArchived = req.query?.archived === "true";
@@ -90,7 +90,7 @@ export default function registerSessions(app, { sendError }) {
     return { success: true };
   });
 
-  app.get("/api/sessions/:id/messages", { schema: { response: { 200: { type: "object", properties: { messages: { type: "array" } } } } } }, async (req) => {
+  app.get("/api/sessions/:id/messages", { schema: { response: { 200: { type: "object", properties: { messages: { type: "array", items: { type: "object" } } } } } }, async (req) => {
     const db = getSessionsDb();
     if (!db) return { messages: [] };
     const { id } = req.params;

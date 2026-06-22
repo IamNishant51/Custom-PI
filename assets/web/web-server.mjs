@@ -2755,7 +2755,6 @@ class WebSession {
         catch (e) { resultText = `Error: ${e.message}`; isError = true; }
         onEvent({ type: "tool_result", id, name: tc.name, result: resultText.slice(0, 100000), isError });
         this.messages.push({
-        if (this.messages.length > 200) this.messages = this.messages.slice(-200);
           role: "toolResult",
           toolCallId: id,
           toolName: tc.name,
@@ -2763,6 +2762,7 @@ class WebSession {
           isError,
           timestamp: Date.now(),
         });
+        if (this.messages.length > 200) this.messages = this.messages.slice(-200);
       }
     }
 

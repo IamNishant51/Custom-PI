@@ -11,7 +11,7 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
   app.post("/api/chat/completions", {
     schema: {
       body: { type: "object", required: ["messages"], properties: { model: { type: "string" }, messages: { type: "array", items: { type: "object" } }, stream: { type: "boolean" }, max_tokens: { type: "number" } } },
-      response: { 200: { type: "object", properties: { choices: { type: "array" }, usage: { type: "object" }, error: { type: "string" } } } },
+      response: { 200: { type: "object", properties: { choices: { type: "array", items: { type: "object" } }, usage: { type: "object" }, error: { type: "string" } } } },
     },
   }, async (req) => {
     const { model: reqModel, messages, stream, max_tokens } = req.body || {};
