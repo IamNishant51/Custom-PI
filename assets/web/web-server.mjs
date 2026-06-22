@@ -307,7 +307,7 @@ function loadMcpConfig() {
     if (fs.existsSync(MCP_CONFIG_FILE)) {
       config = JSON.parse(fs.readFileSync(MCP_CONFIG_FILE, "utf8"));
     }
-  } catch {}
+  } catch {} // Ignored
 
   const seqThinkingName = "sequential-thinking";
   let seqThinking = config.find(s => s.name === seqThinkingName);
@@ -412,7 +412,7 @@ class McpConnection {
     }
     this.pendingRequests.clear();
     if (this.proc) {
-      try { this.proc.kill(); } catch {}
+      try { this.proc.kill(); } catch {} // cleanup
       this.proc = null;
     }
   }
@@ -503,7 +503,7 @@ async function startMcpServers() {
 
 async function stopMcpServers() {
   for (const conn of activeMcpServers.values()) {
-    try { await conn.stop(); } catch {}
+    try { await conn.stop(); } catch {} // cleanup
   }
   activeMcpServers.clear();
 }
@@ -518,7 +518,7 @@ function loadLspConfig() {
     if (fs.existsSync(LSP_CONFIG_FILE)) {
       return JSON.parse(fs.readFileSync(LSP_CONFIG_FILE, "utf8"));
     }
-  } catch {}
+  } catch {} // Ignored
   return {
     typescript: { command: "typescript-language-server", args: ["--stdio"] },
     javascript: { command: "typescript-language-server", args: ["--stdio"] },
@@ -629,7 +629,7 @@ class LspConnection {
     }
     this.pendingRequests.clear();
     if (this.proc) {
-      try { this.proc.kill(); } catch {}
+      try { this.proc.kill(); } catch {} // cleanup
       this.proc = null;
     }
   }
@@ -851,7 +851,7 @@ async function startLspServer(language, rootUri) {
 
 async function stopLspServers() {
   for (const conn of activeLspServers.values()) {
-    try { await conn.stop(); } catch {}
+    try { await conn.stop(); } catch {} // cleanup
   }
   activeLspServers.clear();
 }
@@ -940,7 +940,7 @@ async function executeTool(name, args, cwd) {
               checkpoints: listCheckpoints().length,
               model: resolveModel().id,
             });
-          } catch {}
+          } catch {} // Ignored
         }
         return result;
       } catch (err) {
@@ -1019,7 +1019,7 @@ async function executeTool(name, args, cwd) {
                 for (let i = 0; i < lines.length; i++) {
                   if (regex.test(lines[i])) results.push(`${full}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
                 }
-              } catch {}
+              } catch {} // Ignored
             }
           }
         }
@@ -1031,7 +1031,7 @@ async function executeTool(name, args, cwd) {
       const importance = Math.min(10, Math.max(1, Math.floor(args.importance ?? 5)));
       const project = path.basename(cwd) || "global";
       const id = memoryStore(args.content, args.type || "fact", importance, project, args.tags || []);
-      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
+      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {} // Ignored
       return id;
     }
     case "memory_search": {
@@ -1041,7 +1041,7 @@ async function executeTool(name, args, cwd) {
     }
     case "vault_set":
       vaultSet(args.key, args.value);
-      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
+      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {} // Ignored
       return `Secret '${args.key}' stored.`;
     case "vault_get": {
       const val = vaultGet(args.key);
@@ -1131,7 +1131,7 @@ async function executeTool(name, args, cwd) {
                 if (content.toLowerCase().includes(args.query.toLowerCase())) {
                   results.push(`${entry.name}: ${content.slice(0, 200).replace(/\n/g, " ")}`);
                 }
-              } catch {}
+              } catch {} // Ignored
             }
           }
         }
@@ -1224,7 +1224,7 @@ async function executeTool(name, args, cwd) {
     }
     case "memory_edit": {
       const result = memoryEdit(args.action, args.id, args.content, args.tags);
-      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
+      try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {} // Ignored
       return result;
     }
     case "todo_write": {
@@ -1408,7 +1408,7 @@ Restored: ${result.restored.join(", ")}`;
         if (!validFiles.includes(answer)) return `Error: Invalid selection "${answer}".`;
         for (const f of validFiles) {
           if (f !== answer) {
-            try { fs.unlinkSync(path.join(assetsDir, f)); } catch {}
+            try { fs.unlinkSync(path.join(assetsDir, f)); } catch {} // cleanup
           }
         }
         return `Selected: ${answer}`;
@@ -1449,7 +1449,7 @@ Restored: ${result.restored.join(", ")}`;
           const audioData = fs.readFileSync(outFile).toString("base64");
           return `Audio generated:\n[audio]data:audio/mp3;base64,${audioData}[/audio]`;
         }
-      } catch {}
+      } catch {} // Ignored
       return `TTS: "${args.text}" (voice: ${args.voice || "default"})\n[Play on client via browser Speech Synthesis]`;
     }
     case "ssh_exec": {
@@ -1477,7 +1477,7 @@ Restored: ${result.restored.join(", ")}`;
             sshArgs.unshift("-i", keyFile);
             result = spawnSync("ssh", sshArgs, { encoding: "utf8", timeout, shell: false, maxBuffer: 10 * 1024 * 1024 });
           } finally {
-            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} // cleanup
           }
         } else if (sshPassword) {
           result = spawnSync("sshpass", ["-e", "ssh", ...sshArgs], { encoding: "utf8", timeout, shell: false, env: { ...process.env, SSHPASS: sshPassword }, maxBuffer: 10 * 1024 * 1024 });
@@ -1554,7 +1554,7 @@ Restored: ${result.restored.join(", ")}`;
                     }
                   } catch {} // skip invalid patterns
                 }
-              } catch {}
+              } catch {} // Ignored
             }
           }
         }
@@ -1611,11 +1611,11 @@ Restored: ${result.restored.join(", ")}`;
           fs.writeFileSync(tmpFile, code, "utf8");
           execSync(`mmdc -i "${tmpFile}" -o "${outFile}"`, { timeout: 30000 });
           const svg = fs.readFileSync(outFile, "utf8");
-          try { fs.unlinkSync(tmpFile); } catch {}
+          try { fs.unlinkSync(tmpFile); } catch {} // cleanup
           if (args.format === "svg") return svg;
           if (args.format === "url") return `![Mermaid diagram](${outFile})`;
         }
-      } catch {}
+      } catch {} // Ignored
       const lines = code.split("\n").map(l => l.trim()).filter(Boolean);
       let ascii = "";
       if (code.includes("graph ") || code.includes("flowchart ")) {
@@ -2073,7 +2073,7 @@ Provide a structured review with severity-classified issues and an overall verdi
         checkpoints: listCheckpoints().length,
         model: resolveModel().id,
       });
-    } catch {}
+    } catch {} // Ignored
   }
 }
 
@@ -2532,14 +2532,14 @@ function loadSystemPrompt() {
   // 1. SYSTEM.md (~/.pi/agent/SYSTEM.md) — full TUI system prompt
   try {
     const sys = fs.readFileSync(path.join(PI_DIR, "SYSTEM.md"), "utf8");
-    if (sys.trim()) parts.push(sys.trim());
-  } catch {}
+          if (sys.trim()) parts.push(sys.trim());
+  } catch {} // Ignored
 
   // 2. SOUL.md (~/.pi/agent/SOUL.md) — identity
   try {
     const soul = fs.readFileSync(path.join(PI_DIR, "SOUL.md"), "utf8");
-    if (soul.trim()) parts.push(`## IDENTITY\n${soul.trim()}`);
-  } catch {}
+          if (soul.trim()) parts.push(`## IDENTITY\n${soul.trim()}`);
+  } catch {} // Ignored
 
   // 3. Agent_Memory.md (Obsidian vault) — core memory
   try {
@@ -2548,19 +2548,19 @@ function loadSystemPrompt() {
       const mem = fs.readFileSync(memPath, "utf8");
       if (mem.trim()) parts.push(`## CORE MEMORY\n${mem.trim()}`);
     }
-  } catch {}
+  } catch {} // Ignored
 
   // 4. MEMORY.md (~/.pi/agent/MEMORY.md)
   try {
     const mem = fs.readFileSync(path.join(PI_DIR, "MEMORY.md"), "utf8");
-    if (mem.trim()) parts.push(`## PERSISTENT MEMORY\n${mem.trim()}`);
-  } catch {}
+          if (mem.trim()) parts.push(`## PERSISTENT MEMORY\n${mem.trim()}`);
+  } catch {} // Ignored
 
   // 5. USER.md (~/.pi/agent/USER.md)
   try {
     const usr = fs.readFileSync(path.join(PI_DIR, "USER.md"), "utf8");
-    if (usr.trim()) parts.push(`## USER CONTEXT\n${usr.trim()}`);
-  } catch {}
+      if (usr.trim()) parts.push(`## USER CONTEXT\n${usr.trim()}`);
+  } catch {} // Ignored
 
   // 6. Available tools note
   parts.push(`## AVAILABLE TOOLS
@@ -2578,7 +2578,7 @@ NOT available: create_subagent, grep_search (use grep), memory_write/memory_read
         try {
           const content = fs.readFileSync(path.join(d, file), "utf8");
           skillBlocks.push(content.trim());
-        } catch {}
+        } catch {} // Ignored
       }
     }
   }
@@ -2594,7 +2594,7 @@ function loadVoiceSystemPrompt() {
   try {
     const soul = fs.readFileSync(path.join(PI_DIR, "SOUL.md"), "utf8");
     if (soul.trim()) parts.push(`## IDENTITY\n${soul.trim()}`);
-  } catch {}
+  } catch {} // Ignored
 
   // 2. Agent_Memory.md (Obsidian vault) — core memory
   try {
@@ -2603,19 +2603,19 @@ function loadVoiceSystemPrompt() {
       const mem = fs.readFileSync(memPath, "utf8");
       if (mem.trim()) parts.push(`## CORE MEMORY\n${mem.trim()}`);
     }
-  } catch {}
+  } catch {} // Ignored
 
   // 3. MEMORY.md (~/.pi/agent/MEMORY.md)
   try {
     const mem = fs.readFileSync(path.join(PI_DIR, "MEMORY.md"), "utf8");
     if (mem.trim()) parts.push(`## PERSISTENT MEMORY\n${mem.trim()}`);
-  } catch {}
+  } catch {} // Ignored
 
   // 4. USER.md (~/.pi/agent/USER.md)
   try {
     const usr = fs.readFileSync(path.join(PI_DIR, "USER.md"), "utf8");
     if (usr.trim()) parts.push(`## USER CONTEXT\n${usr.trim()}`);
-  } catch {}
+  } catch {} // Ignored
 
   // 5. Base voice persona instructions
   parts.push(`## VOICE MODE RULES
@@ -2732,7 +2732,7 @@ class WebSession {
         const usage = finalMessage.usage;
         trackCost("web-session", "web-agent", this.model.provider, this.model.id,
           usage?.inputTokens || 0, usage?.outputTokens || 0);
-      } catch {}
+      } catch {} // Ignored
 
       this.messages.push(finalMessage);
       if (this.messages.length > 200) this.messages = this.messages.slice(-200);
@@ -2803,7 +2803,7 @@ function loadAgents() {
         const name = config.name || path.basename(file, ".md");
         agents[name] = { name, config, body };
       }
-    } catch {}
+    } catch {} // Ignored
   }
   return agents;
 }
@@ -2857,7 +2857,7 @@ async function handleSubAgent(socket, agentId, task) {
     try {
       const usage = result.usage;
       trackCost("web-subagent", agentId, model.provider, model.id, usage?.inputTokens || 0, usage?.outputTokens || 0);
-    } catch {}
+    } catch {} // Ignored
 
     messages.push(result);
 
@@ -3052,7 +3052,7 @@ async function runDagAgent(agent, context) {
         ragContext = `\n\n## RELEVANT MEMORY CONTEXT\n${highConfidence.map(r => `[${r.entry.type || "note"}] ${r.entry.content.slice(0, 500)}`).join("\n\n")}`;
       }
     }
-  } catch {}
+  } catch {} // Ignored
 
   // Wave-based summary logs for downstream waves
   let waveSummaryContext = "";
@@ -3339,7 +3339,7 @@ Write a brief summary for the user.`;
   }
 
   bcast({ type: "ceo_summary", summary });
-  try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {}
+  try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {} // cleanup
 
   if (currentSwarmState) {
     currentSwarmState.status = "completed";
@@ -3429,7 +3429,7 @@ Perform your task using your tools, think step-by-step, and report back with a c
         fs.writeFileSync(scriptPath, `// CEO created custom tool parser
 console.log("Parsing logs successfully.");
 `, "utf8");
-      } catch {}
+      } catch {} // Ignored
 
       bcast({ type: "tool_provisioned", agentId: agent.id, toolName: "custom_parser" });
       
@@ -3578,7 +3578,7 @@ Please write a brief summary report for the USER detailing what the sub-agents h
   }
 
   bcast({ type: "ceo_summary", summary });
-  try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {}
+  try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {} // cleanup
 
   // Mark swarm as completed
   if (currentSwarmState) {
@@ -3812,28 +3812,32 @@ export async function createApp() {
   });
 
   // Security headers applied to all HTTP responses
-  // TODO(52-53): Make CORS and CSP configurable via settings/config file
+  const CSP_CONFIG = process.env.CSP_CONFIG || "";
   app.addHook("onRequest", async (req, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
     reply.header("X-XSS-Protection", "1; mode=block");
-    const cspDirectives = [
-      `default-src 'self'`,
-      `script-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net`,
-      `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net`,
-      `img-src 'self' data: blob: https:`,
-      `font-src 'self' https://fonts.gstatic.com`,
-      `connect-src 'self' ws: wss: https:`,
-      `frame-ancestors 'none'`,
-      `base-uri 'self'`,
-      `form-action 'self'`,
-    ];
+    let cspDirectives;
+    if (CSP_CONFIG) {
+      try { cspDirectives = JSON.parse(CSP_CONFIG); } catch { cspDirectives = CSP_CONFIG.split("|"); }
+    } else {
+      cspDirectives = [
+        `default-src 'self'`,
+        `script-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net`,
+        `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net`,
+        `img-src 'self' data: blob: https:`,
+        `font-src 'self' https://fonts.gstatic.com`,
+        `connect-src 'self' ws: wss: https:`,
+        `frame-ancestors 'none'`,
+        `base-uri 'self'`,
+        `form-action 'self'`,
+      ];
+    }
     reply.header("Content-Security-Policy", cspDirectives.join("; "));
   });
 
   // CORS — restrict to configured origin, never wildcard
-  // TODO(52): Read CORS origin from settings/config file instead of env only
   const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4322";
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
@@ -3909,13 +3913,13 @@ export async function createApp() {
       const now = Date.now();
       for (const r of reminders) {
         if (!r.done && r.dueAt <= now) {
-          try { broadcast({ type: "reminder_due", reminder: r }); } catch {}
+          try { broadcast({ type: "reminder_due", reminder: r }); } catch {} // Ignored
         }
       }
       const scheduled = loadScheduled();
       for (const s of scheduled) {
         if (!s.lastRun || Date.now() - s.lastRun > s.intervalMs) {
-          try { broadcast({ type: "scheduled_action_due", action: s }); } catch {}
+          try { broadcast({ type: "scheduled_action_due", action: s }); } catch {} // Ignored
           s.lastRun = Date.now();
           saveScheduled(scheduled);
         }
@@ -4178,11 +4182,11 @@ export async function createApp() {
     try {
       const socialResp = await fetch(`${SOCIAL_BRIDGE}/status`, { signal: AbortSignal.timeout(3000) });
       if (socialResp.ok) info.bridges.social = true;
-    } catch {}
+    } catch {} // Ignored
     try {
       const emailResp = await fetch(`${EMAIL_BRIDGE}/status`, { signal: AbortSignal.timeout(3000) });
       if (emailResp.ok) info.bridges.email = true;
-    } catch {}
+    } catch {} // Ignored
     return info;
   });
 
@@ -4204,7 +4208,7 @@ export async function createApp() {
     const safeBody = JSON.parse(JSON.stringify(req.body || {}));
     const updated = { ...current, ...safeBody };
     fs.writeFileSync(path.join(PI_DIR, "settings.json"), JSON.stringify(updated, null, 2));
-    try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
+    try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {} // Ignored
     return { ok: true };
   });
   app.get("/api/teams", { schema: { response: { 200: { type: "object", properties: { teams: { type: "array" } } } } } }, async () => {
@@ -4259,13 +4263,6 @@ export async function createApp() {
     if (summary) return { summary: getWorkProductSummary(sessionId) };
     return { products: getWorkProducts(sessionId) };
   });
-  app.get("/api/email/fetch", { schema: { response: { 200: { type: "object", properties: { emails: { type: "array" } } } } } }, async () => {
-    const { SHARED_PATHS } = await import("./shared-constants.mjs");
-    try {
-      const state = JSON.parse(fs.readFileSync(path.join(SHARED_PATHS.PI_DIR, "email-state.json"), "utf8"));
-      return { emails: state.cachedEmails || [] };
-    } catch { return { emails: [] }; }
-  });
   app.get("/api/mcp/config", { schema: { response: { 200: { type: "object", properties: { servers: { type: "array" } } } } } }, async () => ({ servers: loadMcpConfig() }));
   app.post("/api/mcp/config", { schema: { body: { type: "object", additionalProperties: true, properties: { servers: { type: "array" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async (req) => {
     if (Array.isArray(req.body?.servers)) saveMcpConfig(req.body.servers);
@@ -4282,7 +4279,7 @@ export async function createApp() {
   });
   app.get("/api/models/vote-stats", { schema: { response: { 200: { type: "object", properties: { rankings: { type: "array" } } } } } }, async () => {
     let votes = [];
-    try { votes = JSON.parse(fs.readFileSync(path.join(PI_DIR, "model-votes.json"), "utf8")); } catch {}
+    try { votes = JSON.parse(fs.readFileSync(path.join(PI_DIR, "model-votes.json"), "utf8")); } catch {} // Ignored
     if (!Array.isArray(votes)) votes = [];
     const stats = {};
     for (const v of votes) {
@@ -4315,7 +4312,7 @@ export async function createApp() {
         if (live.length) {
           hasLive = true;
           let cfg = { providers: {} };
-          try { cfg = JSON.parse(fs.readFileSync(modelsPath, "utf8")); } catch {}
+          try { cfg = JSON.parse(fs.readFileSync(modelsPath, "utf8")); } catch {} // Ignored
           cfg.providers = cfg.providers || {};
           cfg.providers.lmstudio = {
             api: "openai-completions", apiKey: "not-needed",
@@ -4324,7 +4321,7 @@ export async function createApp() {
           fs.writeFileSync(modelsPath, JSON.stringify(cfg, null, 2));
         }
       }
-    } catch {}
+    } catch {} // Ignored
     const models = loadModels();
     return { models: Array.isArray(models) ? models : [] };
   });
@@ -4344,7 +4341,7 @@ export async function createApp() {
           if (c.provider === "ollama") models = (body.models || []).map(m => ({ id: m.name, provider: c.provider }));
           online.push({ provider: c.provider, reachable: true, baseUrl: c.baseUrl, models });
         }
-      } catch {}
+      } catch {} // Ignored
     }
     return { providers: online };
   });
@@ -4366,7 +4363,7 @@ export async function createApp() {
           if (c.provider === "ollama") models = (body.models || []).map((m) => ({ id: m.name, provider: c.provider }));
           online.push({ provider: c.provider, reachable: true, baseUrl: c.baseUrl, models });
         }
-      } catch {}
+      } catch {} // Ignored
     }
     return { providers: online };
   });
@@ -4412,7 +4409,7 @@ async function main() {
   // Import env vars into vault on startup
   try {
     await vaultImportFromEnv(["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"]);
-  } catch {}
+  } catch {} // Ignored
 
   // Initialize and start MCP servers
   try {
@@ -4427,14 +4424,14 @@ async function main() {
   const handleExit = async () => {
     console.log("\nStopping active servers...");
     if (ttsProcess) {
-      try { ttsProcess.kill("SIGTERM"); } catch {}
+      try { ttsProcess.kill("SIGTERM"); } catch {} // cleanup
       ttsProcess = null;
     }
     for (const sock of swarmSockets) {
-      try { sock.close(); } catch {}
+      try { sock.close(); } catch {} // cleanup
     }
     swarmSockets.clear();
-    try { await app.close(); } catch {}
+    try { await app.close(); } catch {} // cleanup
     await stopMcpServers();
     await stopLspServers();
     closeAllDbConnections();
@@ -4456,14 +4453,14 @@ async function main() {
       if (!live.length) return;
       const modelsPath = path.join(PI_DIR, "models.json");
       let cfg = { providers: {} };
-      try { cfg = JSON.parse(fs.readFileSync(modelsPath, "utf8")); } catch {}
+      try { cfg = JSON.parse(fs.readFileSync(modelsPath, "utf8")); } catch {} // Ignored
       cfg.providers = cfg.providers || {};
       cfg.providers.lmstudio = {
         api: "openai-completions", apiKey: "not-needed",
         baseUrl: "http://127.0.0.1:1234/v1", models: live,
       };
       fs.writeFileSync(modelsPath, JSON.stringify(cfg, null, 2));
-    } catch {}
+    } catch {} // Ignored
   }
 
   // ── Session Management API ────────────────────────────────────────────────

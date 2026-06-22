@@ -22,6 +22,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
   const { sendInterrupt, swarmRecovery, clearSwarmRecovery } = useChat();
   const [goal, setGoal] = useState("");
   const [activeGoal, setActiveGoal] = useState("");
+  const activeGoalRef = useRef(activeGoal);
   const [swarmStatus, setSwarmStatus] = useState<"idle" | "planning" | "running" | "done" | "error">("idle");
   const [ceoLogs, setCeoLogs] = useState<string[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -62,6 +63,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
 
   const pausedRef = useRef(paused);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { activeGoalRef.current = activeGoal; }, [activeGoal]);
 
   useEffect(() => {
     if (swarmStatus !== "idle" && swarmStatus !== "done" && swarmStatus !== "error") {
@@ -157,7 +159,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
             break;
           case "swarm_recovery": {
             const rc = data;
-            setActiveGoal(rc.goal || activeGoal);
+            setActiveGoal(rc.goal || activeGoalRef.current);
             setCeoLogs(rc.ceoLogs || []);
             setPaused(!!rc.paused);
             if (rc.agents && rc.agents.length > 0) {
@@ -196,7 +198,7 @@ export default function SubAgentPanel({ ws }: { ws: WebSocket | null }) {
     };
     ws.addEventListener("message", handleMessage);
     return () => ws.removeEventListener("message", handleMessage);
-  }, [ws, toast, activeGoal]);
+  }, [ws, toast]);
 
   useEffect(() => {
     if (!swarmRecovery) return;

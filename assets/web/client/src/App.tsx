@@ -117,6 +117,8 @@ export default function App() {
   );
 }
 
+const VALID_VIEWS = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin", "voice"];
+
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -168,8 +170,7 @@ function AppContent() {
   useEffect(() => {
     const saved = localStorage.getItem("lastView");
     if (saved && saved !== activeView && saved !== "") {
-      const validViews = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin", "voice"];
-      if (validViews.includes(saved)) {
+      if (VALID_VIEWS.includes(saved)) {
         navigate("/" + saved, { replace: true });
       }
     }

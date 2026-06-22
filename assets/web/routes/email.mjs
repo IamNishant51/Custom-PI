@@ -85,6 +85,56 @@ export default function registerEmail(app, { sendError }) {
     } catch (e) { return { error: e.message, emails: [] }; }
   });
 
+  app.get("/api/email/fetch", { schema: { querystring: { type: "object", properties: { accountId: { type: "string" }, folder: { type: "string" }, maxMessages: { type: "integer" } } }, response: { 200: { type: "object", properties: { emails: { type: "array", items: { type: "object" } }, error: { type: "string" } } } } } }, async (req) => {
+    const state = getEmailState();
+    const account = state.accounts.find(a => a.id === req.query.accountId) || state.accounts[0];
+    if (!account) return { error: "No email account configured" };
+    const maxMessages = req.query.maxMessages || 10;
+    if (maxMessages !== undefined && (!Number.isInteger(maxMessages) || maxMessages < 1 || maxMessages > 1000)) {
+      return { error: "maxMessages must be an integer between 1 and 1000" };
+    }
+    try {
+      const password = decrypt(account.password);
+      const net = await import("node:net");
+      const tls = await import("node:tls");
+      const port = account.imapPort || 993;
+      const useTls = account.useTls !== false;
+      const client = useTls ? tls : net;
+      return new Promise((resolve) => {
+        const socket = client.connect(port, account.imapHost, () => {
+          let buf = "";
+          let step = 0;
+          const tag = `a${Date.now() % 1000}`;
+          const onData = (data) => {
+            buf += data.toString();
+            if (step === 0 && buf.includes("* OK")) {
+              socket.write(`${tag} LOGIN ${account.username} ${password}\r\n`);
+              step = 1; buf = "";
+            } else if (step === 1 && buf.includes(`${tag} OK`)) {
+              socket.write(`${tag} SELECT "${req.query.folder || "INBOX"}"\r\n`);
+              step = 2; buf = "";
+            } else if (step === 2 && buf.includes(`${tag} OK`)) {
+              socket.write(`${tag} FETCH 1:${maxMessages || 10} (BODY[HEADER.FIELDS (SUBJECT FROM DATE)])\r\n`);
+              step = 3; buf = "";
+            } else if (step === 3 && (buf.includes(`${tag} OK`) || buf.includes(`${tag} BAD`))) {
+              socket.end();
+              const emails = (buf.match(/\* \d+ FETCH[\s\S]*?\)\)/g) || []).map(raw => ({
+                raw: raw.slice(0, 500),
+                subject: raw.match(/SUBJECT:? "?([^"\r\n]+)/i)?.[1]?.trim() || "(no subject)",
+                from: raw.match(/FROM:? "?([^"\r\n]+)/i)?.[1]?.trim() || "(unknown)",
+                date: raw.match(/DATE:? "?([^"\r\n]+)/i)?.[1]?.trim() || "",
+              }));
+              resolve({ emails });
+            }
+          };
+          socket.on("data", onData);
+          setTimeout(() => { socket.end(); resolve({ emails: [] }); }, 10000);
+        });
+        socket.on("error", () => resolve({ error: "Connection failed", emails: [] }));
+      });
+    } catch (e) { return { error: e.message, emails: [] }; }
+  });
+
   app.post("/api/email/send", { schema: { body: { type: "object", additionalProperties: true, properties: { accountId: { type: "string" }, to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req) => {
     const { accountId, to, subject, body } = req.body || {};
     if (!to || !subject) return { error: "to and subject required" };

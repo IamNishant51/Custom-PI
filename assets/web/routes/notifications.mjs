@@ -36,7 +36,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, type, title, body || null, data ? JSON.stringify(data) : null, Date.now());
       db.close();
-    } catch {}
+    } catch {} // Ignored
   }
 
   app.get("/api/notifications", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, notifications: { type: "array", items: { type: "object" } } } } } } }, async (req) => {

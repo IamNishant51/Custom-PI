@@ -125,7 +125,7 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
         const usage = finalMessage.usage;
         trackCost("voice-session", "voice-agent", model.provider, model.id,
           usage?.inputTokens || 0, usage?.outputTokens || 0);
-      } catch {}
+      } catch {} // Ignored
 
       voiceMessages.push(finalMessage);
       if (currentText.trim()) {
@@ -181,9 +181,9 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
   app.get("/api/voice/chat-stream", { websocket: true }, (socket, req) => {
     let alive = true;
     const pingTimer = setInterval(() => {
-      if (!alive) { try { socket.close(); } catch {} return; }
+      if (!alive) { try { socket.close(); } catch {} /* cleanup */ return; }
       alive = false;
-      try { socket.ping(); } catch {}
+      try { socket.ping(); } catch {} /* cleanup */
     }, 30000);
 
     socket.on("pong", () => { alive = true; });
@@ -193,13 +193,13 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
     socket.on("message", async (data) => {
       let msg;
       try { msg = JSON.parse(data.toString()); }
-      catch (e) { try { socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" })); } catch {} return; }
+      catch (e) { try { socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" })); } catch {} /* Ignored */ return; }
 
-      if (msg.type === "ping") { try { socket.send(JSON.stringify({ type: "pong" })); } catch {} return; }
+      if (msg.type === "ping") { try { socket.send(JSON.stringify({ type: "pong" })); } catch {} /* Ignored */ return; }
 
       if (msg.type === "text") {
         const { text, voice } = msg;
-        if (!text) { try { socket.send(JSON.stringify({ type: "error", message: "text is required" })); } catch {} return; }
+        if (!text) { try { socket.send(JSON.stringify({ type: "error", message: "text is required" })); } catch {} /* Ignored */ return; }
         const voiceId = voice || "af_bella";
 
         const model = resolveModel();
@@ -231,7 +231,7 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
             });
           } catch (e) {
             voiceMessages.pop();
-            try { socket.send(JSON.stringify({ type: "error", message: `Model error: ${e.message}` })); } catch {}
+            try { socket.send(JSON.stringify({ type: "error", message: `Model error: ${e.message}` })); } catch {} /* Ignored */
             return;
           }
 
@@ -241,7 +241,7 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
             }
           } catch (e) {
             if (e.name === "AbortError") {
-              try { socket.send(JSON.stringify({ type: "text", text: currentText, done: true })); } catch {}
+              try { socket.send(JSON.stringify({ type: "text", text: currentText, done: true })); } catch {} /* Ignored */
             }
             return;
           }
@@ -253,7 +253,7 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
             const usage = finalMessage.usage;
             trackCost("voice-session", "voice-agent", model.provider, model.id,
               usage?.inputTokens || 0, usage?.outputTokens || 0);
-          } catch {}
+          } catch {} // Ignored
 
           voiceMessages.push(finalMessage);
           if (currentText.trim()) accumulatedText += (accumulatedText ? " " : "") + currentText.trim();
@@ -276,7 +276,7 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
           }
         }
 
-        try { socket.send(JSON.stringify({ type: "text", text: accumulatedText, done: true })); } catch {}
+        try { socket.send(JSON.stringify({ type: "text", text: accumulatedText, done: true })); } catch {} /* Ignored */
       }
     });
   });

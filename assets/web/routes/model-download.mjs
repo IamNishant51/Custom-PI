@@ -35,7 +35,7 @@ export default function registerModelDownload(app, { sendError }) {
         try {
           execSync(cmd, { timeout: 300000, cwd: MODELS_DOWNLOAD_DIR });
           if (fs.existsSync(targetDir)) return { success: true, path: targetDir, message: `Downloaded ${modelId}` };
-        } catch {}
+        } catch {} // Ignored
       }
       const dlRecord = path.join(MODELS_DOWNLOAD_DIR, "downloads.json");
       const records = JSON.parse(fs.readFileSync(dlRecord, "utf8").catch(() => "[]"));
@@ -58,11 +58,11 @@ export default function registerModelDownload(app, { sendError }) {
     },
   }, async () => {
     const records = []; const dlRecord = path.join(MODELS_DOWNLOAD_DIR, "downloads.json");
-    try { records.push(...JSON.parse(fs.readFileSync(dlRecord, "utf8"))); } catch {}
+    try { records.push(...JSON.parse(fs.readFileSync(dlRecord, "utf8"))); } catch {} // Ignored
     try {
       const dirs = fs.readdirSync(MODELS_DOWNLOAD_DIR).filter(d => d !== "downloads.json");
       for (const dir of dirs) records.push({ modelId: dir, path: path.join(MODELS_DOWNLOAD_DIR, dir), status: "downloaded" });
-    } catch {}
+    } catch {} // Ignored
     return { downloads: records };
   });
 

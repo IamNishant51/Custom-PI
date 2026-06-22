@@ -24,7 +24,7 @@ export default function registerBudget(app, { sendError }) {
       if (fs.existsSync(p)) {
         return JSON.parse(fs.readFileSync(p, "utf8"));
       }
-    } catch {}
+    } catch {} // Ignored
     return { status: "no_data", timestamp: Date.now() };
   });
 }

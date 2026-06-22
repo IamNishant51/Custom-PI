@@ -13,7 +13,7 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     try {
       const entry = { ts: new Date().toISOString(), action, key, ip: "local" };
       fs.appendFileSync(VAULT_AUDIT_FILE, JSON.stringify(entry) + "\n");
-    } catch {}
+    } catch {} // Ignored
   }
 
   app.post("/api/vault/set", {

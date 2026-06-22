@@ -27,7 +27,7 @@ export default function registerWebsocket(app, deps) {
   function cleanUpPendingQuestions() {
     for (const key of Object.keys(pendingQuestions)) {
       const q = pendingQuestions[key];
-      if (q && q.reject) { try { q.reject(new Error("Disconnected")); } catch {} }
+      if (q && q.reject) { try { q.reject(new Error("Disconnected")); } catch {} /* cleanup */ }
       delete pendingQuestions[key];
     }
   }
@@ -59,11 +59,11 @@ export default function registerWebsocket(app, deps) {
     let alive = true;
     const pingTimer = setInterval(() => {
       if (!alive) {
-        try { socket.close(); } catch {}
+        try { socket.close(); } catch {} // cleanup
         return;
       }
       alive = false;
-      try { socket.ping(); } catch {}
+      try { socket.ping(); } catch {} // cleanup
     }, WS_PING_INTERVAL);
 
     socket.on("pong", () => { alive = true; });
@@ -71,15 +71,16 @@ export default function registerWebsocket(app, deps) {
     // Always add to swarmSockets so late swarm events are received
     swarmSockets.add(socket);
 
-    // NOTE: getCurrentSwarmState() is called outside withSwarmLock — race condition possible
-    const current = getCurrentSwarmState();
-    if (current) {
-      safeSend(socket, {
-        type: "swarm_recovery",
-        ...current,
-        paused: getSwarmPaused()
-      });
-    }
+    withSwarmLock(async () => {
+      const current = getCurrentSwarmState();
+      if (current) {
+        safeSend(socket, {
+          type: "swarm_recovery",
+          ...current,
+          paused: getSwarmPaused()
+        });
+      }
+    }).catch(() => {});
 
     socket.on("close", () => {
       clearInterval(pingTimer);
@@ -156,7 +157,7 @@ export default function registerWebsocket(app, deps) {
           await withSwarmLock(async () => {
             setSwarmPaused(false);
             const resolve = getSwarmPauseResolve();
-            if (resolve) { try { resolve(); } catch {} setSwarmPauseResolve(null); }
+            if (resolve) { try { resolve(); } catch {} /* cleanup */ setSwarmPauseResolve(null); }
             safeSend(socket, { type: "swarm_resumed" });
           });
           return;
