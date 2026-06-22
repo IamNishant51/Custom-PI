@@ -49,7 +49,11 @@ export type View = string;
 const PANELFallback = <div style={{ padding: 40, textAlign: "center" }}><div className="loading-spinner" style={{ margin: "0 auto" }} /></div>;
 
 function ViewWrapper({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={PANELFallback}>{children}</Suspense>;
+  return (
+    <Suspense fallback={PANELFallback}>
+      <ErrorBoundary>{children}</ErrorBoundary>
+    </Suspense>
+  );
 }
 
 function ViewRouter() {
@@ -179,7 +183,7 @@ function AppContent() {
   }, [activeView]);
 
   return (
-    <ErrorBoundary>
+    <>
       <div className="layout" role="application" aria-label="Custom-PI Web Client">
         {!online && <div style={{ background: "var(--warning)", color: "#1a1a2e", padding: "8px 16px", fontSize: "14px", textAlign: "center", width: "100%" }}>You are offline — some features may be unavailable</div>}
         <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
@@ -198,7 +202,7 @@ function AppContent() {
       <CommandPalette onToggleSidebar={() => setSidebarOpen(o => !o)} />
       <UndoBar />
       <OnboardingTour />
-    </ErrorBoundary>
+    </>
   );
 }
 

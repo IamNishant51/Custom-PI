@@ -87,7 +87,7 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
   });
 
   app.get("/api/contacts", {
-    schema: { response: { 200: { type: "object", properties: { contacts: { type: "array", items: { type: "object" } } } } },
+    schema: { response: { 200: { type: "object", properties: { contacts: { type: "array", items: { type: "object" } } } } } },
   }, async () => {
     const db = getContactsDb();
     if (!db) return { contacts: [] };

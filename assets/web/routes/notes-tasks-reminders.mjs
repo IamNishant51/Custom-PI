@@ -30,7 +30,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   }
 
   app.get("/api/notes", {
-    schema: { response: { 200: { type: "object", properties: { notes: { type: "array", items: { type: "object" } } } } },
+    schema: { response: { 200: { type: "object", properties: { notes: { type: "array", items: { type: "object" } } } } } },
   }, async () => {
     const db = getNotesDb();
     if (!db) return { notes: [] };
@@ -40,7 +40,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
 
   app.post("/api/notes", {
     schema: {
-      body: { type: "object", properties: { title: { type: "string" }, content: { type: "string" }, color: { type: "string" }, tags: { type: "array", items: { type: "string" } } } },
+      body: { type: "object", additionalProperties: true, properties: { title: { type: "string" }, content: { type: "string" }, color: { type: "string" }, tags: { type: "array", items: { type: "string" } } } },
       response: { 200: { type: "object", properties: { success: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } },
     },
   }, async (req) => {
@@ -85,7 +85,7 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   });
 
   app.get("/api/tasks", {
-    schema: { response: { 200: { type: "object", properties: { tasks: { type: "array", items: { type: "object" } } } } },
+    schema: { response: { 200: { type: "object", properties: { tasks: { type: "array", items: { type: "object" } } } } } },
   }, async () => {
     const db = getNotesDb();
     if (!db) return { tasks: [] };

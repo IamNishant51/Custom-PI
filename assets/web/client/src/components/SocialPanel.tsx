@@ -110,7 +110,7 @@ export default function SocialPanel() {
     setDraftsLoading(false);
   }, []);
 
-  useEffect(() => { fetchStatus(); fetchQueue(); fetchDrafts(); }, [fetchQueue, fetchDrafts]);
+  useEffect(() => { fetchStatus(); fetchQueue(); fetchDrafts(); }, [fetchStatus, fetchQueue, fetchDrafts]);
 
   useEffect(() => {
     if (!scheduleOpen) return;

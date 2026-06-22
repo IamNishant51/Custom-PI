@@ -16,6 +16,7 @@ export default function MCPPanel() {
   const [dirty, setDirty] = useState(false);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState<McpServer>({ name: "", command: "", args: [], enabled: true, description: "" });
+  const [testing, setTesting] = useState(false);
   const [testOutput, setTestOutput] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export default function MCPPanel() {
   }, [servers, toast]);
 
   const testServer = useCallback(async (s: McpServer) => {
+    setTesting(true);
     setTestOutput(`Testing ${s.command}...`);
     try {
       const res = await fetch("/api/mcp/test", {
@@ -65,6 +67,8 @@ export default function MCPPanel() {
       setTestOutput(d.ok ? d.output : `Failed: ${d.output}`);
     } catch {
       setTestOutput("Connection failed");
+    } finally {
+      setTesting(false);
     }
   }, []);
 
@@ -155,7 +159,7 @@ export default function MCPPanel() {
                   <td style={{ fontFamily: "monospace", fontSize: 12, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.args.join(" ")}</td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-ghost" onClick={() => testServer(s)} style={{ display: "flex", alignItems: "center", gap: 4 }}><AsciiPlay size={12} /> test</button>
+                      <button className="btn btn-ghost" onClick={() => testServer(s)} disabled={testing} style={{ display: "flex", alignItems: "center", gap: 4 }}><AsciiPlay size={12} /> {testing ? "Testing..." : "test"}</button>
                       <button className="btn btn-ghost" onClick={() => removeServer(s.name)} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--danger)" }}><AsciiTrash size={12} /> remove</button>
                     </div>
                   </td>

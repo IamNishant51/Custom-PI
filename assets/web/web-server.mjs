@@ -3684,7 +3684,7 @@ function validateEnv() {
 }
 
 export async function createApp() {
-  const app = Fastify({ logger: { level: "warn" } });
+  const app = Fastify({ logger: { level: "warn" }, bodyLimit: 1048576 }); // 1MB global body limit
   const stateDb = getOrCreateDb(path.join(PI_DIR, "session-state.db"));
   initMigrations(stateDb);
   loadFlags();
@@ -3812,6 +3812,7 @@ export async function createApp() {
   });
 
   // Security headers applied to all HTTP responses
+  // TODO(52-53): Make CORS and CSP configurable via settings/config file
   app.addHook("onRequest", async (req, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
@@ -3832,6 +3833,7 @@ export async function createApp() {
   });
 
   // CORS — restrict to configured origin, never wildcard
+  // TODO(52): Read CORS origin from settings/config file instead of env only
   const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:4322";
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;

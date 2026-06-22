@@ -496,7 +496,7 @@ export default function registerSocial(app, { sendError, broadcast }) {
   });
 
   // Email Bridge Status
-  app.get("/api/social/email/status", async () => {
+  app.get("/api/social/email/status", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, configured: { type: "boolean" }, email: { type: "string" }, displayName: { type: "string" }, error: { type: "string" } } } } } }, async () => {
     try {
       const result = await fetch(`${EMAIL_BRIDGE}/status`).then(r => r.json());
       return {
@@ -511,37 +511,37 @@ export default function registerSocial(app, { sendError, broadcast }) {
   });
 
   // Twitter Proxy
-  app.post("/api/social/twitter/login", { schema: { body: { type: "object", additionalProperties: true, properties: { oauth_token: { type: "string" }, oauth_verifier: { type: "string" } } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/login", "POST", req.body));
-  app.post("/api/social/twitter/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, mediaPath: { type: "string" } } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", req.body));
-  app.post("/api/social/twitter/reply", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, in_reply_to_status_id: { type: "string" }, mediaPath: { type: "string" } } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", req.body));
-  app.post("/api/social/twitter/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/twitter/disconnect", "POST"));
+  app.post("/api/social/twitter/login", { schema: { body: { type: "object", additionalProperties: true, properties: { oauth_token: { type: "string" }, oauth_verifier: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/login", "POST", req.body));
+  app.post("/api/social/twitter/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, mediaPath: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", req.body));
+  app.post("/api/social/twitter/reply", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, in_reply_to_status_id: { type: "string" }, mediaPath: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", req.body));
+  app.post("/api/social/twitter/disconnect", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async () => proxyToBridge(SOCIAL_BRIDGE, "/twitter/disconnect", "POST"));
 
   // Reddit Proxy
-  app.post("/api/social/reddit/login", { schema: { body: { type: "object", additionalProperties: true, properties: {} } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/login", "POST", req.body));
-  app.post("/api/social/reddit/post", { schema: { body: { type: "object", additionalProperties: true, properties: { subreddit: { type: "string" }, title: { type: "string" }, body: { type: "string" }, mediaPath: { type: "string" } } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", req.body));
-  app.post("/api/social/reddit/comment", { schema: { body: { type: "object", additionalProperties: true, properties: { post_id: { type: "string" }, text: { type: "string" } } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/comment", "POST", req.body));
-  app.post("/api/social/reddit/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/reddit/disconnect", "POST"));
+  app.post("/api/social/reddit/login", { schema: { body: { type: "object", additionalProperties: true, properties: {} }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/login", "POST", req.body));
+  app.post("/api/social/reddit/post", { schema: { body: { type: "object", additionalProperties: true, properties: { subreddit: { type: "string" }, title: { type: "string" }, body: { type: "string" }, mediaPath: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", req.body));
+  app.post("/api/social/reddit/comment", { schema: { body: { type: "object", additionalProperties: true, properties: { post_id: { type: "string" }, text: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/comment", "POST", req.body));
+  app.post("/api/social/reddit/disconnect", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async () => proxyToBridge(SOCIAL_BRIDGE, "/reddit/disconnect", "POST"));
 
   // LinkedIn Proxy
-  app.post("/api/social/linkedin/login", { schema: { body: { type: "object", additionalProperties: true, properties: {} } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/login", "POST", req.body));
-  app.post("/api/social/linkedin/setup", { schema: { body: { type: "object", nullable: true, additionalProperties: true } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/setup", "POST", req.body));
-  app.post("/api/social/linkedin/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, mediaPath: { type: "string" } } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/post", "POST", req.body));
-  app.post("/api/social/linkedin/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/disconnect", "POST"));
+  app.post("/api/social/linkedin/login", { schema: { body: { type: "object", additionalProperties: true, properties: {} }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/login", "POST", req.body));
+  app.post("/api/social/linkedin/setup", { schema: { body: { type: "object", nullable: true, additionalProperties: true }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/setup", "POST", req.body));
+  app.post("/api/social/linkedin/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, mediaPath: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/post", "POST", req.body));
+  app.post("/api/social/linkedin/disconnect", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } }, additionalProperties: true } } } }, async () => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/disconnect", "POST"));
 
   // Bluesky
-  app.post("/api/social/bluesky/configure", { schema: { body: { type: "object", additionalProperties: true, properties: { username: { type: "string" }, password: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/bluesky/configure", { schema: { body: { type: "object", additionalProperties: true, properties: { username: { type: "string" }, password: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { username, password } = req.body;
     if (!username || !password) return { ok: false, error: "username and password required" };
     vaultSet("BLUESKY_IDENTIFIER", username);
     vaultSet("BLUESKY_APP_PASSWORD", password);
     return { ok: true, message: "Bluesky configured successfully" };
   });
-  app.post("/api/social/bluesky/disconnect", async () => {
+  app.post("/api/social/bluesky/disconnect", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, message: { type: "string" } } } } } }, async () => {
     vaultDelete("BLUESKY_IDENTIFIER");
     vaultDelete("BLUESKY_APP_PASSWORD");
     return { ok: true, message: "Bluesky disconnected" };
   });
-  app.post("/api/social/bluesky/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/bluesky/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { text } = req.body;
     if (!text) return { ok: false, error: "text required" };
     const res = await postToBluesky(text);
@@ -549,17 +549,17 @@ export default function registerSocial(app, { sendError, broadcast }) {
   });
 
   // Discord
-  app.post("/api/social/discord/configure", { schema: { body: { type: "object", additionalProperties: true, properties: { webhookUrl: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/discord/configure", { schema: { body: { type: "object", additionalProperties: true, properties: { webhookUrl: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { webhookUrl } = req.body;
     if (!webhookUrl) return { ok: false, error: "webhookUrl required" };
     vaultSet("DISCORD_WEBHOOK_URL", webhookUrl);
     return { ok: true, message: "Discord configured successfully" };
   });
-  app.post("/api/social/discord/disconnect", async () => {
+  app.post("/api/social/discord/disconnect", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, message: { type: "string" } } } } } }, async () => {
     vaultDelete("DISCORD_WEBHOOK_URL");
     return { ok: true, message: "Discord disconnected" };
   });
-  app.post("/api/social/discord/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/discord/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { text } = req.body;
     if (!text) return { ok: false, error: "text required" };
     const res = await postToDiscord(text);
@@ -567,19 +567,19 @@ export default function registerSocial(app, { sendError, broadcast }) {
   });
 
   // Telegram
-  app.post("/api/social/telegram/configure", { schema: { body: { type: "object", additionalProperties: true, properties: { token: { type: "string" }, chatId: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/telegram/configure", { schema: { body: { type: "object", additionalProperties: true, properties: { token: { type: "string" }, chatId: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { token, chatId } = req.body;
     if (!token || !chatId) return { ok: false, error: "token and chatId required" };
     vaultSet("TELEGRAM_BOT_TOKEN", token);
     vaultSet("TELEGRAM_CHAT_ID", chatId);
     return { ok: true, message: "Telegram configured successfully" };
   });
-  app.post("/api/social/telegram/disconnect", async () => {
+  app.post("/api/social/telegram/disconnect", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, message: { type: "string" } } } } } }, async () => {
     vaultDelete("TELEGRAM_BOT_TOKEN");
     vaultDelete("TELEGRAM_CHAT_ID");
     return { ok: true, message: "Telegram disconnected" };
   });
-  app.post("/api/social/telegram/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/telegram/post", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { text } = req.body;
     if (!text) return { ok: false, error: "text required" };
     const res = await postToTelegram(text);
@@ -587,7 +587,7 @@ export default function registerSocial(app, { sendError, broadcast }) {
   });
 
   // Cross-platform Publish Draft
-  app.post("/api/social/publish", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, mediaPath: { type: "string" }, platforms: { type: "array", items: { type: "string" } }, drafts: { type: "object" } } } } }, async (req) => {
+  app.post("/api/social/publish", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, mediaPath: { type: "string" }, platforms: { type: "array", items: { type: "string" } }, drafts: { type: "object" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     const { text, mediaPath, platforms, drafts } = req.body;
     if (!text) return { ok: false, error: "text required" };
 
@@ -633,7 +633,7 @@ export default function registerSocial(app, { sendError, broadcast }) {
   });
 
   // Social Queue Routes
-  app.post("/api/social/queue", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, platforms: { type: "array", items: { type: "string" } }, scheduled_at: { type: "number" }, title: { type: "string" }, subreddit: { type: "string" }, media_path: { type: "string" } } } } }, async (req) => {
+  app.post("/api/social/queue", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, platforms: { type: "array", items: { type: "string" } }, scheduled_at: { type: "number" }, title: { type: "string" }, subreddit: { type: "string" }, media_path: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { text, platforms, scheduled_at, title, subreddit, media_path } = req.body || {};
     if (!text || !platforms || !scheduled_at) return { ok: false, error: "text, platforms, and scheduled_at required" };
     if (!Array.isArray(platforms) || platforms.length === 0) return { ok: false, error: "platforms must be a non-empty array" };
@@ -780,13 +780,13 @@ Return a JSON array. Each item:
   }
 
   // Drafts API
-  app.get("/api/social/drafts", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, items: { type: "array", items: { type: "object" } } } } } }, async () => {
+  app.get("/api/social/drafts", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, items: { type: "array", items: { type: "object" } } } } } } }, async () => {
     if (!queueDb) return { ok: false, items: [] };
     const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'draft' ORDER BY created_at DESC").all();
     return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };
   });
 
-  app.post("/api/social/drafts/:id/approve", async (req) => {
+  app.post("/api/social/drafts/:id/approve", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     if (!queueDb) return { ok: false, error: "Queue not available" };
     const { id } = req.params;
     const stmt = queueDb.prepare("UPDATE social_queue SET status = 'pending' WHERE id = ? AND status = 'draft'");
@@ -795,7 +795,7 @@ Return a JSON array. Each item:
     return { ok: true, message: "Draft approved and queued for publishing" };
   });
 
-  app.post("/api/social/drafts/:id/reject", async (req) => {
+  app.post("/api/social/drafts/:id/reject", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, message: { type: "string" } } } } } }, async (req) => {
     if (!queueDb) return { ok: false, error: "Queue not available" };
     const { id } = req.params;
     queueDb.prepare("DELETE FROM social_queue WHERE id = ? AND status = 'draft'").run(id);
@@ -803,7 +803,7 @@ Return a JSON array. Each item:
   });
 
   // Manual trigger for autonomous tick
-  app.post("/api/social/autonomous/tick", { schema: { body: { type: "object", additionalProperties: true, properties: {} } } }, async () => {
+  app.post("/api/social/autonomous/tick", { schema: { body: { type: "object", additionalProperties: true, properties: {} }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, message: { type: "string" } } } } } }, async () => {
     autonomousContentTick();
     return { ok: true, message: "Autonomous content generation started. Check /api/social/drafts in a minute." };
   });

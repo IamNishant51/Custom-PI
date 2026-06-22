@@ -71,6 +71,7 @@ export default function registerWebsocket(app, deps) {
     // Always add to swarmSockets so late swarm events are received
     swarmSockets.add(socket);
 
+    // NOTE: getCurrentSwarmState() is called outside withSwarmLock — race condition possible
     const current = getCurrentSwarmState();
     if (current) {
       safeSend(socket, {
@@ -93,7 +94,17 @@ export default function registerWebsocket(app, deps) {
       console.error("WebSocket error:", err?.message);
     });
 
+    // Sliding-window rate limiter: max 20 messages/sec per IP
+    const msgTimestamps = [];
     socket.on("message", async (raw) => {
+      const now = Date.now();
+      const windowStart = now - 1000;
+      while (msgTimestamps.length > 0 && msgTimestamps[0] < windowStart) msgTimestamps.shift();
+      if (msgTimestamps.length >= 20) {
+        safeSend(socket, { type: "error", message: "Rate limit exceeded — try again later" });
+        return;
+      }
+      msgTimestamps.push(now);
       let data;
       try { data = JSON.parse(raw.toString()); }
       catch {
@@ -128,6 +139,7 @@ export default function registerWebsocket(app, deps) {
           if (session) {
             session.interrupt();
             safeSend(socket, { type: "interrupted" });
+            safeSend(socket, { type: "interrupt_ack" });
           }
           return;
         }

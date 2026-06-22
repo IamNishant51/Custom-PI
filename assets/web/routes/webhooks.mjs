@@ -33,7 +33,7 @@ export default function registerWebhooks(app, { sendError }) {
     }
   });
 
-  app.get("/api/webhooks/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array", items: { type: "object" } } } } } }, async () => {
+  app.get("/api/webhooks/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array", items: { type: "object" } } } } } } }, async () => {
     const webhookDir = path.join(PI_DIR, "webhooks");
     try {
       if (!fs.existsSync(webhookDir)) return { events: [] };

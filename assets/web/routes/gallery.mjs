@@ -92,6 +92,15 @@ export default function registerGallery(app, { sendError }) {
           data: { type: "string" },
         },
       },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            success: { type: "boolean" },
+            name: { type: "string" },
+          },
+        },
+      },
     },
   }, async (req, reply) => {
     const { name, data } = req.body || {};

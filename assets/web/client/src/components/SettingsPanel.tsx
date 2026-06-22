@@ -51,7 +51,9 @@ export default function SettingsPanel() {
     setDetectedProviders([]);
     try {
       const res = await fetch("/api/models/check", { method: "POST" });
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const d = await res.json();
+      if (!d || typeof d !== "object") throw new Error("Invalid response from server");
       setDetectedProviders(d.providers || []);
       if (d.providers?.length > 0) {
         const msg = d.providers.map((p: any) => `${p.provider}: ${p.models.length} models`).join(", ");

@@ -38,6 +38,7 @@ export default function ChatView() {
   const [slashFilter, setSlashFilter] = useState("");
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/social/status").then(r => r.json()).then(setSocialStatus).catch(() => {});
@@ -103,6 +104,13 @@ export default function ChatView() {
     }
     return threads;
   }, [items]);
+
+  useEffect(() => {
+    const btns = document.querySelectorAll(".code-block-container .copy-btn");
+    btns.forEach((btn, idx) => {
+      (btn as HTMLElement).textContent = idx === copiedIndex ? "Copied!" : "Copy";
+    });
+  }, [copiedIndex]);
 
   const exportChat = useCallback(async (format: "markdown" | "json") => {
     const lines: string[] = [];
@@ -201,13 +209,10 @@ export default function ChatView() {
         }
 
         navigator.clipboard.writeText(textToCopy).then(() => {
-          const oldText = target.innerText;
-          target.innerText = "Copied!";
-          target.classList.add("copied");
-          setTimeout(() => {
-            target.innerText = oldText;
-            target.classList.remove("copied");
-          }, 2000);
+          const containers = document.querySelectorAll(".code-block-container");
+          const idx = Array.from(containers).indexOf(container);
+          setCopiedIndex(idx);
+          setTimeout(() => setCopiedIndex(null), 2000);
         });
       }
     }

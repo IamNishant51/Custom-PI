@@ -6,6 +6,15 @@ import { SHARED_PATHS } from "../shared-constants.mjs";
 
 const { PI_DIR } = SHARED_PATHS;
 
+// TODO(56): Add 4xx/5xx error response schemas systematically to all routes.
+// Pattern: include a shared error response schema in each route's `schema.response` map,
+// e.g. `4xx: { type: "object", properties: { error: { type: "string" } } }`.
+// Fastify will merge them with the success response for full OpenAPI coverage.
+const ERROR_RESPONSE = {
+  type: "object",
+  properties: { error: { type: "string" } },
+};
+
 export default function registerAuth(app, { sendError }) {
   const TOKENS_FILE = path.join(PI_DIR, "api-tokens.json");
   function loadTokens() {
@@ -20,14 +29,14 @@ export default function registerAuth(app, { sendError }) {
     return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   }
 
-  app.post("/api/auth/login", { schema: { body: { type: "object", additionalProperties: true, properties: { password: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req, reply) => {
+  app.post("/api/auth/login", { schema: { body: { type: "object", additionalProperties: true, properties: { password: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } }, 401: ERROR_RESPONSE, 500: ERROR_RESPONSE } } }, async (req, reply) => {
     const { password } = req.body || {};
     if (!WEB_PASSWORD) return reply.code(500).send({ error: "No password configured. Set WEB_PASSWORD env var." });
     if (!password || !timingSafeEqual(password, WEB_PASSWORD)) return reply.code(401).send({ error: "Invalid password" });
     return { success: true };
   });
 
-  app.get("/api/auth/tokens", { schema: { response: { 200: { type: "object", properties: { tokens: { type: "array", items: { type: "object" } } } } } }, async () => ({ tokens: loadTokens().map(t => ({ ...t, key: t.key.slice(0, 8) + "..." })) }));
+  app.get("/api/auth/tokens", { schema: { response: { 200: { type: "object", properties: { tokens: { type: "array", items: { type: "object" } } } } } } }, async () => ({ tokens: loadTokens().map(t => ({ ...t, key: t.key.slice(0, 8) + "..." })) }));
   app.post("/api/auth/tokens", { schema: { body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, role: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, token: { type: "string" }, id: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { name, role } = req.body || {};
     if (!name) return { error: "name required" };
@@ -64,7 +73,7 @@ export default function registerAuth(app, { sendError }) {
   }
   function saveSessions(sessions) { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2)); }
 
-  app.get("/api/auth/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array", items: { type: "object" } } } } } }, async () => {
+  app.get("/api/auth/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array", items: { type: "object" } } } } } } }, async () => {
     const active = loadSessions().filter(s => s.expiresAt > Date.now());
     return { sessions: active.map(s => ({ id: s.id, device: s.device || "Unknown", createdAt: s.createdAt, expiresAt: s.expiresAt })) };
   });

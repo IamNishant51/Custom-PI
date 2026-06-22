@@ -82,6 +82,15 @@ export default function registerModelDownload(app, { sendError }) {
           loser: { type: "string" },
         },
       },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            success: { type: "boolean" },
+            error: { type: "string" },
+          },
+        },
+      },
     },
   }, async (req) => {
     const { promptId, winner, loser } = req.body || {};

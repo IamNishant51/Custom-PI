@@ -12,7 +12,7 @@ export default function registerCalendar(app, { sendError }) {
   }
   function saveCalendarEvents(events) { fs.writeFileSync(CALENDAR_FILE, JSON.stringify(events, null, 2)); }
 
-  app.get("/api/calendar/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array", items: { type: "object" } } } } } }, async () => {
+  app.get("/api/calendar/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array", items: { type: "object" } } } } } } }, async () => {
     const events = loadCalendarEvents();
     const now = Date.now();
     return { events: events.filter(e => !e.end || e.end > now).sort((a, b) => (a.start || 0) - (b.start || 0)).slice(0, 100) };

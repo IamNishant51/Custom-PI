@@ -22,7 +22,7 @@ export default function registerEmail(app, { sendError }) {
     return { success: true, id };
   });
 
-  app.get("/api/email/accounts", { schema: { response: { 200: { type: "object", properties: { accounts: { type: "array", items: { type: "object" } } } } } }, async () => {
+  app.get("/api/email/accounts", { schema: { response: { 200: { type: "object", properties: { accounts: { type: "array", items: { type: "object" } } } } } } }, async () => {
     const state = getEmailState();
     return { accounts: state.accounts.map(a => ({ ...a, password: "***" })) };
   });
@@ -40,6 +40,9 @@ export default function registerEmail(app, { sendError }) {
     const state = getEmailState();
     const account = state.accounts.find(a => a.id === accountId);
     if (!account) return { error: "Account not found" };
+    if (maxMessages !== undefined && (!Number.isInteger(maxMessages) || maxMessages < 1 || maxMessages > 1000)) {
+      return { error: "maxMessages must be an integer between 1 and 1000" };
+    }
     try {
       const password = decrypt(account.password);
       const net = await import("node:net");
@@ -155,7 +158,7 @@ export default function registerEmail(app, { sendError }) {
     } catch { return { draft: "Dear colleague,\n\nThank you for your message.\n\nBest regards" }; }
   });
 
-  app.post("/api/email/auto-tag", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { tags: { type: "array", items: { type: "object" } } } } } }, async (req) => {
+  app.post("/api/email/auto-tag", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { tags: { type: "array", items: { type: "object" } } } } } } }, async (req) => {
     const { text } = req.body || {};
     if (!text) return { tags: [] };
     const lower = text.toLowerCase();
@@ -186,7 +189,7 @@ export default function registerEmail(app, { sendError }) {
     return { results, total: results.length };
   });
 
-  app.post("/api/email/cache", { schema: { body: { type: "object", additionalProperties: true, properties: { emails: { type: "array", items: { type: "object" } } }, response: { 200: { type: "object", properties: { cached: { type: "number" } } } } } }, async (req) => {
+  app.post("/api/email/cache", { schema: { body: { type: "object", additionalProperties: true, properties: { emails: { type: "array", items: { type: "object" } } } }, response: { 200: { type: "object", properties: { cached: { type: "number" } } } } } }, async (req) => {
     const { emails } = req.body || {};
     if (!Array.isArray(emails)) return { cached: 0 };
     const state = getEmailState();
