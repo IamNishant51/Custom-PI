@@ -10,11 +10,33 @@ export default function registerWebsocket(app, deps) {
     swarmSockets, pendingQuestions,
   } = deps;
 
+  // Mutex to prevent concurrent session.handleMessage() calls
+  let sessionMutex = Promise.resolve();
+
+  function withSessionMutex(fn) {
+    const prev = sessionMutex;
+    let release;
+    sessionMutex = new Promise(resolve => { release = resolve; });
+    return prev.then(() => { try { return fn(); } finally { release(); } });
+  }
+
+  function safeSend(socket, obj) {
+    try { socket.send(JSON.stringify(obj)); } catch (e) { console.error("WS send error:", e?.message); }
+  }
+
+  function cleanUpPendingQuestions() {
+    for (const key of Object.keys(pendingQuestions)) {
+      const q = pendingQuestions[key];
+      if (q && q.reject) { try { q.reject(new Error("Disconnected")); } catch {} }
+      delete pendingQuestions[key];
+    }
+  }
+
   app.get("/ws", { websocket: true }, (socket, req) => {
     if (apiKey) {
       const wsToken = req.query?.token || "";
       if (!wsToken || wsToken.length !== apiKey.length || !crypto.timingSafeEqual(Buffer.from(wsToken), Buffer.from(apiKey))) {
-        try { socket.send(JSON.stringify({ type: "error", message: "Unauthorized — provide token query parameter" })); } catch {}
+        safeSend(socket, { type: "error", message: "Unauthorized — provide token query parameter" });
         setTimeout(() => socket.close(), 500);
         return;
       }
@@ -24,13 +46,14 @@ export default function registerWebsocket(app, deps) {
     let session;
     try { session = getOrCreateSession(); }
     catch (e) {
-      try { socket.send(JSON.stringify({ type: "error", message: "Server init error" })); } catch {}
+      console.error("WS session init error:", e?.message);
+      safeSend(socket, { type: "error", message: "Server init error" });
       setTimeout(() => socket.close(), 500);
       return;
     }
 
     if (session.messages && session.messages.length > 0) {
-      try { socket.send(JSON.stringify({ type: "chat_history", messages: session.messages })); } catch {}
+      safeSend(socket, { type: "chat_history", messages: session.messages.slice(-100) });
     }
 
     let alive = true;
@@ -45,137 +68,147 @@ export default function registerWebsocket(app, deps) {
 
     socket.on("pong", () => { alive = true; });
 
+    // Always add to swarmSockets so late swarm events are received
+    swarmSockets.add(socket);
+
     const current = getCurrentSwarmState();
     if (current) {
-      swarmSockets.add(socket);
-      try {
-        socket.send(JSON.stringify({
-          type: "swarm_recovery",
-          ...current,
-          paused: getSwarmPaused()
-        }));
-      } catch {}
+      safeSend(socket, {
+        type: "swarm_recovery",
+        ...current,
+        paused: getSwarmPaused()
+      });
     }
 
     socket.on("close", () => {
       clearInterval(pingTimer);
       swarmSockets.delete(socket);
+      cleanUpPendingQuestions();
       console.log("WebSocket disconnected from", req.ip);
     });
     socket.on("error", (err) => {
       clearInterval(pingTimer);
       swarmSockets.delete(socket);
+      cleanUpPendingQuestions();
       console.error("WebSocket error:", err?.message);
     });
 
     socket.on("message", async (raw) => {
       let data;
       try { data = JSON.parse(raw.toString()); }
-      catch { try { socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" })); } catch {} return; }
-
-      if (data.type === "chat") {
-        if (data.attachments) {
-          let totalSize = 0;
-          for (const att of data.attachments) {
-            if (att.data) totalSize += att.data.length;
-            if (att.text) totalSize += att.text.length;
-          }
-          if (totalSize > MAX_FILE_SIZE) {
-            try { socket.send(JSON.stringify({ type: "error", message: `Attachment total size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit. Please reduce file sizes.` })); } catch {}
-            return;
-          }
-        }
-        try { socket.send(JSON.stringify({ type: "session_start" })); } catch {}
-        try {
-          await session.handleMessage(data.message, data.cwd || process.cwd(), (event) => {
-            try { socket.send(JSON.stringify(event)); } catch {}
-          }, data.attachments);
-        } catch (e) {
-          try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {}
-        }
-      }
-
-      if (data.type === "interrupt") {
-        if (session) session.interrupt();
-      }
-
-      if (data.type === "swarm_pause") {
-        await withSwarmLock(async () => {
-          setSwarmPaused(true);
-          try { socket.send(JSON.stringify({ type: "swarm_paused" })); } catch {}
-        });
+      catch {
+        safeSend(socket, { type: "error", message: "Invalid JSON" });
         return;
       }
 
-      if (data.type === "swarm_resume") {
-        await withSwarmLock(async () => {
-          setSwarmPaused(false);
-          const resolve = getSwarmPauseResolve();
-          if (resolve) { try { resolve(); } catch {} setSwarmPauseResolve(null); }
-          try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
-        });
-        return;
-      }
-
-      if (data.type === "user_answer") {
-        const q = pendingQuestions[data.questionId];
-        if (q && q.resolve) {
-          q.resolve(data.answer);
-        }
-      }
-
-      if (data.type === "agent_chat") {
-        const { agentId, message } = data;
-        if (agentId && message) {
-          getAgentChatBuffer(agentId).push({ role: "user", content: message, timestamp: Date.now() });
-          bcast({ type: "agent_chat", agentId, message, fromAgent: false });
-
-          const currentState = getCurrentSwarmState();
-          const isSwarmRunning = currentState && currentState.status === "running";
-          if (!isSwarmRunning || !currentState?.agents?.find(a => a.id === agentId)) {
-            try {
-              socket.send(JSON.stringify({ type: "session_start" }));
-              session.handleMessage(`[Message for agent '${agentId}']: ${message}`, data.cwd || process.cwd(), (event) => {
-                try { socket.send(JSON.stringify(event)); } catch {}
-              }, null);
-            } catch (e) {
-              try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {}
+      try {
+        if (data.type === "chat") {
+          if (data.attachments) {
+            let totalSize = 0;
+            for (const att of data.attachments) {
+              if (att.data) totalSize += att.data.length;
+              if (att.text) totalSize += att.text.length;
+            }
+            if (Number.isNaN(totalSize)) totalSize = MAX_FILE_SIZE + 1;
+            if (totalSize > MAX_FILE_SIZE) {
+              safeSend(socket, { type: "error", message: `Attachment total size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit. Please reduce file sizes.` });
+              return;
             }
           }
+          safeSend(socket, { type: "session_start" });
+          await withSessionMutex(async () => {
+            await session.handleMessage(data.message, data.cwd || process.cwd(), (event) => {
+              safeSend(socket, event);
+            }, data.attachments);
+          });
+          return;
         }
-      }
 
-      if (data.type === "memory_search") {
-        try { socket.send(JSON.stringify({ type: "memory_results", results: memorySearch(data.query, data.k ?? 5) })); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
-      }
+        if (data.type === "interrupt") {
+          if (session) {
+            session.interrupt();
+            safeSend(socket, { type: "interrupted" });
+          }
+          return;
+        }
 
-      if (data.type === "subagent_delegate") {
-        const { agentId, task } = data;
-        try { await handleSubAgent(socket, agentId, task); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
-      }
+        if (data.type === "swarm_pause") {
+          await withSwarmLock(async () => {
+            setSwarmPaused(true);
+            safeSend(socket, { type: "swarm_paused" });
+          });
+          return;
+        }
 
-      if (data.type === "swarm_goal") {
-        const { goal } = data;
-        try { await handleSwarmGoal(socket, goal); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
-      }
+        if (data.type === "swarm_resume") {
+          await withSwarmLock(async () => {
+            setSwarmPaused(false);
+            const resolve = getSwarmPauseResolve();
+            if (resolve) { try { resolve(); } catch {} setSwarmPauseResolve(null); }
+            safeSend(socket, { type: "swarm_resumed" });
+          });
+          return;
+        }
 
-      if (data.type === "run_dag") {
-        try {
+        if (data.type === "user_answer") {
+          const q = pendingQuestions[data.questionId];
+          if (q && q.resolve) {
+            q.resolve(data.answer);
+            delete pendingQuestions[data.questionId];
+          }
+          return;
+        }
+
+        if (data.type === "agent_chat") {
+          const { agentId, message } = data;
+          if (agentId && message) {
+            getAgentChatBuffer(agentId).push({ role: "user", content: message, timestamp: Date.now() });
+            bcast({ type: "agent_chat", agentId, message, fromAgent: false });
+
+            const currentState = getCurrentSwarmState();
+            const isSwarmRunning = currentState && currentState.status === "running";
+            if (!isSwarmRunning || !currentState?.agents?.find(a => a.id === agentId)) {
+              safeSend(socket, { type: "session_start" });
+              await withSessionMutex(async () => {
+                await session.handleMessage(`[Message for agent '${agentId}']: ${message}`, data.cwd || process.cwd(), (event) => {
+                  safeSend(socket, event);
+                }, null);
+              });
+            }
+          }
+          return;
+        }
+
+        if (data.type === "memory_search") {
+          const results = memorySearch(data.query, data.k ?? 5);
+          safeSend(socket, { type: "memory_results", results });
+          return;
+        }
+
+        if (data.type === "subagent_delegate") {
+          const { agentId, task } = data;
+          await handleSubAgent(socket, agentId, task);
+          return;
+        }
+
+        if (data.type === "swarm_goal") {
+          const { goal } = data;
+          await handleSwarmGoal(socket, goal);
+          return;
+        }
+
+        if (data.type === "run_dag") {
           const dagConfig = loadDagConfig();
           if (!dagConfig) {
-            try { socket.send(JSON.stringify({ type: "swarm_error", message: "DAG config not found at ~/.pi/agent/dag-config.yaml" })); } catch {}
+            safeSend(socket, { type: "swarm_error", message: "DAG config not found at ~/.pi/agent/dag-config.yaml" });
             return;
           }
           await handleDagGoal(socket, data.goal || "DAG Swarm Goal", dagConfig);
-        } catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
-      }
+          return;
+        }
 
-      if (data.type === "swarm_saved_team") {
-        const { goal, agents } = data;
-        try {
+        if (data.type === "swarm_saved_team") {
+          const { goal, agents } = data;
           const platformMatch = goal.match(/\[Platforms:\s*(.+?)\]/);
           const selectedPlatformNames = platformMatch ? platformMatch[1].split(/,\s*/).filter(Boolean) : [];
           const selectedPlatformKeys = selectedPlatformNames.map(n => {
@@ -229,8 +262,14 @@ export default function registerWebsocket(app, deps) {
           await withSwarmLock(async () => { setCurrentSwarmState(newState); });
           bcast({ type: "swarm_start", goal });
           await executeSwarmCampaign(socket, goal, normalized);
+          return;
         }
-        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
+
+        // Unknown message type
+        safeSend(socket, { type: "error", message: `Unknown message type: ${data.type}` });
+      } catch (e) {
+        console.error("WS message handler error:", e?.message, e?.stack);
+        safeSend(socket, { type: "error", message: "Internal error processing message" });
       }
     });
   });
