@@ -39,7 +39,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
     } catch {}
   }
 
-  app.get("/api/notifications", async (req) => {
+  app.get("/api/notifications", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, notifications: { type: "array" } } } } } }, async (req) => {
     const db = getDb();
     if (!db) return { ok: false, notifications: [] };
     const unreadFirst = req.query?.unread_first !== "false";
@@ -53,7 +53,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
     return { ok: true, notifications: rows.map(r => ({ ...r, data: r.data ? JSON.parse(r.data) : null })) };
   });
 
-  app.post("/api/notifications/:id/read", async (req) => {
+  app.post("/api/notifications/:id/read", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async (req) => {
     const db = getDb();
     if (!db) return { ok: false };
     db.prepare("UPDATE notifications SET read = 1 WHERE id = ?").run(req.params.id);
@@ -61,7 +61,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
     return { ok: true };
   });
 
-  app.post("/api/notifications/read-all", async () => {
+  app.post("/api/notifications/read-all", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async () => {
     const db = getDb();
     if (!db) return { ok: false };
     db.prepare("UPDATE notifications SET read = 1 WHERE read = 0").run();
@@ -69,7 +69,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
     return { ok: true };
   });
 
-  app.get("/api/notifications/unread-count", async () => {
+  app.get("/api/notifications/unread-count", { schema: { response: { 200: { type: "object", properties: { count: { type: "number" } } } } } }, async () => {
     const db = getDb();
     if (!db) return { count: 0 };
     const row = db.prepare("SELECT COUNT(*) as count FROM notifications WHERE read = 0").get();

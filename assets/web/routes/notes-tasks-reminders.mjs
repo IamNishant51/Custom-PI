@@ -29,7 +29,9 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     } catch { return null; }
   }
 
-  app.get("/api/notes", async () => {
+  app.get("/api/notes", {
+    schema: { response: { 200: { type: "object", properties: { notes: { type: "array" } } } } },
+  }, async () => {
     const db = getNotesDb();
     if (!db) return { notes: [] };
     const rows = db.prepare("SELECT * FROM notes WHERE archived = 0 ORDER BY pinned DESC, updated_at DESC LIMIT 100").all();
@@ -52,7 +54,12 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     return { success: true, id };
   });
 
-  app.put("/api/notes/:id", async (req) => {
+  app.put("/api/notes/:id", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { title: { type: "string" }, content: { type: "string" }, color: { type: "string" }, pinned: { type: "number" }, archived: { type: "number" }, tags: { type: "array", items: { type: "string" } } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const db = getNotesDb();
     if (!db) return { error: "Database unavailable" };
     const { id } = req.params;
@@ -68,14 +75,18 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     return { success: true };
   });
 
-  app.delete("/api/notes/:id", async (req) => {
+  app.delete("/api/notes/:id", {
+    schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } },
+  }, async (req) => {
     const db = getNotesDb();
     if (!db) return { error: "Database unavailable" };
     db.prepare("DELETE FROM notes WHERE id = ?").run(req.params.id);
     return { success: true };
   });
 
-  app.get("/api/tasks", async () => {
+  app.get("/api/tasks", {
+    schema: { response: { 200: { type: "object", properties: { tasks: { type: "array" } } } } },
+  }, async () => {
     const db = getNotesDb();
     if (!db) return { tasks: [] };
     const rows = db.prepare("SELECT * FROM tasks ORDER BY done ASC, due_date ASC, created_at DESC LIMIT 100").all();
@@ -98,7 +109,12 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     return { success: true, id };
   });
 
-  app.put("/api/tasks/:id", async (req) => {
+  app.put("/api/tasks/:id", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { title: { type: "string" }, done: { type: "number" }, status: { type: "string" }, priority: { type: "string" }, due_date: { type: "number" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const db = getNotesDb();
     if (!db) return { error: "Database unavailable" };
     const updates = req.body || {};
@@ -112,7 +128,9 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     return { success: true };
   });
 
-  app.delete("/api/tasks/:id", async (req) => {
+  app.delete("/api/tasks/:id", {
+    schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } },
+  }, async (req) => {
     const db = getNotesDb();
     if (!db) return { error: "Database unavailable" };
     db.prepare("DELETE FROM tasks WHERE id = ?").run(req.params.id);
@@ -125,8 +143,15 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   }
   function saveReminders(reminders) { fs.writeFileSync(REMINDERS_FILE, JSON.stringify(reminders, null, 2)); }
 
-  app.get("/api/reminders", async () => ({ reminders: loadReminders() }));
-  app.post("/api/reminders", async (req) => {
+  app.get("/api/reminders", {
+    schema: { response: { 200: { type: "object", properties: { reminders: { type: "array" } } } } },
+  }, async () => ({ reminders: loadReminders() }));
+  app.post("/api/reminders", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { title: { type: "string" }, dueAt: { type: "number" }, noteId: { type: "string" }, recurring: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, reminder: { type: "object" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const { title, dueAt, noteId, recurring } = req.body || {};
     if (!title) return { error: "title required" };
     const reminders = loadReminders();
@@ -135,11 +160,15 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     saveReminders(reminders);
     return { success: true, reminder: r };
   });
-  app.post("/api/reminders/:id/done", async (req) => {
+  app.post("/api/reminders/:id/done", {
+    schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } },
+  }, async (req) => {
     saveReminders(loadReminders().map(r => r.id === req.params.id ? { ...r, done: true } : r));
     return { success: true };
   });
-  app.delete("/api/reminders/:id", async (req) => {
+  app.delete("/api/reminders/:id", {
+    schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } },
+  }, async (req) => {
     saveReminders(loadReminders().filter(r => r.id !== req.params.id));
     return { success: true };
   });
@@ -150,8 +179,15 @@ export default function registerNotesTasksReminders(app, { sendError }) {
   }
   function saveScheduled(actions) { fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(actions, null, 2)); }
 
-  app.get("/api/scheduled-actions", async () => ({ actions: loadScheduled() }));
-  app.post("/api/scheduled-actions", async (req) => {
+  app.get("/api/scheduled-actions", {
+    schema: { response: { 200: { type: "object", properties: { actions: { type: "array" } } } } },
+  }, async () => ({ actions: loadScheduled() }));
+  app.post("/api/scheduled-actions", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, description: { type: "string" }, intervalMs: { type: "number" }, agentTask: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const { name, description, intervalMs, agentTask } = req.body || {};
     if (!name || !intervalMs) return { error: "name and intervalMs required" };
     const actions = loadScheduled();
@@ -159,7 +195,9 @@ export default function registerNotesTasksReminders(app, { sendError }) {
     saveScheduled(actions);
     return { success: true };
   });
-  app.delete("/api/scheduled-actions/:id", async (req) => {
+  app.delete("/api/scheduled-actions/:id", {
+    schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } },
+  }, async (req) => {
     saveScheduled(loadScheduled().filter(a => a.id !== req.params.id));
     return { success: true };
   });

@@ -8,7 +8,7 @@ const { PI_DIR } = SHARED_PATHS;
 const STATE_DB_PATH = path.join(PI_DIR, "session-state.db");
 
 export default function registerHealth(app, { sendError }) {
-  app.get("/api/health/services", async () => {
+  app.get("/api/health/services", { schema: { response: { 200: { type: "object", properties: { services: { type: "array" } } } } } }, async () => {
     try {
       const db = getOrCreateDb(STATE_DB_PATH);
       if (!db) return { services: [] };
@@ -17,7 +17,7 @@ export default function registerHealth(app, { sendError }) {
     } catch { return { services: [] }; }
   });
 
-  app.get("/api/health/endpoints", async () => {
+  app.get("/api/health/endpoints", { schema: { response: { 200: { type: "object", properties: { endpoints: { type: "array" } } } } } }, async () => {
     const endpoints = [
       { name: "llm-anthropic", url: "https://api.anthropic.com/v1/health", method: "GET" },
       { name: "llm-openai", url: "https://api.openai.com/v1/health", method: "GET" },
@@ -36,7 +36,7 @@ export default function registerHealth(app, { sendError }) {
     fs.writeFileSync(PIPELINE_FILE, JSON.stringify(data, null, 2));
   }
 
-  app.post("/api/pipeline/deploy", async (req) => {
+  app.post("/api/pipeline/deploy", { schema: { body: { type: "object", additionalProperties: true, properties: { branch: { type: "string" }, target: { type: "string" }, stableSha: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, deploy: { type: "object" }, error: { type: "string" } } } } } }, async (req) => {
     try {
       const { branch, target, stableSha } = req.body || {};
       const data = readPipeline();
@@ -52,12 +52,12 @@ export default function registerHealth(app, { sendError }) {
     } catch (e) { return { error: e.message }; }
   });
 
-  app.get("/api/pipeline/status", async () => {
+  app.get("/api/pipeline/status", { schema: { response: { 200: { type: "object", properties: { current: { type: "object", nullable: true }, history: { type: "array" } } } } } }, async () => {
     const data = readPipeline();
     return { current: data.current, history: data.deployments.slice(-20) };
   });
 
-  app.get("/api/system/resources", async () => {
+  app.get("/api/system/resources", { schema: { response: { 200: { type: "object", additionalProperties: true, properties: { cpuCount: { type: "number" }, cpuModel: { type: "string" }, memoryTotal: { type: "number" }, memoryFree: { type: "number" }, uptime: { type: "number" }, hostname: { type: "string" }, platform: { type: "string" }, arch: { type: "string" }, nodeVersion: { type: "string" }, error: { type: "string" } } } } } }, async () => {
     try {
       const os = await import("node:os");
       const cpus = os.cpus();
@@ -78,7 +78,7 @@ export default function registerHealth(app, { sendError }) {
     } catch (e) { return { error: e.message }; }
   });
 
-  app.get("/api/system/rate-limits", async () => {
+  app.get("/api/system/rate-limits", { schema: { response: { 200: { type: "object", properties: { limits: { type: "array" } } } } } }, async () => {
     const limits = [];
     for (const [name, bucket] of Object.entries(rateLimiters)) {
       limits.push({

@@ -1,19 +1,94 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { PanelLoadingSpinner, PanelErrorCard } from "./LoadingSkeleton";
 
+const STORAGE_KEY = "custom-pi.deepResearch";
+
+interface SavedState {
+  query: string;
+  depth: string;
+  status: "idle" | "running" | "done";
+  result: any;
+  timestamp: number;
+}
+
+function loadSavedState(): SavedState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object") return null;
+    return {
+      query: parsed.query || "",
+      depth: parsed.depth || "moderate",
+      status: parsed.status || "idle",
+      result: parsed.result ?? null,
+      timestamp: parsed.timestamp || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveState(state: SavedState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore quota exceeded or serialization errors
+  }
+}
+
+function clearState() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
+
+function safeSerializeResult(result: any): any {
+  if (!result || typeof result !== "object") return result;
+  const safe: Record<string, any> = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (key === "error" && typeof value === "string") {
+      safe[key] = value;
+    } else if (["summary", "depth"].includes(key) && typeof value === "string") {
+      safe[key] = value;
+    } else if (["findings", "sources"].includes(key) && Array.isArray(value)) {
+      safe[key] = value.filter(v => typeof v === "string" || (v && typeof v === "object"));
+    }
+  }
+  return safe;
+}
+
 export default function DeepResearchPanel() {
-  const [query, setQuery] = useState("");
-  const [depth, setDepth] = useState("moderate");
-  const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
-  const [result, setResult] = useState<any>(null);
+  const saved = loadSavedState();
+  const hasRestoredRef = useRef(false);
+
+  const [query, setQuery] = useState(saved?.query || "");
+  const [depth, setDepth] = useState(saved?.depth || "moderate");
+  const [status, setStatus] = useState<"idle" | "running" | "done">(saved?.status || "idle");
+  const [result, setResult] = useState<any>(saved?.result ?? null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!hasRestoredRef.current && saved) {
+      hasRestoredRef.current = true;
+    }
+  }, [saved]);
+
+  useEffect(() => {
+    if (hasRestoredRef.current && status !== "idle") {
+      saveState({ query, depth, status, result: safeSerializeResult(result), timestamp: Date.now() });
+    }
+  }, [query, depth, status, result]);
+
   const loadData = useCallback(async () => {
-    setLoading(true); setLoadError(null);
+    setLoading(true);
+    setLoadError(null);
     try {
       // No initial data fetch
-    } catch (e: any) { setLoadError(e.message || "Failed to load"); }
+    } catch (e: any) {
+      setLoadError(e.message || "Failed to load");
+    }
     setLoading(false);
   }, []);
 
@@ -21,7 +96,9 @@ export default function DeepResearchPanel() {
 
   const run = async () => {
     if (!query.trim()) return;
+    clearState();
     setStatus("running");
+    setResult(null);
     try {
       const r = await fetch("/api/research", {
         method: "POST",
@@ -30,8 +107,18 @@ export default function DeepResearchPanel() {
       });
       const d = await r.json();
       setResult(d);
-    } catch (e: any) { setResult({ error: e.message }); }
+    } catch (e: any) {
+      setResult({ error: e.message });
+    }
     setStatus("done");
+  };
+
+  const clearResearch = () => {
+    clearState();
+    setQuery("");
+    setDepth("moderate");
+    setStatus("idle");
+    setResult(null);
   };
 
   const renderSection = (title: string, content: string) => (
@@ -59,6 +146,11 @@ export default function DeepResearchPanel() {
         <button className="btn" onClick={run} disabled={status === "running"}>
           {status === "running" ? "Researching..." : "Go"}
         </button>
+        {(status === "done" || status === "running") && (
+          <button className="btn btn-secondary" onClick={clearResearch} disabled={status === "running"}>
+            Clear
+          </button>
+        )}
       </div>
       {status === "running" && (
         <div style={{ padding: 32, textAlign: "center", color: "var(--mute)" }}>

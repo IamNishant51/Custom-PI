@@ -96,6 +96,11 @@ export default function ThemeEditorPanel() {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
           <div style={{ marginBottom: 6, fontSize: 12, color: "var(--mute)", textTransform: "uppercase", letterSpacing: 1 }}>Colors</div>
+          <div style={{ display: "flex", gap: 4, marginTop: 4, marginBottom: 8 }}>
+            {CSS_VARS.map(v => (
+              <div key={v.key} title={`${v.label}: ${colors[v.key] || v.default}`} style={{ width: 12, height: 12, borderRadius: "50%", backgroundColor: colors[v.key] || v.default }} />
+            ))}
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {CSS_VARS.map(v => (
               <div key={v.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>

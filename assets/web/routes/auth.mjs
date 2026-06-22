@@ -13,8 +13,22 @@ export default function registerAuth(app, { sendError }) {
   }
   function saveTokens(tokens) { fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2)); }
 
-  app.get("/api/auth/tokens", async () => ({ tokens: loadTokens().map(t => ({ ...t, key: t.key.slice(0, 8) + "..." })) }));
-  app.post("/api/auth/tokens", async (req) => {
+  const WEB_PASSWORD = process.env.WEB_PASSWORD || process.env.CUSTOM_PI_WEB_KEY || "";
+  function timingSafeEqual(a, b) {
+    if (typeof a !== "string" || typeof b !== "string") return false;
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  }
+
+  app.post("/api/auth/login", { schema: { body: { type: "object", additionalProperties: true, properties: { password: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req, reply) => {
+    const { password } = req.body || {};
+    if (!WEB_PASSWORD) return reply.code(500).send({ error: "No password configured. Set WEB_PASSWORD env var." });
+    if (!password || !timingSafeEqual(password, WEB_PASSWORD)) return reply.code(401).send({ error: "Invalid password" });
+    return { success: true };
+  });
+
+  app.get("/api/auth/tokens", { schema: { response: { 200: { type: "object", properties: { tokens: { type: "array" } } } } } }, async () => ({ tokens: loadTokens().map(t => ({ ...t, key: t.key.slice(0, 8) + "..." })) }));
+  app.post("/api/auth/tokens", { schema: { body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, role: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, token: { type: "string" }, id: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { name, role } = req.body || {};
     if (!name) return { error: "name required" };
     const tokens = loadTokens();
@@ -23,12 +37,12 @@ export default function registerAuth(app, { sendError }) {
     saveTokens(tokens);
     return { success: true, token: key, id: `tok_${Date.now()}` };
   });
-  app.delete("/api/auth/tokens/:id", async (req) => {
+  app.delete("/api/auth/tokens/:id", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async (req) => {
     saveTokens(loadTokens().filter(t => t.id !== req.params.id));
     return { success: true };
   });
 
-  app.get("/api/companion/status", async () => {
+  app.get("/api/companion/status", { schema: { response: { 200: { type: "object", properties: { enabled: { type: "boolean" }, autoConnect: { type: "boolean" }, deviceName: { type: "string" } } } } } }, async () => {
     const companionDir = path.join(PI_DIR, "companion");
     try {
       if (!fs.existsSync(companionDir)) return { enabled: false };
@@ -37,7 +51,7 @@ export default function registerAuth(app, { sendError }) {
     } catch { return { enabled: false }; }
   });
 
-  app.post("/api/companion/config", async (req) => {
+  app.post("/api/companion/config", { schema: { body: { type: "object", additionalProperties: true }, response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async (req) => {
     const companionDir = path.join(PI_DIR, "companion");
     fs.mkdirSync(companionDir, { recursive: true });
     fs.writeFileSync(path.join(companionDir, "config.json"), JSON.stringify(req.body || {}, null, 2));
@@ -50,15 +64,15 @@ export default function registerAuth(app, { sendError }) {
   }
   function saveSessions(sessions) { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2)); }
 
-  app.get("/api/auth/sessions", async () => {
+  app.get("/api/auth/sessions", { schema: { response: { 200: { type: "object", properties: { sessions: { type: "array" } } } } } }, async () => {
     const active = loadSessions().filter(s => s.expiresAt > Date.now());
     return { sessions: active.map(s => ({ id: s.id, device: s.device || "Unknown", createdAt: s.createdAt, expiresAt: s.expiresAt })) };
   });
-  app.delete("/api/auth/sessions/:id", async (req) => {
+  app.delete("/api/auth/sessions/:id", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async (req) => {
     saveSessions(loadSessions().filter(s => s.id !== req.params.id));
     return { success: true };
   });
-  app.delete("/api/auth/sessions", async () => {
+  app.delete("/api/auth/sessions", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async () => {
     saveSessions([]);
     return { success: true };
   });

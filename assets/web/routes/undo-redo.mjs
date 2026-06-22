@@ -40,14 +40,14 @@ export default function registerUndoRedo(app, { PI_DIR }) {
     return result.lastInsertRowid;
   }
 
-  app.post("/api/undo/log", async (req) => {
+  app.post("/api/undo/log", { schema: { body: { type: "object", additionalProperties: true, properties: { type: { type: "string" }, entityType: { type: "string" }, entityId: { type: "string" }, description: { type: "string" }, data: { type: "object" }, inverseData: { type: "object" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, id: { type: "number" }, error: { type: "string" } } } } } }, async (req) => {
     const { type, entityType, entityId, description, data, inverseData } = req.body || {};
     if (!type || !entityType) return { error: "type and entityType required" };
     const id = logAction(type, entityType, entityId, description, data, inverseData);
     return { ok: true, id };
   });
 
-  app.get("/api/undo/history", async (req) => {
+  app.get("/api/undo/history", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, actions: { type: "array" } } } } } }, async (req) => {
     const db = getDb();
     if (!db) return { ok: false, actions: [] };
     const limit = Math.min(Number(req.query?.limit) || 50, 200);
@@ -56,7 +56,7 @@ export default function registerUndoRedo(app, { PI_DIR }) {
     return { ok: true, actions: rows.map(r => ({ ...r, data: r.data ? JSON.parse(r.data) : null, inverse_data: r.inverse_data ? JSON.parse(r.inverse_data) : null })) };
   });
 
-  app.post("/api/undo/execute", async (req) => {
+  app.post("/api/undo/execute", { schema: { body: { type: "object", additionalProperties: true, properties: { id: { type: "number" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, type: { type: "string" }, data: { type: "object" }, description: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { id } = req.body || {};
     if (!id) return { error: "id required" };
     const db = getDb();
@@ -68,7 +68,7 @@ export default function registerUndoRedo(app, { PI_DIR }) {
     return { ok: true, type: action.entity_type, data: inverseData, description: `Undo: ${action.description}` };
   });
 
-  app.get("/api/undo/last", async () => {
+  app.get("/api/undo/last", { schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, action: { type: "object", nullable: true } } } } } }, async () => {
     const db = getDb();
     if (!db) return { ok: false, action: null };
     const action = db.prepare("SELECT * FROM action_log ORDER BY id DESC LIMIT 1").get();

@@ -25,7 +25,12 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     catch (e) { vaultAudit("set", req.body.key, false); throw e; }
   });
 
-  app.post("/api/vault/get", async (req) => {
+  app.post("/api/vault/get", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { key: { type: "string" } } },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" }, value: { type: "string", nullable: true }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const err = validateBody(req.body, ["key"]);
     if (err) return { ok: false, error: err };
     vaultAudit("get", req.body.key, true);
@@ -35,7 +40,12 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     return { ok: true, value: redacted };
   });
 
-  app.post("/api/vault/delete", async (req) => {
+  app.post("/api/vault/delete", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { key: { type: "string" } } },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const err = validateBody(req.body, ["key"]);
     if (err) return { ok: false, error: err };
     const result = vaultDelete(req.body.key);
@@ -47,14 +57,23 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     schema: { response: { 200: { type: "object", properties: { keys: { type: "array", items: { type: "string" } } } } } },
   }, async () => ({ keys: vaultList() }));
 
-  app.get("/api/vault/health", async () => vaultHealth());
+  app.get("/api/vault/health", {
+    schema: { response: { 200: { type: "object", additionalProperties: true } } },
+  }, async () => vaultHealth());
 
-  app.get("/api/vault/export", async () => {
+  app.get("/api/vault/export", {
+    schema: { response: { 200: { type: "object", properties: { vault: { type: "object" }, exportedAt: { type: "string" } } } } },
+  }, async () => {
     const vault = readVault();
     return { vault, exportedAt: new Date().toISOString() };
   });
 
-  app.post("/api/vault/import", async (req) => {
+  app.post("/api/vault/import", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { entries: { type: "object" }, merge: { type: "boolean" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, imported: { type: "number" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const { entries, merge } = req.body || {};
     if (!entries || typeof entries !== "object") return { error: "entries object required", imported: 0 };
     const current = readVault();
@@ -67,7 +86,9 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     return { success: true, imported: count };
   });
 
-  app.get("/api/contacts", async () => {
+  app.get("/api/contacts", {
+    schema: { response: { 200: { type: "object", properties: { contacts: { type: "array" } } } } },
+  }, async () => {
     const db = getContactsDb();
     if (!db) return { contacts: [] };
     return { contacts: db.prepare("SELECT * FROM contacts ORDER BY name ASC LIMIT 200").all() };
@@ -89,7 +110,12 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     return { success: true, id };
   });
 
-  app.put("/api/contacts/:id", async (req) => {
+  app.put("/api/contacts/:id", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, organization: { type: "string" }, notes: { type: "string" }, avatar: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const db = getContactsDb(); if (!db) return { error: "Unavailable" };
     const fields = []; const vals = [];
     for (const k of ["name","email","phone","organization","notes","avatar"]) {
@@ -101,13 +127,20 @@ export default function registerVaultContacts(app, { sendError, validateBody, ge
     return { success: true };
   });
 
-  app.delete("/api/contacts/:id", async (req) => {
+  app.delete("/api/contacts/:id", {
+    schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } },
+  }, async (req) => {
     const db = getContactsDb(); if (!db) return { error: "Unavailable" };
     db.prepare("DELETE FROM contacts WHERE id=?").run(req.params.id);
     return { success: true };
   });
 
-  app.post("/api/contacts/carddav/sync", async (req) => {
+  app.post("/api/contacts/carddav/sync", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { serverUrl: { type: "string" }, username: { type: "string" }, password: { type: "string" } } },
+      response: { 200: { type: "object", properties: { success: { type: "boolean" }, imported: { type: "number" }, total: { type: "number" }, error: { type: "string" } } } },
+    },
+  }, async (req) => {
     const { serverUrl, username, password } = req.body || {};
     if (!serverUrl || !username || !password) return { error: "serverUrl, username, password required" };
     try {

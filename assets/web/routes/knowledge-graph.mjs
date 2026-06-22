@@ -6,7 +6,7 @@ const { PI_DIR } = SHARED_PATHS;
 const STATE_DB_PATH = path.join(PI_DIR, "session-state.db");
 
 export default function registerKnowledgeGraph(app, { sendError }) {
-  app.get("/api/knowledge/triplets", async (req) => {
+  app.get("/api/knowledge/triplets", { schema: { response: { 200: { type: "object", properties: { triplets: { type: "array" }, count: { type: "number" }, error: { type: "string" } } } } } }, async (req) => {
     try {
       const db = getOrCreateDb(STATE_DB_PATH);
       if (!db) return { error: "Database not available", triplets: [], count: 0 };
@@ -27,7 +27,7 @@ export default function registerKnowledgeGraph(app, { sendError }) {
     }
   });
 
-  app.get("/api/knowledge/entity", async (req) => {
+  app.get("/api/knowledge/entity", { schema: { response: { 200: { type: "object", properties: { entity: { type: "object" }, outgoing: { type: "array" }, incoming: { type: "array" }, error: { type: "string" } } } } } }, async (req) => {
     try {
       const id = req.query?.id;
       if (!id) return { error: "id parameter required" };

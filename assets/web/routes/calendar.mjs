@@ -12,7 +12,7 @@ export default function registerCalendar(app, { sendError }) {
   }
   function saveCalendarEvents(events) { fs.writeFileSync(CALENDAR_FILE, JSON.stringify(events, null, 2)); }
 
-  app.get("/api/calendar/events", async () => {
+  app.get("/api/calendar/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array" } } } } } }, async () => {
     const events = loadCalendarEvents();
     const now = Date.now();
     return { events: events.filter(e => !e.end || e.end > now).sort((a, b) => (a.start || 0) - (b.start || 0)).slice(0, 100) };
@@ -33,12 +33,12 @@ export default function registerCalendar(app, { sendError }) {
     return { success: true, event };
   });
 
-  app.delete("/api/calendar/events/:id", async (req) => {
+  app.delete("/api/calendar/events/:id", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async (req) => {
     saveCalendarEvents(loadCalendarEvents().filter(e => e.id !== req.params.id));
     return { success: true };
   });
 
-  app.post("/api/calendar/caldav/sync", async (req) => {
+  app.post("/api/calendar/caldav/sync", { schema: { body: { type: "object", additionalProperties: true, properties: { serverUrl: { type: "string" }, username: { type: "string" }, password: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, imported: { type: "number" }, error: { type: "string" } } } } } }, async (req) => {
     const { serverUrl, username, password } = req.body || {};
     if (!serverUrl || !username) return { error: "serverUrl and username required" };
     try {

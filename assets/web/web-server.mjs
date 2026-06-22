@@ -52,6 +52,9 @@ import registerAuth from "./routes/auth.mjs";
 import registerSsh from "./routes/ssh.mjs";
 import registerNotifications from "./routes/notifications.mjs";
 import registerUndoRedo from "./routes/undo-redo.mjs";
+import registerSocial, { postToTwitter, postToReddit, postToBluesky, postToDiscord, postToTelegram, addPostedEntry, findSimilarPosted, socialBridgePid, emailBridgePid, SOCIAL_BRIDGE, EMAIL_BRIDGE } from "./routes/social.mjs";
+import registerSessions from "./routes/sessions.mjs";
+import registerWebsocket from "./routes/websocket.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PI_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -220,61 +223,6 @@ function sendError(reply, statusCode, message, code) {
 
 // ── Helpers (remaining inline) ────────────────────────────────────────────
 // Swarm teams, settings, models, soul extracted to services/settings.mjs
-
-const ASSETS_DIR = path.join(PI_DIR, "assets");
-try { fs.mkdirSync(ASSETS_DIR, { recursive: true }); } catch {}
-
-const POSTED_CONTENT_FILE = path.join(PI_DIR, "posted-content.json");
-
-function loadPostedContent() {
-  try {
-    if (fs.existsSync(POSTED_CONTENT_FILE)) {
-      return JSON.parse(fs.readFileSync(POSTED_CONTENT_FILE, "utf8"));
-    }
-  } catch {}
-  return [];
-}
-
-function savePostedContent(entries) {
-  try {
-    fs.mkdirSync(path.dirname(POSTED_CONTENT_FILE), { recursive: true });
-    const keep = entries.slice(-500);
-    fs.writeFileSync(POSTED_CONTENT_FILE, JSON.stringify(keep, null, 2));
-  } catch (e) { console.error("[PostedContent] Failed to save:", e.message); }
-}
-
-function addPostedEntry(platform, content, topic, url) {
-  const entries = loadPostedContent();
-  const fingerprint = content.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 200);
-  entries.push({
-    platform,
-    content: fingerprint,
-    fullContent: content.slice(0, 500),
-    topic: topic || "",
-    url: url || "",
-    postedAt: new Date().toISOString(),
-  });
-  savePostedContent(entries);
-}
-
-function findSimilarPosted(platform, content, threshold) {
-  const entries = loadPostedContent();
-  if (entries.length === 0) return [];
-  const words = new Set(content.toLowerCase().split(/\s+/).filter(w => w.length > 3));
-  if (words.size === 0) return [];
-  const results = [];
-  for (const entry of entries) {
-    if (platform && entry.platform !== platform) continue;
-    const entryWords = new Set(entry.content.split(/\s+/).filter(w => w.length > 3));
-    const intersection = new Set([...words].filter(w => entryWords.has(w)));
-    const union = new Set([...words, ...entryWords]);
-    const similarity = intersection.size / (union.size || 1);
-    if (similarity >= (threshold || 0.35)) {
-      results.push({ similarity, entry });
-    }
-  }
-  return results.sort((a, b) => b.similarity - a.similarity).slice(0, 5);
-}
 
 // ── Vault functions extracted to services/vault.mjs
 
@@ -2129,27 +2077,6 @@ Provide a structured review with severity-classified issues and an overall verdi
   }
 }
 
-async function postToTwitter(text, mediaPath) {
-  const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-  try {
-    const body = { text };
-    if (mediaPath) {
-      const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
-      if (fs.existsSync(resolvedPath)) body.mediaPath = resolvedPath;
-    }
-    const res = await fetch(`${bridgeUrl}/twitter/post`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (data.ok) return `Tweet posted successfully! ${data.message || ""}`;
-    return `Twitter post failed: ${data.error || "unknown error"}`;
-  } catch (e) {
-    return `Twitter post failed — bridge unreachable: ${e.message}. Make sure you've connected your Twitter account in Social Accounts panel first.`;
-  }
-}
-
 // ── Web Search / Web Fetch / SSRF ──────────────────────────────────────────
 // Extracted to services/web-search.mjs
 
@@ -2285,98 +2212,8 @@ async function githubAction(args) {
   }
 }
 
-// ── Reddit Posting ──────────────────────────────────────────────────────────
-
-async function postToReddit(subreddit, title, text, mediaPath) {
-  const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-  try {
-    const body = { subreddit, title, body: text };
-    if (mediaPath) {
-      const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
-      if (fs.existsSync(resolvedPath)) body.mediaPath = resolvedPath;
-    }
-    const res = await fetch(`${bridgeUrl}/reddit/post`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (data.ok) return `Posted to r/${subreddit}! ${data.message || ""}`;
-    return `Reddit post failed: ${data.error || "unknown error"}`;
-  } catch (e) {
-    return `Reddit post failed — bridge unreachable: ${e.message}. Make sure you've connected your Reddit account in Social Accounts panel first.`;
-  }
-}
-
-// ── Bluesky Posting ─────────────────────────────────────────────────────────
-
-async function postToBluesky(text, mediaPath) {
-  const identifier = vaultGet("BLUESKY_IDENTIFIER");
-  const password = vaultGet("BLUESKY_APP_PASSWORD");
-  if (!identifier || !password) {
-    return "Bluesky credentials not configured. Store BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD in vault.";
-  }
-
-  try {
-    const sessionRes = await fetch("https://bsky.social/xrpc/com.atproto.server.createSession", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier, password }),
-      signal: AbortSignal.timeout(15000),
-    });
-    const session = await sessionRes.json();
-    if (!session.accessJwt) return `Bluesky auth failed: ${JSON.stringify(session)}`;
-
-    let embed;
-    if (mediaPath) {
-      const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
-      if (fs.existsSync(resolvedPath)) {
-        const imageBuffer = fs.readFileSync(resolvedPath);
-        const ext = path.extname(resolvedPath).toLowerCase();
-        const mime = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : "image/jpeg";
-        const uploadRes = await fetch("https://bsky.social/xrpc/com.atproto.repo.uploadBlob", {
-          method: "POST",
-          headers: {
-            "Content-Type": mime,
-            Authorization: `Bearer ${session.accessJwt}`,
-          },
-          body: imageBuffer,
-          signal: AbortSignal.timeout(20000),
-        });
-        const uploadData = await uploadRes.json();
-        if (uploadData.blob) {
-          embed = {
-            $type: "app.bsky.embed.images",
-            images: [{ alt: "", image: uploadData.blob }],
-          };
-        }
-      }
-    }
-
-    const now = new Date().toISOString();
-    const record = {
-      $type: "app.bsky.feed.post",
-      text: text.slice(0, 300),
-      createdAt: now,
-    };
-    if (embed) record.embed = embed;
-
-    const postRes = await fetch("https://bsky.social/xrpc/com.atproto.repo.createRecord", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.accessJwt}`,
-      },
-      body: JSON.stringify({ repo: session.did, collection: "app.bsky.feed.post", record }),
-      signal: AbortSignal.timeout(15000),
-    });
-    const postData = await postRes.json();
-    if (postData.uri) return `Posted to Bluesky! URI: ${postData.uri}`;
-    return `Bluesky error: ${JSON.stringify(postData)}`;
-  } catch (e) {
-    return `Bluesky error: ${e.message}`;
-  }
-}
+// ── Social media posting ──────────────────────────────────────────────────
+// Extracted to routes/social.mjs
 
 // ── Email (Gmail) ────────────────────────────────────────────────────────────
 
@@ -2389,7 +2226,6 @@ async function gmailAuth() {
     throw new Error("Gmail not configured. Store GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in vault.");
   }
 
-  // Try device flow
   const deviceRes = await fetch("https://oauth2.googleapis.com/device/code", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -2401,7 +2237,6 @@ async function gmailAuth() {
 
   broadcast({ type: "gmail_auth_required", verificationUrl: device.verification_url, userCode: device.user_code });
 
-  // Poll for token
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -2444,7 +2279,6 @@ async function sendEmail(to, subject, body) {
     });
 
     if (res.status === 401) {
-      // Token expired, re-auth
       gmailTokens = { accessToken: null, refreshToken: null };
       return await sendEmail(to, subject, body);
     }
@@ -2457,74 +2291,24 @@ async function sendEmail(to, subject, body) {
   }
 }
 
-// ── Discord Posting ─────────────────────────────────────────────────────────
+// ── LLM Completion helper ─────────────────────────────────────────────────
 
-async function postToDiscord(message, mediaPath) {
-  const url = vaultGet("DISCORD_WEBHOOK_URL");
-  if (!url) return "Discord webhook not configured. Store DISCORD_WEBHOOK_URL in vault.";
+async function getLLMCompletion(systemPrompt, userPrompt) {
+  const model = resolveModel();
+  const auth = getModelAuth(model);
+  let text = "";
   try {
-    const resolvedPath = mediaPath && ((resolveAssetPath(path.basename(mediaPath)) || mediaPath));
-    if (resolvedPath && fs.existsSync(resolvedPath)) {
-      const { Blob } = globalThis;
-      const imageData = fs.readFileSync(resolvedPath);
-      const ext = path.extname(resolvedPath).toLowerCase();
-      const mime = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : "image/jpeg";
-      const formData = new FormData();
-      formData.append("content", message.slice(0, 2000));
-      formData.append("file", new Blob([imageData], { type: mime }), path.basename(resolvedPath));
-      const res = await fetch(url, { method: "POST", body: formData, signal: AbortSignal.timeout(20000) });
-      if (res.ok) return "Posted to Discord with image!";
-      return `Discord error: ${res.status} ${await res.text()}`;
+    const stream = streamSimple(model, {
+      systemPrompt,
+      messages: [{ role: "user", content: [{ type: "text", text: userPrompt }] }]
+    }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
+    for await (const event of stream) {
+      if (event.type === "text_delta") text += event.delta;
     }
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: message.slice(0, 2000) }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (res.ok) return "Posted to Discord!";
-    return `Discord error: ${res.status} ${await res.text()}`;
   } catch (e) {
-    return `Discord error: ${e.message}`;
+    console.error("LLM Error:", e);
   }
-}
-
-// ── Telegram Posting ────────────────────────────────────────────────────────
-
-async function postToTelegram(message, mediaPath) {
-  const token = vaultGet("TELEGRAM_BOT_TOKEN");
-  const chatId = vaultGet("TELEGRAM_CHAT_ID");
-  if (!token || !chatId) return "Telegram not configured. Store TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in vault.";
-  try {
-    const resolvedPath = mediaPath && ((resolveAssetPath(path.basename(mediaPath)) || mediaPath));
-    if (resolvedPath && fs.existsSync(resolvedPath)) {
-      const { Blob } = globalThis;
-      const imageData = fs.readFileSync(resolvedPath);
-      const ext = path.extname(resolvedPath).toLowerCase();
-      const mime = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : "image/jpeg";
-      const formData = new FormData();
-      formData.append("chat_id", chatId);
-      formData.append("photo", new Blob([imageData], { type: mime }), path.basename(resolvedPath));
-      formData.append("caption", message.slice(0, 1024));
-      const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-        method: "POST", body: formData, signal: AbortSignal.timeout(20000),
-      });
-      const data = await res.json();
-      if (data.ok) return "Posted photo to Telegram!";
-      return `Telegram photo error: ${JSON.stringify(data)}`;
-    }
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: message.slice(0, 4096) }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const data = await res.json();
-    if (data.ok) return "Posted to Telegram!";
-    return `Telegram error: ${JSON.stringify(data)}`;
-  } catch (e) {
-    return `Telegram error: ${e.message}`;
-  }
+  return text.trim();
 }
 
 // ── Memory Edit ──────────────────────────────────────────────────────────────
@@ -4098,6 +3882,8 @@ export async function createApp() {
   registerSsh(app, { PI_DIR, sendError });
   const { notify } = registerNotifications(app, { PI_DIR, sendError });
   registerUndoRedo(app, { PI_DIR });
+  registerSocial(app, { sendError, broadcast });
+  registerSessions(app, { sendError });
 
   // ── Reminders & Scheduled Actions ────────────────────────────────────
   const REMINDERS_FILE = path.join(PI_DIR, "reminders.json");
@@ -4180,13 +3966,13 @@ export async function createApp() {
     logRequest(req, duration);
     done();
   });
-  app.get("/api/admin/logs", async (req) => {
+  app.get("/api/admin/logs", { schema: { response: { 200: { type: "object", properties: { logs: { type: "array" } } } } } }, async (req) => {
     try {
       const lines = fs.readFileSync(path.join(PI_DIR, "access.log"), "utf8").trim().split("\n").slice(-200);
       return { logs: lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) };
     } catch { return { logs: [] }; }
   });
-  app.get("/api/admin/performance", async () => {
+  app.get("/api/admin/performance", { schema: { response: { 200: { type: "object", properties: { totalRequests: { type: "number" }, avgDurationMs: { type: "number" }, slowest: { type: "array" } } } } } }, async () => {
     try {
       const lines = fs.readFileSync(path.join(PI_DIR, "access.log"), "utf8").trim().split("\n").filter(Boolean);
       const entries = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).slice(-500);
@@ -4198,14 +3984,14 @@ export async function createApp() {
 
   // ── API Routes ─────────────────────────────────────────────────────────
 
-  app.get("/api/health", async () => ({
+  app.get("/api/health", { schema: { response: { 200: { type: "object", properties: { status: { type: "string" }, version: { type: "string" }, timestamp: { type: "string" } } } } } }, async () => ({
     status: "ok", version: "1.0.0", timestamp: new Date().toISOString(),
   }));
 
-  app.get("/api/migrations/status", async () => getMigrationStatus());
+  app.get("/api/migrations/status", { schema: { response: { 200: { type: "object", properties: { applied: { type: "array" }, pending: { type: "array" } } } } } }, async () => getMigrationStatus());
 
-  app.get("/api/flags", async () => getFlags());
-  app.post("/api/flags", async (req) => {
+  app.get("/api/flags", { schema: { response: { 200: { type: "object", additionalProperties: true } } } }, async () => getFlags());
+  app.post("/api/flags", { schema: { body: { type: "object", additionalProperties: true, properties: { key: { type: "string" }, value: { type: "string" }, description: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" } } } } } }, async (req) => {
     const { key, value, description } = req.body || {};
     if (!key || !value) return { error: "key and value required" };
     setFlag(key, value, description);
@@ -4213,8 +3999,8 @@ export async function createApp() {
   });
 
   // ── Eval Harness ──────────────────────────────────────────────────
-  app.get("/api/eval/tasks", async () => ({ tasks: getEvalTasks() }));
-  app.post("/api/eval/run", async (req) => {
+  app.get("/api/eval/tasks", { schema: { response: { 200: { type: "object", properties: { tasks: { type: "array" } } } } } }, async () => ({ tasks: getEvalTasks() }));
+  app.post("/api/eval/run", { schema: { body: { type: "object", additionalProperties: true, properties: { taskId: { type: "string" } } }, response: { 200: { type: "object", properties: { total: { type: "number" }, passed: { type: "number" }, failed: { type: "number" }, results: { type: "array" } } } } } }, async (req) => {
     const { taskId } = req.body || {};
     const result = await runEval(async (prompt) => {
       const model = resolveModel();
@@ -4233,8 +4019,8 @@ export async function createApp() {
   });
 
   // ── Model Router ─────────────────────────────────────────────────
-  app.get("/api/models/performance", async () => ({ performance: getModelPerformanceReport() }));
-  app.post("/api/models/select", async (req) => {
+  app.get("/api/models/performance", { schema: { response: { 200: { type: "object", properties: { performance: { type: "object" } } } } } }, async () => ({ performance: getModelPerformanceReport() }));
+  app.post("/api/models/select", { schema: { body: { type: "object", additionalProperties: true, properties: { taskType: { type: "string" } } }, response: { 200: { type: "object", properties: { selected: { type: "object" }, error: { type: "string" } } } } } }, async (req) => {
     const { taskType } = req.body || {};
     if (!taskType) return { error: "taskType required" };
     const settings = loadSettings();
@@ -4251,7 +4037,7 @@ export async function createApp() {
   // WebSocket Voice Chat streaming endpoint
 
   // Node.js Voice Cloning endpoint
-  app.post("/api/voice/clone", async (req, reply) => {
+  app.post("/api/voice/clone", { schema: { body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, transcript: { type: "string" }, audio: { type: "string" } } }, response: { 200: { type: "object", properties: { error: { type: "string" } } } } } }, async (req, reply) => {
     const { name, transcript, audio } = req.body || {};
     if (!name || !transcript || !audio) {
       return reply.code(400).send({ error: "name, transcript, and audio (base64) are required" });
@@ -4276,7 +4062,7 @@ export async function createApp() {
     }
   });
 
-  app.delete("/api/voice/clone/:id", async (req, reply) => {
+  app.delete("/api/voice/clone/:id", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async (req, reply) => {
     const { id } = req.params;
     try {
       const delR = await fetch(`${TTS_SERVER}/v1/voices/clone/${id}`, {
@@ -4292,7 +4078,7 @@ export async function createApp() {
     }
   });
 
-  app.get("/api/voice/voices", async () => {
+  app.get("/api/voice/voices", { schema: { response: { 200: { type: "object", properties: { voices: { type: "array" }, active: { type: "string" } } } } } }, async () => {
     try {
       const r = await fetch(`${TTS_SERVER}/v1/voices`);
       const data = await r.json();
@@ -4302,7 +4088,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/voice/select", async (req, reply) => {
+  app.post("/api/voice/select", { schema: { body: { type: "object", additionalProperties: true, properties: { voice_id: { type: "string" } } }, response: { 200: { type: "object", properties: { active: { type: "string" }, error: { type: "string" } } } } } }, async (req, reply) => {
     const { voice_id } = req.body || {};
     if (!voice_id) return reply.code(400).send({ error: "voice_id is required" });
     try {
@@ -4317,7 +4103,7 @@ export async function createApp() {
     }
   });
 
-  app.post("/api/voice/tts", async (req, reply) => {
+  app.post("/api/voice/tts", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, voice: { type: "string" } } }, response: { 200: { type: "object", properties: { audio: { type: "string" }, sampleRate: { type: "number" }, error: { type: "string" } } } } } }, async (req, reply) => {
     const { text, voice } = req.body || {};
     if (!text) return reply.code(400).send({ error: "text is required" });
     const voiceId = voice || "af_bella";
@@ -4376,7 +4162,7 @@ export async function createApp() {
   });
 
   // Sub-agent process health — checks bridge processes and active agents
-  app.get("/api/health/subagents", async () => {
+  app.get("/api/health/subagents", { schema: { response: { 200: { type: "object", properties: { bridges: { type: "object" }, activeSwarms: { type: "number" }, websocketClients: { type: "number" }, bridgePids: { type: "object" }, timestamp: { type: "string" } } } } } }, async () => {
     const info = {
       bridges: { social: false, email: false },
       activeSwarms: currentSwarmState ? 1 : 0,
@@ -4395,17 +4181,17 @@ export async function createApp() {
     return info;
   });
 
-  app.get("/api/session/checkpoints", async () => ({ checkpoints: listCheckpoints() }));
-  app.post("/api/session/checkpoint", async (req) => {
+  app.get("/api/session/checkpoints", { schema: { response: { 200: { type: "object", properties: { checkpoints: { type: "array" } } } } } }, async () => ({ checkpoints: listCheckpoints() }));
+  app.post("/api/session/checkpoint", { schema: { body: { type: "object", additionalProperties: true, properties: { label: { type: "string" } } }, response: { 200: { type: "object", additionalProperties: true } } } }, async (req) => {
     const ckpt = createCheckpoint(req.body?.label);
     return ckpt;
   });
-  app.post("/api/session/restore", async (req) => {
+  app.post("/api/session/restore", { schema: { body: { type: "object", additionalProperties: true, properties: { id: { type: "string" } } }, response: { 200: { type: "object", additionalProperties: true } } } }, async (req) => {
     const result = restoreCheckpoint(req.body?.id);
     return result;
   });
 
-  app.get("/api/settings", async () => loadSettings());
+  app.get("/api/settings", { schema: { response: { 200: { type: "object", additionalProperties: true } } } }, async () => loadSettings());
   app.post("/api/settings", {
     schema: { body: { type: "object" }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } },
   }, async (req) => {
@@ -4416,10 +4202,10 @@ export async function createApp() {
     try { saveSessionState({ lastActive: Date.now(), toolCallCount: _toolCallCount, memoryCount: readMemory().length, checkpoints: listCheckpoints().length, model: resolveModel().id }); } catch {}
     return { ok: true };
   });
-  app.get("/api/teams", async () => {
+  app.get("/api/teams", { schema: { response: { 200: { type: "object", properties: { teams: { type: "array" } } } } } }, async () => {
     return { teams: loadSwarmTeams() };
   });
-  app.post("/api/teams", async (req) => {
+  app.post("/api/teams", { schema: { body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, workspace: { type: "string" }, leaderAgentId: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, team: { type: "object" } } } } } }, async (req) => {
     const teams = loadSwarmTeams();
     const newTeam = {
       id: `team-${Date.now()}`,
@@ -4433,13 +4219,13 @@ export async function createApp() {
     saveSwarmTeams(teams);
     return { ok: true, team: newTeam };
   });
-  app.post("/api/teams/delete", async (req) => {
+  app.post("/api/teams/delete", { schema: { body: { type: "object", additionalProperties: true, properties: { teamId: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async (req) => {
     let teams = loadSwarmTeams();
     teams = teams.filter(t => t.id !== req.body?.teamId);
     saveSwarmTeams(teams);
     return { ok: true };
   });
-  app.post("/api/teams/add-agent", async (req) => {
+  app.post("/api/teams/add-agent", { schema: { body: { type: "object", additionalProperties: true, properties: { teamId: { type: "string" }, agentId: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async (req) => {
     const teams = loadSwarmTeams();
     const team = teams.find(t => t.id === req.body?.teamId);
     if (team) {
@@ -4450,7 +4236,7 @@ export async function createApp() {
     }
     return { ok: true };
   });
-  app.post("/api/teams/remove-agent", async (req) => {
+  app.post("/api/teams/remove-agent", { schema: { body: { type: "object", additionalProperties: true, properties: { teamId: { type: "string" }, slotId: { type: "string" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async (req) => {
     const teams = loadSwarmTeams();
     const team = teams.find(t => t.id === req.body?.teamId);
     if (team) {
@@ -4459,28 +4245,37 @@ export async function createApp() {
     }
     return { ok: true };
   });
-  app.get("/api/agents/discover", async () => {
+  app.get("/api/agents/discover", { schema: { response: { 200: { type: "object", properties: { agents: { type: "array" } } } } } }, async () => {
     return { agents: listAgents().map(a => ({ ...a, available: true })) };
   });
-  app.get("/api/work-products", async (req) => {
+  app.get("/api/work-products", { schema: { response: { 200: { type: "object", properties: { summary: { type: "string" }, products: { type: "array" } } } } } }, async (req) => {
     const sessionId = req.query?.sessionId || undefined;
     const summary = req.query?.summary === "true";
     if (summary) return { summary: getWorkProductSummary(sessionId) };
     return { products: getWorkProducts(sessionId) };
   });
-  app.get("/api/email/fetch", async () => {
+  app.get("/api/email/fetch", { schema: { response: { 200: { type: "object", properties: { emails: { type: "array" } } } } } }, async () => {
     const { SHARED_PATHS } = await import("./shared-constants.mjs");
     try {
       const state = JSON.parse(fs.readFileSync(path.join(SHARED_PATHS.PI_DIR, "email-state.json"), "utf8"));
       return { emails: state.cachedEmails || [] };
     } catch { return { emails: [] }; }
   });
-  app.get("/api/mcp/config", async () => ({ servers: loadMcpConfig() }));
-  app.post("/api/mcp/config", async (req) => {
+  app.get("/api/mcp/config", { schema: { response: { 200: { type: "object", properties: { servers: { type: "array" } } } } } }, async () => ({ servers: loadMcpConfig() }));
+  app.post("/api/mcp/config", { schema: { body: { type: "object", additionalProperties: true, properties: { servers: { type: "array" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" } } } } } }, async (req) => {
     if (Array.isArray(req.body?.servers)) saveMcpConfig(req.body.servers);
     return { ok: true };
   });
-  app.get("/api/models/vote-stats", async () => {
+  app.post("/api/mcp/test", { schema: { body: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, command: { type: "string" }, args: { type: "array" } } }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, output: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
+    const { name, command, args } = req.body || {};
+    if (!command) return { ok: false, error: "command required" };
+    try {
+      const cp = await import("node:child_process");
+      const result = cp.spawnSync(command, args || [], { timeout: 10000, encoding: "utf8", maxBuffer: 1024 * 1024 });
+      return { ok: result.status === 0, output: result.stdout?.slice(0, 5000) || "", error: result.stderr?.slice(0, 1000) || "" };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+  app.get("/api/models/vote-stats", { schema: { response: { 200: { type: "object", properties: { rankings: { type: "array" } } } } } }, async () => {
     let votes = [];
     try { votes = JSON.parse(fs.readFileSync(path.join(PI_DIR, "model-votes.json"), "utf8")); } catch {}
     if (!Array.isArray(votes)) votes = [];
@@ -4494,8 +4289,8 @@ export async function createApp() {
     const rankings = Object.entries(stats).map(([model, s]) => ({ model, ...s, winRate: s.total > 0 ? Math.round(s.wins / s.total * 100) : 0 })).sort((a, b) => b.winRate - a.winRate);
     return { rankings };
   });
-  app.get("/api/swarm/teams", async () => ({ teams: loadSwarmTeams() }));
-  app.get("/api/auth/me", async () => ({ authenticated: true, user: "local", provider: "local" }));
+  app.get("/api/swarm/teams", { schema: { response: { 200: { type: "object", properties: { teams: { type: "array" } } } } } }, async () => ({ teams: loadSwarmTeams() }));
+  app.get("/api/auth/me", { schema: { response: { 200: { type: "object", properties: { authenticated: { type: "boolean" }, user: { type: "string" }, provider: { type: "string" } } } } } }, async () => ({ authenticated: true, user: "local", provider: "local" }));
   app.get("/api/models", {
     schema: {
       response: { 200: { type: "object", properties: { models: { type: "array" }, providers: { type: "array" } } } },
@@ -4528,7 +4323,7 @@ export async function createApp() {
     const models = loadModels();
     return { models: Array.isArray(models) ? models : [] };
   });
-  app.get("/api/model-providers", async () => {
+  app.get("/api/model-providers", { schema: { response: { 200: { type: "object", properties: { providers: { type: "array" } } } } } }, async () => {
     const online = [];
     const checks = [
       { provider: "lmstudio", url: "http://127.0.0.1:1234/v1/models", baseUrl: "http://127.0.0.1:1234/v1" },
@@ -4549,7 +4344,7 @@ export async function createApp() {
     return { providers: online };
   });
 
-  app.post("/api/models/check", async () => {
+  app.post("/api/models/check", { schema: { response: { 200: { type: "object", properties: { providers: { type: "array" } } } } } }, async () => {
     const online = [];
     // Check common local providers
     const checks = [
@@ -4571,824 +4366,36 @@ export async function createApp() {
     return { providers: online };
   });
 
-  // ── Social Media Proxy Routes ────────────────────────────────────────────
-
-  const SOCIAL_BRIDGE = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-  const EMAIL_BRIDGE = process.env.EMAIL_BRIDGE_URL || "http://localhost:9878";
-
-  async function proxyToBridge(bridgeUrl, endpoint, method, body) {
-    const url = `${bridgeUrl}${endpoint}`;
-    const opts = { method, headers: { "Content-Type": "application/json" } };
-    if (body) opts.body = JSON.stringify(body);
-    const resp = await fetch(url, opts);
-    return resp.json();
-  }
-
-  // ── Helper Functions for Social AI Agent ─────────────────────────────────
-
-  async function getLLMCompletion(systemPrompt, userPrompt) {
-    const model = resolveModel();
-    const auth = getModelAuth(model);
-    let text = "";
-    try {
-      const stream = streamSimple(model, {
-        systemPrompt,
-        messages: [{ role: "user", content: [{ type: "text", text: userPrompt }] }]
-      }, { apiKey: auth.apiKey, headers: auth.headers, reasoning: "low" });
-      for await (const event of stream) {
-        if (event.type === "text_delta") text += event.delta;
-      }
-    } catch (e) {
-      console.error("LLM Error:", e);
-    }
-    return text.trim();
-  }
-
-  async function searchWebForTopic(query) {
-    const tavilyKey = process.env.TAVILY_API_KEY || "";
-    const serperKey = process.env.SERPER_API_KEY || "";
-    if (!tavilyKey && !serperKey) return "No web search API keys configured. Using offline LLM knowledge.";
-    
-    try {
-      if (tavilyKey) {
-        const r = await fetch("https://api.tavily.com/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ api_key: tavilyKey, query, search_depth: "basic", max_results: 3 })
-        });
-        if (r.ok) {
-          const data = await r.json();
-          return data.results.map(res => `Title: ${res.title}\nURL: ${res.url}\nContent: ${res.content}\n`).join("\n---\n");
-        }
-      }
-      if (serperKey) {
-        const r = await fetch("https://google.serper.dev/search", {
-          method: "POST",
-          headers: { "X-API-KEY": serperKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ q: query, num: 3 })
-        });
-        if (r.ok) {
-          const data = await r.json();
-          return data.organic.map(res => `Title: ${res.title}\nURL: ${res.link}\nSnippet: ${res.snippet}\n`).join("\n---\n");
-        }
-      }
-    } catch (e) {
-      console.error("Search failed:", e);
-    }
-    return "Web search failed. Using offline LLM knowledge.";
-  }
-
-  async function generatePostImage(prompt) {
-    const provider = vaultGet("OPENAI_API_KEY") ? "openai" : vaultGet("GEMINI_API_KEY") ? "gemini" : vaultGet("XAI_API_KEY") ? "grok" : null;
-    if (!provider) return { error: "No image generation keys in vault." };
-    
-    try {
-      if (provider === "openai") return await generateImageOpenAI(prompt, "1024x1024", "base64");
-      if (provider === "gemini") return await generateImageGemini(prompt);
-      if (provider === "grok") return await generateImageGrok(prompt, "base64");
-    } catch (e) {
-      return { error: e.message };
-    }
-    return { error: "Failed to generate image." };
-  }
-
-  // ── Social Bridge Status ──────────────────────────────────────────────────
-  app.get("/api/social/status", {
-    schema: { response: { 200: { type: "object", properties: { ok: { type: "boolean" }, platforms: { type: "object" }, error: { type: "string" } } } } },
-  }, async () => {
-    try {
-      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => ({ platforms: {} }));
-      const email = await proxyToBridge(EMAIL_BRIDGE, "/status", "GET").catch(() => ({ configured: false }));
-      const bskyConfigured = !!(vaultGet("BLUESKY_IDENTIFIER") && vaultGet("BLUESKY_APP_PASSWORD"));
-      const discordConfigured = !!vaultGet("DISCORD_WEBHOOK_URL");
-      const telegramConfigured = !!(vaultGet("TELEGRAM_BOT_TOKEN") && vaultGet("TELEGRAM_CHAT_ID"));
-
-      return {
-        ok: true,
-        platforms: {
-          ...social.platforms,
-          email: { configured: email.configured },
-          bluesky: { configured: bskyConfigured },
-          discord: { configured: discordConfigured },
-          telegram: { configured: telegramConfigured },
-        }
-      };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
+  app.post("/api/generate/topic", async () => {
+    const topics = [
+      "Improving developer productivity with AI",
+      "Building resilient microservices architectures",
+      "The future of edge computing",
+      "Best practices for API design",
+      "Scaling databases for high-traffic applications",
+      "Implementing CI/CD pipelines",
+      "Security best practices for web applications",
+      "Optimizing React application performance",
+    ];
+    return { topic: topics[Math.floor(Math.random() * topics.length)] };
   });
-
-  // Twitter Proxy
-  app.post("/api/social/twitter/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/login", "POST", req.body));
-  app.post("/api/social/twitter/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", req.body));
-  app.post("/api/social/twitter/reply", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/twitter/reply", "POST", req.body));
-  app.post("/api/social/twitter/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/twitter/disconnect", "POST"));
-
-  // Reddit Proxy
-  app.post("/api/social/reddit/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/login", "POST", req.body));
-  app.post("/api/social/reddit/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", req.body));
-  app.post("/api/social/reddit/comment", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/reddit/comment", "POST", req.body));
-  app.post("/api/social/reddit/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/reddit/disconnect", "POST"));
-
-  // LinkedIn Proxy
-  app.post("/api/social/linkedin/login", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/login", "POST", req.body));
-  app.post("/api/social/linkedin/setup", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/setup", "POST", req.body));
-  app.post("/api/social/linkedin/post", async (req) => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/post", "POST", req.body));
-  app.post("/api/social/linkedin/disconnect", async () => proxyToBridge(SOCIAL_BRIDGE, "/linkedin/disconnect", "POST"));
-
-  // Email Proxy
-  app.get("/api/social/email/status", async () => {
-    try { return await proxyToBridge(EMAIL_BRIDGE, "/status", "GET"); }
-    catch { return { ok: false, error: "Email bridge not running" }; }
-  });
-  app.post("/api/social/email/configure", async (req) => proxyToBridge(EMAIL_BRIDGE, "/configure", "POST", req.body));
-  app.post("/api/social/email/send", async (req) => proxyToBridge(EMAIL_BRIDGE, "/send", "POST", req.body));
-  app.get("/api/social/email/read", async (req) => {
-    const folder = req.query.folder || "INBOX";
-    const limit = req.query.limit || "20";
-    return proxyToBridge(EMAIL_BRIDGE, `/read?folder=${folder}&limit=${limit}`, "GET");
-  });
-  app.post("/api/social/email/disconnect", async () => proxyToBridge(EMAIL_BRIDGE, "/disconnect", "POST"));
-
-  // Bluesky
-  app.post("/api/social/bluesky/configure", async (req) => {
-    const { username, password } = req.body;
-    if (!username || !password) return { ok: false, error: "username and password required" };
-    vaultSet("BLUESKY_IDENTIFIER", username);
-    vaultSet("BLUESKY_APP_PASSWORD", password);
-    return { ok: true, message: "Bluesky configured successfully" };
-  });
-  app.post("/api/social/bluesky/disconnect", async () => {
-    vaultDelete("BLUESKY_IDENTIFIER");
-    vaultDelete("BLUESKY_APP_PASSWORD");
-    return { ok: true, message: "Bluesky disconnected" };
-  });
-  app.post("/api/social/bluesky/post", async (req) => {
-    const { text } = req.body;
-    if (!text) return { ok: false, error: "text required" };
-    const res = await postToBluesky(text);
-    return { ok: !res.toLowerCase().includes("error"), message: res };
-  });
-
-  // Discord
-  app.post("/api/social/discord/configure", async (req) => {
-    const { webhookUrl } = req.body;
-    if (!webhookUrl) return { ok: false, error: "webhookUrl required" };
-    vaultSet("DISCORD_WEBHOOK_URL", webhookUrl);
-    return { ok: true, message: "Discord configured successfully" };
-  });
-  app.post("/api/social/discord/disconnect", async () => {
-    vaultDelete("DISCORD_WEBHOOK_URL");
-    return { ok: true, message: "Discord disconnected" };
-  });
-  app.post("/api/social/discord/post", async (req) => {
-    const { text } = req.body;
-    if (!text) return { ok: false, error: "text required" };
-    const res = await postToDiscord(text);
-    return { ok: !res.toLowerCase().includes("error"), message: res };
-  });
-
-  // Telegram
-  app.post("/api/social/telegram/configure", async (req) => {
-    const { token, chatId } = req.body;
-    if (!token || !chatId) return { ok: false, error: "token and chatId required" };
-    vaultSet("TELEGRAM_BOT_TOKEN", token);
-    vaultSet("TELEGRAM_CHAT_ID", chatId);
-    return { ok: true, message: "Telegram configured successfully" };
-  });
-  app.post("/api/social/telegram/disconnect", async () => {
-    vaultDelete("TELEGRAM_BOT_TOKEN");
-    vaultDelete("TELEGRAM_CHAT_ID");
-    return { ok: true, message: "Telegram disconnected" };
-  });
-  app.post("/api/social/telegram/post", async (req) => {
-    const { text } = req.body;
-    if (!text) return { ok: false, error: "text required" };
-    const res = await postToTelegram(text);
-    return { ok: !res.toLowerCase().includes("error"), message: res };
-  });
-
-  // Cross-platform Publish Draft
-  app.post("/api/social/publish", async (req) => {
-    const { text, mediaPath, platforms, drafts } = req.body;
-    if (!text) return { ok: false, error: "text required" };
-    
-    const results = [];
-    const targetPlatforms = platforms || ["twitter"];
-    
-    for (const platform of targetPlatforms) {
-      let platformText = text;
-      if (drafts && drafts[platform]) {
-        platformText = drafts[platform];
-        if (typeof platformText === "object") {
-          platformText = platformText.body || platformText.text || JSON.stringify(platformText);
-        }
-      }
-      
-      try {
-        if (platform === "twitter") {
-          const res = await proxyToBridge(SOCIAL_BRIDGE, "/twitter/post", "POST", { text: platformText, mediaPath });
-          results.push(`Twitter: ${res.ok ? "Success" : "Failed (" + res.error + ")"}`);
-        } else if (platform === "linkedin") {
-          const res = await proxyToBridge(SOCIAL_BRIDGE, "/linkedin/post", "POST", { text: platformText, mediaPath });
-          results.push(`LinkedIn: ${res.ok ? "Success" : "Failed (" + res.error + ")"}`);
-        } else if (platform === "reddit") {
-          const title = (drafts?.reddit?.title) || "Shared via Custom-PI";
-          const res = await proxyToBridge(SOCIAL_BRIDGE, "/reddit/post", "POST", { subreddit: "programming", title, body: platformText });
-          results.push(`Reddit: ${res.ok ? "Success" : "Failed (" + res.error + ")"}`);
-        } else if (platform === "bluesky") {
-          const res = await postToBluesky(platformText);
-          results.push(`Bluesky: ${res.includes("Posted") ? "Success" : "Failed (" + res + ")"}`);
-        } else if (platform === "discord") {
-          const res = await postToDiscord(platformText);
-          results.push(`Discord: ${res.includes("Posted") ? "Success" : "Failed (" + res + ")"}`);
-        } else if (platform === "telegram") {
-          const res = await postToTelegram(platformText);
-          results.push(`Telegram: ${res.includes("Posted") ? "Success" : "Failed (" + res + ")"}`);
-        }
-      } catch (err) {
-        results.push(`${platform}: Failed (${err.message})`);
-      }
-    }
-    
-    return { ok: true, message: `Publish execution completed:\n${results.join("\n")}` };
-  });
-
-  // Start Social Bridge automatically if not running
-  let socialBridgePid = null;
-  let emailBridgePid = null;
-
-  function killBridge(pid) {
-    if (pid === null) return;
-    try { process.kill(pid, "SIGTERM"); } catch {}
-    socialBridgePid = socialBridgePid === pid ? null : socialBridgePid;
-    emailBridgePid = emailBridgePid === pid ? null : emailBridgePid;
-  }
-
-  async function ensureSocialBridge() {
-    if (socialBridgePid !== null) {
-      try { process.kill(socialBridgePid, 0); return; } catch { socialBridgePid = null; }
-    }
-    try {
-      await fetch(`${SOCIAL_BRIDGE}/status`);
-      return;
-    } catch {
-      const bridgePath = path.join(__dirname, "social-bridge.mjs");
-      if (fs.existsSync(bridgePath)) {
-        const { spawn } = await import("node:child_process");
-        const child = spawn(process.execPath, [bridgePath], {
-          detached: true,
-          stdio: "ignore",
-        });
-        socialBridgePid = child.pid;
-        child.unref();
-        console.log("  ✦ Social bridge started on port 9877");
-      }
-    }
-  }
-
-  async function ensureEmailBridge() {
-    if (emailBridgePid !== null) {
-      try { process.kill(emailBridgePid, 0); return; } catch { emailBridgePid = null; }
-    }
-    try {
-      await fetch(`${EMAIL_BRIDGE}/status`);
-      return;
-    } catch {
-      const bridgePath = path.join(__dirname, "email-bridge.mjs");
-      if (fs.existsSync(bridgePath)) {
-        const { spawn } = await import("node:child_process");
-        const child = spawn(process.execPath, [bridgePath], {
-          detached: true,
-          stdio: "ignore",
-        });
-        emailBridgePid = child.pid;
-        child.unref();
-        console.log("  ✦ Email bridge started on port 9878");
-      }
-    }
-  }
-
-  ensureSocialBridge();
-  ensureEmailBridge();
-
-  // ── Social Queue (Scheduling) ─────────────────────────────────────────
-
-  const QUEUE_DB_PATH = path.join(PI_DIR, "social-queue.db");
-  let queueDb = null;
-  try {
-    const Database = _require("better-sqlite3");
-    queueDb = new Database(QUEUE_DB_PATH);
-    queueDb.pragma("journal_mode = WAL");
-    queueDb.exec(`
-      CREATE TABLE IF NOT EXISTS social_queue (
-        id TEXT PRIMARY KEY,
-        text TEXT NOT NULL,
-        media_path TEXT,
-        platforms TEXT NOT NULL,
-        title TEXT,
-        subreddit TEXT,
-        scheduled_at INTEGER NOT NULL,
-        status TEXT DEFAULT 'pending',
-        error TEXT,
-        created_at INTEGER DEFAULT (unixepoch())
-      )
-    `);
-    console.log("  ✦ Social queue initialized");
-  } catch (e) {
-    console.log("  ⚠ Social queue not available (better-sqlite3?):", e.message);
-  }
-
-  function addToQueue(text, platforms, scheduledAt, opts = {}) {
-    if (!queueDb) return { ok: false, error: "Queue database not available" };
-    const id = crypto.randomUUID();
-    const stmt = queueDb.prepare(`
-      INSERT INTO social_queue (id, text, media_path, platforms, title, subreddit, scheduled_at, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-    `);
-    stmt.run(id, text, opts.mediaPath || null, JSON.stringify(platforms), opts.title || null, opts.subreddit || null, scheduledAt);
-    return { ok: true, id };
-  }
-
-  app.post("/api/social/queue", async (req) => {
-    const { text, platforms, scheduled_at, title, subreddit, media_path } = req.body || {};
-    if (!text || !platforms || !scheduled_at) return { ok: false, error: "text, platforms, and scheduled_at required" };
-    if (!Array.isArray(platforms) || platforms.length === 0) return { ok: false, error: "platforms must be a non-empty array" };
-    return addToQueue(text, platforms, scheduled_at, { title, subreddit, mediaPath: media_path });
-  });
-
-  app.get("/api/social/queue", async () => {
-    if (!queueDb) return { ok: false, error: "Queue database not available", items: [] };
-    const rows = queueDb.prepare("SELECT * FROM social_queue ORDER BY scheduled_at ASC").all();
-    return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };
-  });
-
-  app.delete("/api/social/queue/:id", async (req) => {
-    if (!queueDb) return { ok: false, error: "Queue database not available" };
-    const { id } = req.params;
-    const stmt = queueDb.prepare("DELETE FROM social_queue WHERE id = ? AND status = 'pending'");
-    const info = stmt.run(id);
-    if (info.changes === 0) return { ok: false, error: "Post not found or already processed" };
-    return { ok: true, message: "Post cancelled" };
-  });
-
-  // Background processor — check every 30s for due posts
-  async function processQueue() {
-    if (!queueDb) return;
-    try {
-      const now = Math.floor(Date.now() / 1000);
-      const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'pending' AND scheduled_at <= ? LIMIT 5").all(now);
-      for (const row of rows) {
-        const id = row.id;
-        queueDb.prepare("UPDATE social_queue SET status = 'processing' WHERE id = ?").run(id);
-        const platforms = JSON.parse(row.platforms);
-        const errors = [];
-        for (const platform of platforms) {
-          try {
-            let result;
-            if (platform === "twitter") result = await postToTwitter(row.text);
-            else if (platform === "reddit") result = await postToReddit(row.subreddit || "programming", row.title || "Shared via Custom-PI", row.text);
-            else if (platform === "bluesky") result = await postToBluesky(row.text);
-            else if (platform === "discord") result = await postToDiscord(row.text);
-            else if (platform === "telegram") result = await postToTelegram(row.text);
-            else if (platform === "linkedin") {
-              const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-              const bridgeRes = await fetch(`${bridgeUrl}/linkedin/post`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: row.text, mediaPath: row.media_path }),
-              });
-              const bridgeData = await bridgeRes.json();
-              result = bridgeData.ok ? "Posted to LinkedIn!" : `LinkedIn error: ${bridgeData.error}`;
-            } else {
-              result = `Unknown platform: ${platform}`;
-            }
-            errors.push(`${platform}: ${result}`);
-          } catch (e) {
-            errors.push(`${platform}: ${e.message}`);
-          }
-        }
-        const allOk = errors.every(e => !e.includes("error") && !e.includes("fail") && !e.includes("unreachable"));
-        queueDb.prepare("UPDATE social_queue SET status = ?, error = ? WHERE id = ?")
-          .run(allOk ? "published" : "failed", errors.join("; "), id);
-      }
-    } catch (e) {
-      console.error("Queue processor error:", e.message);
-    }
-  }
-
-  setInterval(processQueue, 30_000);
-  setTimeout(processQueue, 5_000);
-
-  // ── Autonomous Content Strategy ───────────────────────────────────────
-
-  const AUTONOMOUS_INTERVAL = 6 * 60 * 60 * 1000; // every 6 hours
-
-  const SECRET_PATTERNS = [
-    /sk-[a-zA-Z0-9]{20,}/,                          // OpenAI keys
-    /ghp_[a-zA-Z0-9]{36,}/,                          // GitHub PAT
-    /gho_[a-zA-Z0-9]{36,}/,                          // GitHub OAuth
-    /AKIA[0-9A-Z]{16}/,                              // AWS access key
-    /-----BEGIN (RSA|EC|OPENSSH|DSA|PGP) PRIVATE KEY-----/,
-    /(password|passwd|pwd|secret|api[_-]?key)\s*[:=]\s*['"][^'"]+['"]/i,
-    /https?:\/\/[^\/\s]+@[^\/\s]+/,                  // URL-embedded credentials
-    /\/home\/[a-z_][a-z0-9_-]*\//,                   // local paths
-    /~\/\.(pi|ssh|aws|config)\//,                    // dotfile paths
-  ];
-
-  function securityScan(text) {
-    const issues = [];
-    for (const pattern of SECRET_PATTERNS) {
-      if (pattern.test(text)) {
-        issues.push(`Matched: ${pattern}`);
-      }
-    }
-    return issues;
-  }
-
-  async function getConnectedPlatforms() {
-    const connected = [];
-    try {
-      const social = await proxyToBridge(SOCIAL_BRIDGE, "/status", "GET").catch(() => ({ platforms: {} }));
-      if (social.platforms?.twitter?.sessionActive) connected.push("twitter");
-      if (social.platforms?.reddit?.sessionActive) connected.push("reddit");
-    } catch {}
-    if (vaultGet("BLUESKY_IDENTIFIER") && vaultGet("BLUESKY_APP_PASSWORD")) connected.push("bluesky");
-    if (vaultGet("DISCORD_WEBHOOK_URL")) connected.push("discord");
-    if (vaultGet("TELEGRAM_BOT_TOKEN") && vaultGet("TELEGRAM_CHAT_ID")) connected.push("telegram");
-    return connected;
-  }
-
-  const PLATFORM_WRITE_GUIDES = {
-    twitter: "Twitter (max 260 chars, conversational, hashtags ok)",
-    reddit: "Reddit (conversational + informative, 200-800 chars, suitable for a subreddit post)",
-    bluesky: "Bluesky (concise, max 300 chars, hashtags ok)",
-    discord: "Discord (casual announcement, 100-500 chars, informal)",
-    telegram: "Telegram (direct update, 100-500 chars, direct tone)",
-  };
-
-  async function autonomousContentTick() {
-    console.log("[autonomous] Starting content generation tick...");
-    const drafts = [];
-
-    // 0. Check which platforms are connected
-    const connectedPlatforms = await getConnectedPlatforms();
-    if (connectedPlatforms.length === 0) {
-      console.log("[autonomous] No connected platforms, skipping content generation.");
-      return;
-    }
-    const platformGuides = connectedPlatforms.map(p => PLATFORM_WRITE_GUIDES[p] || p).join(", ");
-
-    // 1. Scan codebase changes
-    let codeChanges = "";
-    try {
-      const { execSync } = await import("node:child_process");
-      const since = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-      const log = execSync(`git log --since="${since}" --oneline --no-decorate -20`, {
-        cwd: path.join(__dirname, "..", ".."),
-        encoding: "utf8",
-        timeout: 10000,
-      }).trim();
-      if (log) codeChanges = log;
-    } catch {}
-
-    // 2. Search trending topics
-    let trends = "";
-    try {
-      const results = await webSearch("latest in AI agentic frameworks LLM tools 2026", 5);
-      trends = typeof results === "string" ? results : results;
-    } catch {}
-
-    // 3. Generate post drafts via LLM
-    const systemPrompt = `You are a senior developer writing social media content about AI and software engineering. 
-Write engaging, expert-level posts that teach something valuable.
-
-RULES:
-- Each post must be self-contained and ready to publish
-- Only write for these connected platforms: ${platformGuides}
-- Do NOT write for any other platforms
-- Use the cheat sheet format for maximum engagement
-- Lead with a hook, teach a framework, end with insight
-- No buzzwords, no fluff, no weasel words
-- Never include API keys, paths, passwords, or secrets`;
-
-    const platformNames = connectedPlatforms.join(", ");
-    const userPrompt = `Generate 2 social media posts based on this context:
-
-RECENT CODE CHANGES:
-${codeChanges || "No significant changes in the last 24 hours."}
-
-TRENDING TOPICS:
-${trends || "General AI and software development trends."}
-
-CONNECTED PLATFORMS (ONLY write for platforms from this list — do NOT use any others):
-${platformNames}
-
-Return a JSON array. Each item:
-{
-  "platforms": ["twitter"] or ["twitter", "reddit"] (only from the connected platforms list above),
-  "text": "The post content",
-  "title": "Title (only for reddit posts)",
-  "subreddit": "Subreddit name (only for reddit posts)"
-}`;
-
-    let generated = [];
-    try {
-      const raw = await getLLMCompletion(systemPrompt, userPrompt);
-      const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*$/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-      if (Array.isArray(parsed)) generated = parsed;
-    } catch (e) {
-      console.error("[autonomous] LLM generation error:", e.message);
-    }
-
-    // 4. Security scan + queue as drafts
-    for (const post of generated) {
-      if (!post.text || !post.platforms) continue;
-      const issues = securityScan(post.text);
-      if (issues.length > 0) {
-        console.log(`[autonomous] Draft blocked by security: ${issues.join(", ")}`);
-        continue;
-      }
-      const id = crypto.randomUUID();
-      try {
-        const stmt = queueDb.prepare(`
-          INSERT INTO social_queue (id, text, media_path, platforms, title, subreddit, scheduled_at, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')
-        `);
-        stmt.run(id, post.text, null, JSON.stringify(post.platforms), post.title || null, post.subreddit || null, Math.floor(Date.now() / 1000));
-        drafts.push(id);
-      } catch {}
-    }
-
-    console.log(`[autonomous] Generated ${drafts.length} draft(s)`);
-  }
-
-  // Drafts API
-  app.get("/api/social/drafts", async () => {
-    if (!queueDb) return { ok: false, items: [] };
-    const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'draft' ORDER BY created_at DESC").all();
-    return { ok: true, items: rows.map(r => ({ ...r, platforms: JSON.parse(r.platforms) })) };
-  });
-
-  app.post("/api/social/drafts/:id/approve", async (req) => {
-    if (!queueDb) return { ok: false, error: "Queue not available" };
-    const { id } = req.params;
-    const stmt = queueDb.prepare("UPDATE social_queue SET status = 'pending' WHERE id = ? AND status = 'draft'");
-    const info = stmt.run(id);
-    if (info.changes === 0) return { ok: false, error: "Draft not found or already approved" };
-    return { ok: true, message: "Draft approved and queued for publishing" };
-  });
-
-  app.post("/api/social/drafts/:id/reject", async (req) => {
-    if (!queueDb) return { ok: false, error: "Queue not available" };
-    const { id } = req.params;
-    queueDb.prepare("DELETE FROM social_queue WHERE id = ? AND status = 'draft'").run(id);
-    return { ok: true, message: "Draft rejected" };
-  });
-
-  // Manual trigger for autonomous tick
-  app.post("/api/social/autonomous/tick", async () => {
-    autonomousContentTick();
-    return { ok: true, message: "Autonomous content generation started. Check /api/social/drafts in a minute." };
-  });
-
-  // Autonomous tick is NOT auto-started. Use POST /api/social/autonomous/tick to trigger.
-  // To enable periodic ticking, set AUTONOMOUS_ENABLED=true env var.
-  if (process.env.AUTONOMOUS_ENABLED === "true") {
-    setInterval(autonomousContentTick, AUTONOMOUS_INTERVAL);
-  }
 
   // ── WebSocket ──────────────────────────────────────────────────────────
 
-  app.get("/ws", { websocket: true }, (socket, req) => {
-    // Authenticate WebSocket connections — require token from query param
-    if (apiKey) {
-      const wsToken = req.query?.token || "";
-      if (!wsToken || wsToken.length !== apiKey.length || !crypto.timingSafeEqual(Buffer.from(wsToken), Buffer.from(apiKey))) {
-        try { socket.send(JSON.stringify({ type: "error", message: "Unauthorized — provide token query parameter" })); } catch {}
-        setTimeout(() => socket.close(), 500);
-        return;
-      }
-    }
-    console.log("WebSocket connected from", req.ip);
-
-    let session;
-    try { session = getOrCreateSession(); }
-    catch (e) {
-      try { socket.send(JSON.stringify({ type: "error", message: "Server init error" })); } catch {}
-      setTimeout(() => socket.close(), 500);
-      return;
-    }
-
-    // Send chat history if messages exist
-    try {
-      if (session.messages && session.messages.length > 0) {
-        socket.send(JSON.stringify({ type: "chat_history", messages: session.messages }));
-      }
-    } catch {}
-
-    // Heartbeat — close stale connections
-    let alive = true;
-    const pingTimer = setInterval(() => {
-      if (!alive) {
-        try { socket.close(); } catch {}
-        return;
-      }
-      alive = false;
-      try { socket.ping(); } catch {}
-    }, WS_PING_INTERVAL);
-
-    socket.on("pong", () => { alive = true; });
-
-    // Send swarm recovery state if there's an active or completed swarm
-    if (currentSwarmState) {
-      swarmSockets.add(socket);
-      try {
-        socket.send(JSON.stringify({
-          type: "swarm_recovery",
-          ...currentSwarmState,
-          paused: _swarmPaused
-        }));
-      } catch {}
-    }
-
-    socket.on("close", () => {
-      clearInterval(pingTimer);
-      swarmSockets.delete(socket);
-      console.log("WebSocket disconnected from", req.ip);
-    });
-    socket.on("error", (err) => {
-      clearInterval(pingTimer);
-      swarmSockets.delete(socket);
-      console.error("WebSocket error:", err?.message);
-    });
-
-    socket.on("message", async (raw) => {
-      let data;
-      try { data = JSON.parse(raw.toString()); }
-      catch { try { socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" })); } catch {} return; }
-
-      if (data.type === "chat") {
-        // Limit total attachment size
-        if (data.attachments) {
-          let totalSize = 0;
-          for (const att of data.attachments) {
-            if (att.data) totalSize += att.data.length;
-            if (att.text) totalSize += att.text.length;
-          }
-          if (totalSize > MAX_FILE_SIZE) {
-            try { socket.send(JSON.stringify({ type: "error", message: `Attachment total size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit. Please reduce file sizes.` })); } catch {}
-            return;
-          }
-        }
-        try { socket.send(JSON.stringify({ type: "session_start" })); } catch {}
-        try {
-          await session.handleMessage(data.message, data.cwd || process.cwd(), (event) => {
-            try { socket.send(JSON.stringify(event)); } catch {}
-          }, data.attachments);
-        } catch (e) {
-          try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {}
-        }
-      }
-
-      if (data.type === "interrupt") {
-        if (session) session.interrupt();
-      }
-
-      if (data.type === "swarm_pause") {
-        await withSwarmLock(async () => {
-          _swarmPaused = true;
-          try { socket.send(JSON.stringify({ type: "swarm_paused" })); } catch {}
-        });
-        return;
-      }
-
-      if (data.type === "swarm_resume") {
-        await withSwarmLock(async () => {
-          _swarmPaused = false;
-          if (_swarmPauseResolve) { try { _swarmPauseResolve(); } catch {} _swarmPauseResolve = null; }
-          try { socket.send(JSON.stringify({ type: "swarm_resumed" })); } catch {}
-        });
-        return;
-      }
-
-      if (data.type === "user_answer") {
-        const q = pendingQuestions[data.questionId];
-        if (q && q.resolve) {
-          q.resolve(data.answer);
-        }
-      }
-
-      if (data.type === "agent_chat") {
-        const { agentId, message } = data;
-        if (agentId && message) {
-          getAgentChatBuffer(agentId).push({ role: "user", content: message, timestamp: Date.now() });
-          bcast({ type: "agent_chat", agentId, message, fromAgent: false });
-
-          // If no swarm is currently running for this agent, route to main chat session
-          const isSwarmRunning = currentSwarmState && currentSwarmState.status === "running";
-          if (!isSwarmRunning || !currentSwarmState?.agents?.find(a => a.id === agentId)) {
-            try {
-              socket.send(JSON.stringify({ type: "session_start" }));
-              session.handleMessage(`[Message for agent '${agentId}']: ${message}`, data.cwd || process.cwd(), (event) => {
-                try { socket.send(JSON.stringify(event)); } catch {}
-              }, null);
-            } catch (e) {
-              try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {}
-            }
-          }
-        }
-      }
-
-      if (data.type === "memory_search") {
-        try { socket.send(JSON.stringify({ type: "memory_results", results: memorySearch(data.query, data.k ?? 5) })); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
-      }
-
-      if (data.type === "subagent_delegate") {
-        const { agentId, task } = data;
-        try { await handleSubAgent(socket, agentId, task); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "error", message: e.message })); } catch {} }
-      }
-
-      if (data.type === "swarm_goal") {
-        const { goal } = data;
-        try { await handleSwarmGoal(socket, goal); }
-        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
-      }
-
-      if (data.type === "run_dag") {
-        try {
-          const dagConfig = loadDagConfig();
-          if (!dagConfig) {
-            try { socket.send(JSON.stringify({ type: "swarm_error", message: "DAG config not found at ~/.pi/agent/dag-config.yaml" })); } catch {}
-            return;
-          }
-          await handleDagGoal(socket, data.goal || "DAG Swarm Goal", dagConfig);
-        } catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
-      }
-
-      if (data.type === "swarm_saved_team") {
-        const { goal, agents } = data;
-        try {
-          // Extract selected platforms from goal: "[Platforms: Twitter / X, Reddit]"
-          const platformMatch = goal.match(/\[Platforms:\s*(.+?)\]/);
-          const selectedPlatformNames = platformMatch ? platformMatch[1].split(/,\s*/).filter(Boolean) : [];
-          const selectedPlatformKeys = selectedPlatformNames.map(n => {
-            const lower = n.toLowerCase();
-            if (lower.includes("twitter") || lower.includes("x")) return "twitter";
-            if (lower.includes("reddit")) return "reddit";
-            if (lower.includes("bluesky")) return "bluesky";
-            if (lower.includes("discord")) return "discord";
-            if (lower.includes("telegram")) return "telegram";
-            if (lower.includes("linkedin")) return "linkedin";
-            return null;
-          }).filter(Boolean);
-
-          const platformTaskSuffix = selectedPlatformNames.length > 0
-            ? `Target platforms: ${selectedPlatformNames.join(", ")}. Only write drafts for these platforms — do NOT write for any others.`
-            : "";
-
-          const platformToolMap = {
-            twitter: "post_to_twitter", reddit: "post_to_reddit",
-            bluesky: "post_to_bluesky", discord: "post_to_discord",
-            telegram: "post_to_telegram",
-          };
-          const allPostTools = new Set(Object.values(platformToolMap));
-          const allowedPostTools = new Set(selectedPlatformKeys.map(k => platformToolMap[k]).filter(Boolean));
-
-          const normalized = (agents || []).map(a => {
-            if (typeof a === "string") {
-              return { id: a, role: "sub-agent", task: `${platformTaskSuffix} Contribute to: ${goal}`, tools: ["bash", "glob", "grep", "view_file", "write", "edit", "list_dir", "web_search", "web_fetch"] };
-            }
-            const modified = { ...a };
-            if (platformTaskSuffix) {
-              if (modified.id === "writer" || modified.id === "publisher") {
-                modified.task = `${platformTaskSuffix} ${modified.task}`;
-              }
-              if (modified.id === "publisher" && modified.tools) {
-                modified.tools = modified.tools.filter(t => !allPostTools.has(t) || allowedPostTools.has(t));
-                modified.tools.push("request_post_approval", "read");
-              }
-            }
-            return modified;
-          });
-
-          // Initialize persistent state for saved team runs
-          currentSwarmState = {
-            goal,
-            status: "running",
-            agents: normalized.map(a => ({ ...a, status: "pending", logs: [] })),
-            agentResults: {},
-            ceoLogs: [],
-            summary: null
-          };
-          bcast({ type: "swarm_start", goal });
-          await executeSwarmCampaign(socket, goal, normalized);
-        }
-        catch (e) { try { socket.send(JSON.stringify({ type: "swarm_error", message: "Swarm execution failed" })); } catch {} }
-      }
-    });
+  registerWebsocket(app, {
+    apiKey, crypto,
+    getOrCreateSession,
+    WS_PING_INTERVAL, MAX_FILE_SIZE,
+    withSwarmLock, bcast, getAgentChatBuffer, memorySearch,
+    handleSubAgent, handleSwarmGoal, handleDagGoal,
+    executeSwarmCampaign, loadDagConfig,
+    getCurrentSwarmState: () => currentSwarmState,
+    setCurrentSwarmState: (v) => { currentSwarmState = v; },
+    getSwarmPaused: () => _swarmPaused,
+    setSwarmPaused: (v) => { _swarmPaused = v; },
+    getSwarmPauseResolve: () => _swarmPauseResolve,
+    setSwarmPauseResolve: (v) => { _swarmPauseResolve = v; },
+    swarmSockets, pendingQuestions,
   });
 
   return app;
@@ -5456,8 +4463,21 @@ async function main() {
 
   // ── Session Management API ────────────────────────────────────────────────
 
-  app.get("/api/memory/stats", async () => memoryStats());
-  app.get("/api/memory/export", async (req) => {
+  app.get("/api/memory/stats", { schema: { response: { 200: { type: "object", properties: { totalEntries: { type: "number" }, byType: { type: "object" }, byProject: { type: "object" }, averageImportance: { type: "string" }, totalEpisodes: { type: "number" }, deprecatedCount: { type: "number" }, avgRetrievalSuccess: { type: "number" }, oldestEntry: { type: "number" }, newestEntry: { type: "number" } } } } } }, async () => memoryStats());
+  app.post("/api/memory/search", { schema: { body: { type: "object", additionalProperties: true, properties: { query: { type: "string" }, k: { type: "number" } } }, response: { 200: { type: "object", properties: { results: { type: "array" } } } } } }, async (req) => {
+    const { query, k } = req.body || {};
+    if (!query) return { results: [] };
+    return { results: memorySearch(query, k ?? 5) };
+  });
+  app.post("/api/memory/store", { schema: { body: { type: "object", additionalProperties: true, properties: { content: { type: "string" }, type: { type: "string" }, importance: { type: "number" }, project: { type: "string" }, tags: { type: "array" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
+    const { content, type, importance, project, tags } = req.body || {};
+    if (!content) return { error: "content required" };
+    try {
+      const id = memoryStore(content, type || "note", importance ?? 5, project || "", tags || []);
+      return { success: true, id };
+    } catch (e) { return { error: e.message }; }
+  });
+  app.get("/api/memory/export", { schema: { response: { 200: { type: "object", properties: { entries: { type: "array" } } } } } }, async (req) => {
     const format = req.query?.format || "json";
     const entries = readMemory();
     if (format === "csv") {
@@ -5470,7 +4490,7 @@ async function main() {
     return { entries };
   });
 
-  app.post("/api/memory/import", async (req) => {
+  app.post("/api/memory/import", { schema: { body: { type: "object", additionalProperties: true, properties: { entries: { type: "array" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, imported: { type: "number" }, error: { type: "string" } } } } } }, async (req) => {
     const { entries } = req.body || {};
     if (!Array.isArray(entries) || entries.length === 0) return { error: "No entries provided", imported: 0 };
     try {
@@ -5491,122 +4511,6 @@ async function main() {
     } catch (e) { return { error: e.message, imported: 0 }; }
   });
 
-  const SESSIONS_DB_PATH = path.join(PI_DIR, "sessions.db");
-
-  function getSessionsDb() {
-    try {
-      const db = getOrCreateDb(SESSIONS_DB_PATH);
-      if (!db) return null;
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS sessions (
-          id TEXT PRIMARY KEY,
-          title TEXT NOT NULL DEFAULT 'New Chat',
-          model_id TEXT DEFAULT '',
-          preset TEXT DEFAULT '',
-          token_count INTEGER DEFAULT 0,
-          message_count INTEGER DEFAULT 0,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          archived INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS session_messages (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          role TEXT NOT NULL,
-          content TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        );
-      `);
-      return db;
-    } catch { return null; }
-  }
-
-  app.get("/api/sessions", async (req) => {
-    const db = getSessionsDb();
-    if (!db) return { sessions: [] };
-    const includeArchived = req.query?.archived === "true";
-    const rows = db.prepare(`
-      SELECT id, title, model_id, preset, token_count, message_count,
-             created_at AS createdAt, updated_at AS updatedAt, archived
-      FROM sessions
-      WHERE archived ${includeArchived ? "IN (0,1)" : "= 0"}
-      ORDER BY updated_at DESC
-      LIMIT 100
-    `).all();
-    return { sessions: rows };
-  });
-
-  app.post("/api/sessions", async (req) => {
-    const db = getSessionsDb();
-    if (!db) return { error: "Database unavailable" };
-    const { title, modelId } = req.body || {};
-    const id = `session_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    const now = Date.now();
-    db.prepare(`
-      INSERT INTO sessions (id, title, model_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, title || "New Chat", modelId || "", now, now);
-    return { success: true, id };
-  });
-
-  app.put("/api/sessions/:id", async (req) => {
-    const db = getSessionsDb();
-    if (!db) return { error: "Database unavailable" };
-    const { id } = req.params;
-    const updates = req.body || {};
-    const fields = [];
-    const values = [];
-    if (updates.title !== undefined) { fields.push("title = ?"); values.push(updates.title); }
-    if (updates.archived !== undefined) { fields.push("archived = ?"); values.push(updates.archived ? 1 : 0); }
-    if (fields.length === 0) return { error: "No fields to update" };
-    fields.push("updated_at = ?");
-    values.push(Date.now());
-    values.push(id);
-    db.prepare(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`).run(...values);
-    return { success: true };
-  });
-
-  app.delete("/api/sessions/:id", async (req) => {
-    const db = getSessionsDb();
-    if (!db) return { error: "Database unavailable" };
-    const { id } = req.params;
-    db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(id);
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-    return { success: true };
-  });
-
-  app.get("/api/sessions/:id/messages", async (req) => {
-    const db = getSessionsDb();
-    if (!db) return { messages: [] };
-    const { id } = req.params;
-    const rows = db.prepare(`
-      SELECT id, role, content, created_at AS createdAt
-      FROM session_messages
-      WHERE session_id = ?
-      ORDER BY created_at ASC
-    `).all(id);
-    return { messages: rows };
-  });
-
-  app.post("/api/sessions/:id/messages", async (req) => {
-    const db = getSessionsDb();
-    if (!db) return { error: "Database unavailable" };
-    const { id } = req.params;
-    const { role, content } = req.body || {};
-    if (!role || !content) return { error: "role and content required" };
-    const msgId = `msg_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    const now = Date.now();
-    db.prepare(`
-      INSERT INTO session_messages (id, session_id, role, content, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(msgId, id, role, content, now);
-    db.prepare(`
-      UPDATE sessions SET message_count = message_count + 1, token_count = token_count + ?, updated_at = ?
-      WHERE id = ?
-    `).run(content.length, now, id);
-    return { success: true, id: msgId };
-  });
   try {
     await syncLmStudioModels();
 

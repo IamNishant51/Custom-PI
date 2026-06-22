@@ -17,7 +17,18 @@ export default function registerGallery(app, { sendError }) {
     return resolved;
   }
 
-  app.get("/api/assets", async () => {
+  app.get("/api/assets", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            assets: { type: "array" },
+          },
+        },
+      },
+    },
+  }, async () => {
     try {
       if (!fs.existsSync(ASSETS_DIR)) return { assets: [] };
       const files = fs.readdirSync(ASSETS_DIR).filter(f => ALLOWED_EXTENSIONS.test(path.extname(f)));
@@ -29,7 +40,18 @@ export default function registerGallery(app, { sendError }) {
     } catch { return { assets: [] }; }
   });
 
-  app.delete("/api/assets/:filename", async (req) => {
+  app.delete("/api/assets/:filename", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+          },
+        },
+      },
+    },
+  }, async (req) => {
     const filePath = resolveAssetPath(req.params.filename);
     if (!filePath) throw new Error("Security Check Failed: Invalid filename");
     if (!fs.existsSync(filePath)) throw new Error("File not found");
@@ -41,7 +63,18 @@ export default function registerGallery(app, { sendError }) {
   const GALLERY_EXT = /^\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i;
   const GALLERY_MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml" };
 
-  app.get("/api/gallery", async () => {
+  app.get("/api/gallery", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            images: { type: "array" },
+          },
+        },
+      },
+    },
+  }, async () => {
     try {
       if (!fs.existsSync(GALLERY_DIR)) return { images: [] };
       const files = fs.readdirSync(GALLERY_DIR).filter(f => GALLERY_EXT.test(path.extname(f)));
@@ -49,7 +82,18 @@ export default function registerGallery(app, { sendError }) {
     } catch { return { images: [] }; }
   });
 
-  app.post("/api/gallery/upload", async (req, reply) => {
+  app.post("/api/gallery/upload", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          name: { type: "string" },
+          data: { type: "string" },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const { name, data } = req.body || {};
     if (!data) { reply.status(400).send("No file data"); return; }
     const filename = name || `image_${Date.now()}.png`;
@@ -92,7 +136,18 @@ export default function registerGallery(app, { sendError }) {
     reply.send(fs.createReadStream(filePath));
   });
 
-  app.delete("/api/gallery/:filename", async (req) => {
+  app.delete("/api/gallery/:filename", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            success: { type: "boolean" },
+          },
+        },
+      },
+    },
+  }, async (req) => {
     const name = path.basename(req.params.filename);
     const filePath = path.join(GALLERY_DIR, name);
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);

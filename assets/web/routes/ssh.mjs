@@ -10,11 +10,11 @@ export default function registerSsh(app, { PI_DIR, sendError }) {
     fs.writeFileSync(SSH_CONFIG_FILE, JSON.stringify(machines, null, 2));
   }
 
-  app.get("/api/ssh/machines", async () => {
+  app.get("/api/ssh/machines", { schema: { response: { 200: { type: "object", properties: { machines: { type: "array" } } } } } }, async () => {
     return { machines: loadSshMachines().map(m => ({ ...m, password: "***" })) };
   });
 
-  app.post("/api/ssh/machines", async (req) => {
+  app.post("/api/ssh/machines", { schema: { body: { type: "object", additionalProperties: true, properties: { host: { type: "string" }, port: { type: "number" }, username: { type: "string" }, password: { type: "string" }, label: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req) => {
     const { host, port, username, password, label } = req.body || {};
     if (!host || !username) return { error: "host and username required" };
     const machines = loadSshMachines();
@@ -31,13 +31,13 @@ export default function registerSsh(app, { PI_DIR, sendError }) {
     return { success: true };
   });
 
-  app.delete("/api/ssh/machines/:id", async (req) => {
+  app.delete("/api/ssh/machines/:id", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" } } } } } }, async (req) => {
     const machines = loadSshMachines().filter(m => m.id !== req.params.id);
     saveSshMachines(machines);
     return { success: true };
   });
 
-  app.put("/api/ssh/machines/:id", async (req) => {
+  app.put("/api/ssh/machines/:id", { schema: { body: { type: "object", additionalProperties: true, properties: { host: { type: "string" }, port: { type: "number" }, username: { type: "string" }, password: { type: "string" }, label: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req) => {
     const machines = loadSshMachines();
     const idx = machines.findIndex(m => m.id === req.params.id);
     if (idx === -1) return { error: "Machine not found" };

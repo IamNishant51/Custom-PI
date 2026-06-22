@@ -12,7 +12,7 @@ export default function registerEmail(app, { sendError }) {
   }
   function saveEmailState(state) { fs.writeFileSync(EMAIL_STATE_FILE, JSON.stringify(state, null, 2)); }
 
-  app.post("/api/email/accounts", async (req) => {
+  app.post("/api/email/accounts", { schema: { body: { type: "object", additionalProperties: true, properties: { imapHost: { type: "string" }, imapPort: { type: "number" }, smtpHost: { type: "string" }, smtpPort: { type: "number" }, username: { type: "string" }, password: { type: "string" }, useTls: { type: "boolean" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, id: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     const { imapHost, imapPort, smtpHost, smtpPort, username, password, useTls } = req.body || {};
     if (!imapHost || !username) return { error: "imapHost and username required" };
     const state = getEmailState();
@@ -22,12 +22,20 @@ export default function registerEmail(app, { sendError }) {
     return { success: true, id };
   });
 
-  app.get("/api/email/accounts", async () => {
+  app.get("/api/email/accounts", { schema: { response: { 200: { type: "object", properties: { accounts: { type: "array" } } } } } }, async () => {
     const state = getEmailState();
     return { accounts: state.accounts.map(a => ({ ...a, password: "***" })) };
   });
+  app.delete("/api/email/accounts/:id", { schema: { response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req) => {
+    const state = getEmailState();
+    const idx = state.accounts.findIndex(a => a.id === req.params.id);
+    if (idx === -1) return { error: "Account not found" };
+    state.accounts.splice(idx, 1);
+    saveEmailState(state);
+    return { success: true };
+  });
 
-  app.post("/api/email/fetch", async (req) => {
+  app.post("/api/email/fetch", { schema: { body: { type: "object", additionalProperties: true, properties: { accountId: { type: "string" }, folder: { type: "string" }, maxMessages: { type: "number" } } }, response: { 200: { type: "object", properties: { emails: { type: "array" }, error: { type: "string" } } } } } }, async (req) => {
     const { accountId, folder, maxMessages } = req.body || {};
     const state = getEmailState();
     const account = state.accounts.find(a => a.id === accountId);
@@ -74,7 +82,7 @@ export default function registerEmail(app, { sendError }) {
     } catch (e) { return { error: e.message, emails: [] }; }
   });
 
-  app.post("/api/email/send", async (req) => {
+  app.post("/api/email/send", { schema: { body: { type: "object", additionalProperties: true, properties: { accountId: { type: "string" }, to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } } }, response: { 200: { type: "object", properties: { success: { type: "boolean" }, error: { type: "string" } } } } } }, async (req) => {
     const { accountId, to, subject, body } = req.body || {};
     if (!to || !subject) return { error: "to and subject required" };
     const state = getEmailState();
@@ -120,7 +128,7 @@ export default function registerEmail(app, { sendError }) {
     } catch (e) { return { error: e.message, success: false }; }
   });
 
-  app.post("/api/email/ai-summarize", async (req) => {
+  app.post("/api/email/ai-summarize", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { summary: { type: "string" } } } } } }, async (req) => {
     const { text } = req.body || {};
     if (!text) return { summary: "No text provided" };
     const lines = text.split("\n").filter(Boolean).slice(0, 50);
@@ -132,7 +140,7 @@ export default function registerEmail(app, { sendError }) {
     return { summary: summary || "Could not summarize" };
   });
 
-  app.post("/api/email/draft-reply", async (req) => {
+  app.post("/api/email/draft-reply", { schema: { body: { type: "object", additionalProperties: true, properties: { emailText: { type: "string" }, tone: { type: "string" } } }, response: { 200: { type: "object", properties: { draft: { type: "string" } } } } } }, async (req) => {
     const { emailText, tone } = req.body || {};
     if (!emailText) return { draft: "No email text provided" };
     const toneGuide = tone === "formal" ? "Write a formal, professional reply." : tone === "brief" ? "Write a short, concise reply." : "Write a friendly, conversational reply.";
@@ -147,7 +155,7 @@ export default function registerEmail(app, { sendError }) {
     } catch { return { draft: "Dear colleague,\n\nThank you for your message.\n\nBest regards" }; }
   });
 
-  app.post("/api/email/auto-tag", async (req) => {
+  app.post("/api/email/auto-tag", { schema: { body: { type: "object", additionalProperties: true, properties: { text: { type: "string" } } }, response: { 200: { type: "object", properties: { tags: { type: "array" } } } } } }, async (req) => {
     const { text } = req.body || {};
     if (!text) return { tags: [] };
     const lower = text.toLowerCase();
@@ -165,7 +173,7 @@ export default function registerEmail(app, { sendError }) {
     return { tags: [...new Set(tags)] };
   });
 
-  app.post("/api/email/search", async (req) => {
+  app.post("/api/email/search", { schema: { body: { type: "object", additionalProperties: true, properties: { query: { type: "string" } } }, response: { 200: { type: "object", properties: { results: { type: "array" }, total: { type: "number" } } } } } }, async (req) => {
     const { query } = req.body || {};
     if (!query) return { results: [] };
     const state = getEmailState();
@@ -178,7 +186,7 @@ export default function registerEmail(app, { sendError }) {
     return { results, total: results.length };
   });
 
-  app.post("/api/email/cache", async (req) => {
+  app.post("/api/email/cache", { schema: { body: { type: "object", additionalProperties: true, properties: { emails: { type: "array" } } }, response: { 200: { type: "object", properties: { cached: { type: "number" } } } } } }, async (req) => {
     const { emails } = req.body || {};
     if (!Array.isArray(emails)) return { cached: 0 };
     const state = getEmailState();

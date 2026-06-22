@@ -60,7 +60,12 @@ export default function registerChatVoice(app, { sendError, getActiveTools, exec
     }
   });
 
-  app.post("/api/voice/chat", async (req, reply) => {
+  app.post("/api/voice/chat", {
+    schema: {
+      body: { type: "object", additionalProperties: true, properties: { text: { type: "string" }, voice: { type: "string" } } },
+      response: { 200: { type: "object", properties: { reply: { type: "string" }, audio: { type: "string" }, sampleRate: { type: "number" }, ttsError: { type: "string" }, error: { type: "string" } } } },
+    },
+  }, async (req, reply) => {
     const { text, voice } = req.body || {};
     if (!text) return reply.code(400).send({ error: "text is required" });
     const voiceId = voice || "af_bella";

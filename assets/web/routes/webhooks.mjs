@@ -5,7 +5,7 @@ import { SHARED_PATHS } from "../shared-constants.mjs";
 const { PI_DIR } = SHARED_PATHS;
 
 export default function registerWebhooks(app, { sendError }) {
-  app.post("/api/webhooks/:source", async (req) => {
+  app.post("/api/webhooks/:source", { schema: { body: { type: "object", additionalProperties: true }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, eventId: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
     try {
       const source = req.params.source;
       if (!source || typeof source !== "string" || source.length > 64) {
@@ -33,7 +33,7 @@ export default function registerWebhooks(app, { sendError }) {
     }
   });
 
-  app.get("/api/webhooks/events", async () => {
+  app.get("/api/webhooks/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array" } } } } } }, async () => {
     const webhookDir = path.join(PI_DIR, "webhooks");
     try {
       if (!fs.existsSync(webhookDir)) return { events: [] };

@@ -8,7 +8,18 @@ const { PI_DIR } = SHARED_PATHS;
 export default function registerModelDownload(app, { sendError }) {
   const MODELS_DOWNLOAD_DIR = path.join(PI_DIR, "downloaded-models");
 
-  app.post("/api/models/download", async (req) => {
+  app.post("/api/models/download", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          modelId: { type: "string" },
+          source: { type: "string" },
+        },
+      },
+    },
+  }, async (req) => {
     const { modelId, source } = req.body || {};
     if (!modelId) return { error: "modelId required" };
     const src = source || "huggingface";
@@ -34,7 +45,18 @@ export default function registerModelDownload(app, { sendError }) {
     } catch (e) { return { error: e.message, success: false }; }
   });
 
-  app.get("/api/models/downloads", async () => {
+  app.get("/api/models/downloads", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            downloads: { type: "array" },
+          },
+        },
+      },
+    },
+  }, async () => {
     const records = []; const dlRecord = path.join(MODELS_DOWNLOAD_DIR, "downloads.json");
     try { records.push(...JSON.parse(fs.readFileSync(dlRecord, "utf8"))); } catch {}
     try {
@@ -49,7 +71,19 @@ export default function registerModelDownload(app, { sendError }) {
     try { return JSON.parse(fs.readFileSync(VOTES_FILE, "utf8")); } catch { return []; }
   }
 
-  app.post("/api/models/vote", async (req) => {
+  app.post("/api/models/vote", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          promptId: { type: "string" },
+          winner: { type: "string" },
+          loser: { type: "string" },
+        },
+      },
+    },
+  }, async (req) => {
     const { promptId, winner, loser } = req.body || {};
     if (!promptId || !winner) return { error: "promptId and winner required" };
     const votes = loadVotes();
@@ -58,9 +92,32 @@ export default function registerModelDownload(app, { sendError }) {
     return { success: true };
   });
 
-  app.get("/api/models/votes", async () => ({ votes: loadVotes() }));
+  app.get("/api/models/votes", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            votes: { type: "array" },
+          },
+        },
+      },
+    },
+  }, async () => ({ votes: loadVotes() }));
 
-  app.get("/api/models/rankings", async () => {
+  app.get("/api/models/rankings", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            votes: { type: "number" },
+            rankings: { type: "array" },
+          },
+        },
+      },
+    },
+  }, async () => {
     const votes = loadVotes();
     const stats = {};
     for (const v of votes) {

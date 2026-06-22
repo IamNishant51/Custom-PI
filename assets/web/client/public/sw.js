@@ -1,4 +1,4 @@
-const CACHE = "custom-pi-v1";
+const CACHE = "custom-pi-v2";
 const ASSETS = ["/", "/index.html", "/assets/index.css", "/assets/index.js"];
 
 self.addEventListener("install", (e) => {
@@ -22,8 +22,10 @@ self.addEventListener("fetch", (e) => {
 async function networkFirst(req) {
   try {
     const res = await fetch(req);
-    const cache = await caches.open(CACHE);
-    cache.put(req, res.clone());
+    if (req.method === "GET" || req.method === "HEAD") {
+      const cache = await caches.open(CACHE);
+      cache.put(req, res.clone());
+    }
     return res;
   } catch {
     return caches.match(req);
@@ -33,6 +35,10 @@ async function networkFirst(req) {
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);
   const cached = await cache.match(req);
-  fetch(req).then((res) => cache.put(req, res));
+  fetch(req).then((res) => {
+    if (req.method === "GET" || req.method === "HEAD") {
+      cache.put(req, res);
+    }
+  });
   return cached || fetch(req);
 }

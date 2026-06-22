@@ -14,6 +14,7 @@ import CommandPalette from "./components/CommandPalette";
 import NotificationBell from "./components/NotificationBell";
 import UndoBar from "./components/UndoBar";
 import OnboardingTour from "./components/OnboardingTour";
+import Breadcrumbs from "./components/Breadcrumbs";
 
 const Dashboard = lazy(() => import("./components/Dashboard"));
 const VaultPanel = lazy(() => import("./components/VaultPanel"));
@@ -117,6 +118,7 @@ function AppContent() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
   const { ws, connected } = useChat();
 
   const activeView = location.pathname.replace(/^\//, "") || "chat";
@@ -137,6 +139,17 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ws) return;
     const handler = (e: MessageEvent) => {
       try {
@@ -148,14 +161,33 @@ function AppContent() {
     return () => ws.removeEventListener("message", handler);
   }, [ws, navigate]);
 
+  useEffect(() => {
+    const saved = localStorage.getItem("lastView");
+    if (saved && saved !== activeView && saved !== "") {
+      const validViews = ["chat", "dashboard", "vault", "budget", "memory", "knowledge-graph", "pipeline", "health", "work-products", "agents", "agent-discovery", "mcp", "teams", "settings", "social", "notes", "contacts", "cookbook", "research", "compare", "gallery", "documents", "email", "canvas-editor", "theme", "login", "admin", "voice"];
+      if (validViews.includes(saved)) {
+        navigate("/" + saved, { replace: true });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeView && activeView !== "admin") {
+      localStorage.setItem("lastView", activeView);
+    }
+  }, [activeView]);
+
   return (
     <ErrorBoundary>
       <div className="layout" role="application" aria-label="Custom-PI Web Client">
+        {!online && <div style={{ background: "var(--warning)", color: "#1a1a2e", padding: "8px 16px", fontSize: "14px", textAlign: "center", width: "100%" }}>You are offline — some features may be unavailable</div>}
         <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
         <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           <Sidebar activeView={activeView} onNavigate={onNavigate} wsConnected={connected} />
         </div>
         <div className="main-area">
+          <Breadcrumbs />
           <TopBar activeView={activeView} wsConnected={connected} onMenuClick={() => setSidebarOpen(o => !o)} />
           <div className={`content-area ${activeView === "chat" ? "content-area-chat" : ""} ${activeView === "voice" ? "content-area-voice" : ""}`}>
             <ViewRouter />
