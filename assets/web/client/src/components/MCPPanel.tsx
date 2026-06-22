@@ -39,13 +39,18 @@ export default function MCPPanel() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const save = useCallback(async () => {
-    await fetch("/api/mcp/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ servers }),
-    });
-    setDirty(false);
-    toast("MCP configuration saved", "success");
+    try {
+      const res = await fetch("/api/mcp/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servers }),
+      });
+      if (!res.ok) { toast("Failed to save MCP configuration", "error"); return; }
+      setDirty(false);
+      toast("MCP configuration saved", "success");
+    } catch {
+      toast("Failed to save MCP configuration", "error");
+    }
   }, [servers, toast]);
 
   const testServer = useCallback(async (s: McpServer) => {

@@ -17,35 +17,27 @@ export default function Dashboard() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [
-        statsRes, memoryRes, modelsRes,
-        vaultHealthRes, vaultListRes, mcpRes,
-        swarmRes, workRes,
-      ] = await Promise.all([
-        fetch("/api/budget/stats"),
-        fetch("/api/memory/stats"),
-        fetch("/api/models"),
-        fetch("/api/vault/health"),
-        fetch("/api/vault/list"),
-        fetch("/api/mcp/config"),
-        fetch("/api/swarm/teams"),
-        fetch("/api/work-products"),
+      const results = await Promise.allSettled([
+        fetch("/api/budget/stats").then(r => r.ok ? r.json() : null),
+        fetch("/api/memory/stats").then(r => r.ok ? r.json() : null),
+        fetch("/api/models").then(r => r.ok ? r.json() : null),
+        fetch("/api/vault/health").then(r => r.ok ? r.json() : null),
+        fetch("/api/vault/list").then(r => r.ok ? r.json() : null),
+        fetch("/api/mcp/config").then(r => r.ok ? r.json() : null),
+        fetch("/api/swarm/teams").then(r => r.ok ? r.json() : null),
+        fetch("/api/work-products").then(r => r.ok ? r.json() : null),
       ]);
       const [statsData, memoryData, modelsData, vaultHealthData, vaultListData, mcpData, swarmData, workData] =
-        await Promise.all([
-          statsRes.json(), memoryRes.json(), modelsRes.json(),
-          vaultHealthRes.json(), vaultListRes.json(), mcpRes.json(),
-          swarmRes.json(), workRes.json(),
-        ]);
+        results.map(r => r.status === "fulfilled" ? r.value : null);
       setStats(statsData);
       setMemory(memoryData);
-      setModels(modelsData.models || []);
-      if (vaultHealthData.ok) setVaultHealth(vaultHealthData.message);
+      setModels(modelsData?.models || []);
+      if (vaultHealthData?.ok) setVaultHealth(vaultHealthData.message);
       else setVaultHealth("Locked / Key Required");
-      setVaultKeys(vaultListData.keys || []);
+      setVaultKeys(vaultListData?.keys || []);
       setMcpConfig(mcpData);
-      setSwarmTeams(swarmData.teams || []);
-      setWorkProducts(workData.products || []);
+      setSwarmTeams(swarmData?.teams || []);
+      setWorkProducts(workData?.products || []);
     } catch {
       setLoadError("Failed to load dashboard data");
     } finally {
@@ -239,7 +231,7 @@ export default function Dashboard() {
                             borderRadius: 3,
                             fontFamily: "var(--font-mono)" 
                           }}>
-                            {p.action.toUpperCase()}
+                            {(p.action || "N/A").toUpperCase()}
                           </span>
                           <span style={{ fontSize: 13, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={p.filePath}>
                             {getFileBasename(p.filePath)}
