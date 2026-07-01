@@ -20,7 +20,7 @@ jobs:
           cache: npm
       - id: cache-key
         run: echo "value=$(sha256sum package-lock.json | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         id: cache-node
         with:
           path: node_modules
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: cache-node-restore
         with:
           path: node_modules
@@ -56,7 +56,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: cache-node-restore-lint
         with:
           path: node_modules
@@ -78,7 +78,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: cache-node-restore-test
         with:
           path: node_modules
@@ -96,7 +96,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: cache-node-restore-cov
         with:
           path: node_modules
@@ -114,7 +114,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: cache-node-restore-val
         with:
           path: node_modules
@@ -133,7 +133,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: cache-node-restore-audit
         with:
           path: node_modules
