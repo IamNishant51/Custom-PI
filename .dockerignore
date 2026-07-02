@@ -2,12 +2,12 @@ node_modules/
 npm-debug.log
 .git/
 .gitignore
+.gitattributes
 .env
 .env.*
 *.md
 docs/
 tests/
-scripts/
 *.test.ts
 *.test.tsx
 __tests__/
@@ -15,3 +15,13 @@ __tests__/
 agency-website/
 draft-twitter/
 examples/
+custom-pi-desktop/
+.dockerignore
+.editorconfig
+.npmignore
+.nvmrc
+.eslintrc*
+.prettierrc*
+tsconfig.json
+vitest.config.ts
+docker-compose*

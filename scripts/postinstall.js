@@ -34,9 +34,7 @@ try {
   patchLibraryFiles();
   console.log('\x1b[32m✓ custom-pi: assets synced correctly\x1b[0m');
 } catch (e) {
-  console.error('\x1b[31m✗ custom-pi postinstall failed:\x1b[0m', e.message);
-  console.error('\x1b[31m  Try: sudo npm install -g custom-pi\x1b[0m');
-  process.exit(1);
+  console.error('\x1b[33m⚠ custom-pi postinstall warning:\x1b[0m', e.message);
 }
 
 const DIST = path.join(__dirname, '..', 'assets', 'web', 'client', 'dist', 'index.html');
