@@ -20,7 +20,7 @@ interface SelfPatch {
   originalContent: string;
   patchedContent: string;
   diff: string;
-  status: "proposed" | "testing" | "applied" | "rolled_back" | "failed";
+  status: "proposed" | "pending_approval" | "approved" | "rejected" | "testing" | "applied" | "rolled_back" | "failed";
   risk: "low" | "medium" | "high";
   testResults?: { passed: number; failed: number; output: string };
   appliedAt?: number;
@@ -53,11 +53,24 @@ export class SelfModifier {
   private isPatching = false;
   private rollbackCount = 0;
   private registrations: CapabilityRegistration[] = [];
+  private approvalCallback: ((patch: SelfPatch) => Promise<boolean>) | null = null;
 
   constructor() {
     this.sourceDir = ALLOWED_SRC_DIR;
     this.setupListeners();
     this.registerBackgroundTask();
+  }
+
+  setApprovalCallback(callback: (patch: SelfPatch) => Promise<boolean>): void {
+    this.approvalCallback = callback;
+  }
+
+  private async requestUserApproval(patch: SelfPatch): Promise<boolean> {
+    if (!this.approvalCallback) {
+      logger.warn("[SelfModifier] No approval callback set — auto-rejecting for safety");
+      return false;
+    }
+    return await this.approvalCallback(patch);
   }
 
   private setupListeners(): void {
@@ -110,7 +123,7 @@ export class SelfModifier {
       originalContent,
       patchedContent: newContent,
       diff,
-      status: "proposed",
+      status: "pending_approval",
       risk,
       improvement: { metric: "unknown", before: "unknown" },
       blastRadius,
@@ -132,8 +145,26 @@ export class SelfModifier {
 
   async applyPatch(patchId: string): Promise<boolean> {
     const patch = this.patches.find(p => p.id === patchId);
-    if (!patch || patch.status !== "proposed") return false;
+    if (!patch || (patch.status !== "pending_approval" && patch.status !== "approved")) return false;
     if (this.isPatching) return false;
+
+    // If still pending approval, request it
+    if (patch.status === "pending_approval") {
+      const approved = await this.requestUserApproval(patch);
+      if (!approved) {
+        patch.status = "rejected";
+        bus.emit(Topics.SELF_IMPROVEMENT, {
+          patchId: patch.id,
+          file: patch.filePath,
+          description: patch.description,
+          risk: patch.risk,
+          status: "rejected",
+        }, { source: "self-modifier" });
+        return false;
+      }
+      patch.status = "approved";
+    }
+
     this.isPatching = true;
 
     try {
@@ -214,6 +245,38 @@ export class SelfModifier {
 
   isModificationDisabled(): boolean {
     return this.rollbackCount >= MAX_ROLLBACKS_PER_SESSION;
+  }
+
+  async approvePatch(patchId: string): Promise<boolean> {
+    const patch = this.patches.find(p => p.id === patchId);
+    if (!patch || patch.status !== "pending_approval") return false;
+    patch.status = "approved";
+    bus.emit(Topics.SELF_IMPROVEMENT, {
+      patchId: patch.id,
+      file: patch.filePath,
+      description: patch.description,
+      risk: patch.risk,
+      status: "approved",
+    }, { source: "self-modifier" });
+    return true;
+  }
+
+  async rejectPatch(patchId: string): Promise<boolean> {
+    const patch = this.patches.find(p => p.id === patchId);
+    if (!patch || patch.status !== "pending_approval") return false;
+    patch.status = "rejected";
+    bus.emit(Topics.SELF_IMPROVEMENT, {
+      patchId: patch.id,
+      file: patch.filePath,
+      description: patch.description,
+      risk: patch.risk,
+      status: "rejected",
+    }, { source: "self-modifier" });
+    return true;
+  }
+
+  getPendingApprovalPatches(): SelfPatch[] {
+    return this.patches.filter(p => p.status === "pending_approval");
   }
 
   proposeOptimization(): Promise<AuditFinding[]> {

@@ -15,7 +15,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:web": "cd assets/web/client && npm install && npm run build",
-    "web": "node bin/web.js"
+    "web": "node bin/web.js",
+    "desktop:dev": "cd custom-pi-desktop && npm run dev",
+    "desktop:build": "cd custom-pi-desktop && npm run build",
+    "desktop:dist:win": "cd custom-pi-desktop && npm run dist:win",
+    "desktop:dist:mac": "cd custom-pi-desktop && npm run dist:mac",
+    "desktop:dist:linux": "cd custom-pi-desktop && npm run dist:linux"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.77.0",

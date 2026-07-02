@@ -32,8 +32,11 @@ function patchLibraryFiles() {
 
 try {
   patchLibraryFiles();
+  console.log('\x1b[32m✓ custom-pi: assets synced correctly\x1b[0m');
 } catch (e) {
-  console.warn('\x1b[33mWarning: Failed to patch library files:\x1b[0m', e.message);
+  console.error('\x1b[31m✗ custom-pi postinstall failed:\x1b[0m', e.message);
+  console.error('\x1b[31m  Try: sudo npm install -g custom-pi\x1b[0m');
+  process.exit(1);
 }
 
 const DIST = path.join(__dirname, '..', 'assets', 'web', 'client', 'dist', 'index.html');

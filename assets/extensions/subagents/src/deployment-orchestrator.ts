@@ -19,6 +19,7 @@ function getDb(): InstanceType<typeof Database> {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       db = new Database(DB_PATH);
       db.pragma("journal_mode = WAL");
+      db.pragma("synchronous = NORMAL");
       db.exec(`
         CREATE TABLE IF NOT EXISTS deployments (
           id TEXT PRIMARY KEY,

@@ -165,6 +165,14 @@ export class HiveMind {
     };
 
     this.proposals.set(proposal.id, proposal);
+
+    // Auto-resolve after deadline
+    setTimeout(() => {
+      if (proposal.status === "voting") {
+        proposal.status = this.resolveVotes(proposal);
+      }
+    }, 60000);
+
     return proposal;
   }
 
@@ -244,6 +252,12 @@ export class HiveMind {
   }
 
   private resolveVotes(proposal: ConsensusProposal): "approved" | "rejected" | "tie" {
+    const team = this.teams.get(proposal.teamId);
+    const agentCount = team ? team.agents.length : 0;
+    const quorum = Math.max(2, Math.ceil(agentCount * 0.4));
+
+    if (proposal.votes.size < quorum) return "rejected";
+
     const voteCount = new Map<string, number>();
     for (const vote of proposal.votes.values()) {
       voteCount.set(vote, (voteCount.get(vote) || 0) + 1);

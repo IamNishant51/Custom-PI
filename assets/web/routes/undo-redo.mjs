@@ -10,6 +10,7 @@ export default function registerUndoRedo(app, { PI_DIR }) {
       const Database = _require("better-sqlite3");
       const db = new Database(DB_PATH);
       db.pragma("journal_mode = WAL");
+      db.pragma("synchronous = NORMAL");
       db.exec(`
         CREATE TABLE IF NOT EXISTS action_log (
           id INTEGER PRIMARY KEY AUTOINCREMENT,

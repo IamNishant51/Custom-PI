@@ -16,6 +16,7 @@ export function getOrCreateDb(dbPath) {
     const Database = _require("better-sqlite3");
     const db = new Database(dbPath);
     db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
     dbConnections.set(dbPath, db);
     return db;
   } catch { return null; }

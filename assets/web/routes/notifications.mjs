@@ -11,6 +11,7 @@ export default function registerNotifications(app, { PI_DIR, sendError }) {
       const Database = _require("better-sqlite3");
       const db = new Database(DB_PATH);
       db.pragma("journal_mode = WAL");
+      db.pragma("synchronous = NORMAL");
       db.exec(`
         CREATE TABLE IF NOT EXISTS notifications (
           id TEXT PRIMARY KEY,

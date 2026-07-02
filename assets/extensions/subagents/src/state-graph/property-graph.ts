@@ -71,7 +71,9 @@ export class PropertyGraph {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     this.db = new Database(resolvedPath);
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
     this.db.pragma("cache_size = -16000");
+    this.db.pragma("mmap_size = 268435456");
     this.initializeSchema();
   }
 

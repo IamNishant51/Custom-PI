@@ -48,7 +48,9 @@ function openDb(): any {
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
-  db.pragma("cache_size = -8000");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("cache_size = -64000");
+  db.pragma("mmap_size = 268435456");
   initializeSchema();
   return db;
 }
@@ -485,7 +487,7 @@ function appendPruneLog(entry: any): void {
       ? JSON.parse(fs.readFileSync(PRUNE_LOG_PATH, "utf8"))
       : [];
     log.push({ ...entry, timestamp: Date.now() });
-    if (log.length > 1000) log.splice(0, log.length - 1000);
+    if (log.length > 100) log.splice(0, log.length - 100);
     fs.writeFileSync(PRUNE_LOG_PATH, JSON.stringify(log, null, 2));
   } catch { /* prune log is best-effort */ }
 }

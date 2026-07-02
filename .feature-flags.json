@@ -1,6 +1,6 @@
 {
   "undo-redo": {
-    "value": "off",
+    "value": "on",
     "description": "Enable undo/redo for destructive actions"
   },
   "search-command-palette": {
@@ -12,7 +12,7 @@
     "description": "Immediate UI updates before API response"
   },
   "notification-center": {
-    "value": "off",
+    "value": "on",
     "description": "Persistent notification center with read/unread"
   },
   "pwa-offline": {

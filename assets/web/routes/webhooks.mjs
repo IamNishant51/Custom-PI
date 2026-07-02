@@ -1,11 +1,33 @@
 import path from "node:path";
 import fs from "node:fs";
 import { SHARED_PATHS } from "../shared-constants.mjs";
+import { getOrCreateDb } from "../services/db.mjs";
 
 const { PI_DIR } = SHARED_PATHS;
+const WEBHOOK_DB_PATH = path.join(PI_DIR, "webhooks.db");
+
+function initWebhookDb() {
+  const db = getOrCreateDb(WEBHOOK_DB_PATH);
+  if (db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS webhook_events (
+        delivery_id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        received_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_webhook_source ON webhook_events(source);
+      CREATE INDEX IF NOT EXISTS idx_webhook_received ON webhook_events(received_at);
+    `);
+  }
+  return db;
+}
 
 export default function registerWebhooks(app, { sendError }) {
-  app.post("/api/webhooks/:source", { schema: { body: { type: "object", additionalProperties: true }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, eventId: { type: "string" }, error: { type: "string" } } } } } }, async (req) => {
+  const db = initWebhookDb();
+
+  app.post("/api/webhooks/:source", { schema: { body: { type: "object", additionalProperties: true }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, eventId: { type: "string" }, error: { type: "string" }, duplicate: { type: "boolean" } } } } } }, async (req) => {
     try {
       const source = req.params.source;
       if (!source || typeof source !== "string" || source.length > 64) {
@@ -22,18 +44,51 @@ export default function registerWebhooks(app, { sendError }) {
       if (secret && !validateSignature(req.body, sig, secret)) {
         return { error: "Invalid webhook signature" };
       }
+
+      // Extract delivery ID for deduplication (Sentry, GitHub, Datadog all send unique IDs)
+      const deliveryId = req.headers["sentry-hook-resource"]?.replace("event:", "")
+        || req.headers["x-github-delivery"]
+        || req.headers["x-datadog-webhook-id"]
+        || req.headers["x-webhook-delivery-id"]
+        || crypto.randomUUID(); // fallback
+
       const event = normalizeEvent(source, req.body);
+
+      // Deduplicate via SQLite
+      if (db) {
+        const existing = db.prepare("SELECT delivery_id FROM webhook_events WHERE delivery_id = ?").get(deliveryId);
+        if (existing) {
+          return { ok: true, eventId: deliveryId, duplicate: true };
+        }
+        db.prepare(`
+          INSERT INTO webhook_events (delivery_id, source, event_type, payload, received_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(deliveryId, source, event.type, JSON.stringify(event), event.receivedAt);
+      }
+
+      // Also write to file for backward compatibility / debugging
       const webhookDir = path.join(PI_DIR, "webhooks");
       fs.mkdirSync(webhookDir, { recursive: true });
       const filePath = path.join(webhookDir, `event_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.json`);
       fs.writeFileSync(filePath, JSON.stringify(event));
-      return { ok: true, eventId: path.basename(filePath, ".json") };
+
+      return { ok: true, eventId: deliveryId, duplicate: false };
     } catch (e) {
       return { error: "Failed to process webhook" };
     }
   });
 
   app.get("/api/webhooks/events", { schema: { response: { 200: { type: "object", properties: { events: { type: "array", items: { type: "object" } } } } } } }, async () => {
+    if (db) {
+      const rows = db.prepare(`
+        SELECT delivery_id as id, source, event_type, payload, received_at
+        FROM webhook_events
+        ORDER BY received_at DESC
+        LIMIT 50
+      `).all();
+      return { events: rows.map(r => ({ ...JSON.parse(r.payload), _deliveryId: r.id, _source: r.source, _receivedAt: r.received_at })) };
+    }
+    // Fallback to file-based
     const webhookDir = path.join(PI_DIR, "webhooks");
     try {
       if (!fs.existsSync(webhookDir)) return { events: [] };

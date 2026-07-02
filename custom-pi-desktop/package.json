@@ -1,0 +1,25 @@
+{
+  "name": "custom-pi-desktop",
+  "version": "1.11.0",
+  "description": "Custom-PI Desktop App — AI coding agent with swarm intelligence",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsc && electron .",
+    "dev:watch": "tsc --watch &  electron .",
+    "build": "tsc",
+    "build:electron": "tsc && electron-builder",
+    "dist:win": "tsc && electron-builder --win",
+    "dist:mac": "tsc && electron-builder --mac",
+    "dist:linux": "tsc && electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
+    "typescript": "^5.8.0"
+  },
+  "author": "Nishant Unavane <iamnishantunavane@gmail.com>",
+  "license": "MIT"
+}

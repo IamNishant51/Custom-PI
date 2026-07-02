@@ -93,9 +93,22 @@ function findSimilarPosted(platform, content, threshold) {
 
 // ── Posting Functions ───────────────────────────────────────────────────
 
+async function postWithRetry(fn, platform, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = Math.min(1000 * 2 ** attempt, 30000);
+      console.log(`[${platform}] post failed (attempt ${attempt}), retrying in ${delay}ms: ${err.message}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
 async function postToTwitter(text, mediaPath) {
   const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-  try {
+  return postWithRetry(async () => {
     const body = { text };
     if (mediaPath) {
       const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
@@ -109,14 +122,12 @@ async function postToTwitter(text, mediaPath) {
     const data = await res.json();
     if (data.ok) return `Tweet posted successfully! ${data.message || ""}`;
     return `Twitter post failed: ${data.error || "unknown error"}`;
-  } catch (e) {
-    return `Twitter post failed — bridge unreachable: ${e.message}. Make sure you've connected your Twitter account in Social Accounts panel first.`;
-  }
+  }, "twitter");
 }
 
 async function postToReddit(subreddit, title, text, mediaPath) {
   const bridgeUrl = process.env.SOCIAL_BRIDGE_URL || "http://localhost:9877";
-  try {
+  return postWithRetry(async () => {
     const body = { subreddit, title, body: text };
     if (mediaPath) {
       const resolvedPath = resolveAssetPath(path.basename(mediaPath)) || mediaPath;
@@ -130,9 +141,7 @@ async function postToReddit(subreddit, title, text, mediaPath) {
     const data = await res.json();
     if (data.ok) return `Posted to r/${subreddit}! ${data.message || ""}`;
     return `Reddit post failed: ${data.error || "unknown error"}`;
-  } catch (e) {
-    return `Reddit post failed — bridge unreachable: ${e.message}. Make sure you've connected your Reddit account in Social Accounts panel first.`;
-  }
+  }, "reddit");
 }
 
 async function postToBluesky(text, mediaPath) {
@@ -394,6 +403,7 @@ export default function registerSocial(app, { sendError, broadcast }) {
     const Database = _require("better-sqlite3");
     queueDb = new Database(QUEUE_DB_PATH);
     queueDb.pragma("journal_mode = WAL");
+    queueDb.pragma("synchronous = NORMAL");
     queueDb.exec(`
       CREATE TABLE IF NOT EXISTS social_queue (
         id TEXT PRIMARY KEY,

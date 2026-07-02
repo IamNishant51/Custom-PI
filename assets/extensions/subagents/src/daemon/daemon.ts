@@ -357,6 +357,13 @@ export class Daemon extends EventEmitter {
           this.stats = { ...this.stats, ...data.stats, uptime: this.getUptime() };
         }
         if (data.lastUserActivity) this.lastUserActivity = data.lastUserActivity;
+
+        // Migrate JSON state to SQLite
+        try {
+          this.saveState();
+          const store = getSystemStore();
+          store.kvSet("daemon", "_migrated", "1");
+        } catch { /* non-critical migration */ }
       } catch {}
     }
   }
