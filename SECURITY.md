@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-Please report security issues privately to nishant@example.com rather than
+Please report security issues privately to nishantunavane0007@gmail.com rather than
 opening a public issue. We'll acknowledge within 48 hours.
 
 ## Known Security Model
