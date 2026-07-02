@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { secureExecFileSync, secureSpawn, CommandNotAllowedError, CommandTimeoutError } from "../secure-exec";
 
 describe("secureExecFileSync", () => {
-  it("executes allowed commands", () => {
-    const result = secureExecFileSync("echo", ["hello"]);
+  it("executes allowed commands", async () => {
+    const result = await secureExecFileSync("echo", ["hello"]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("hello");
   });
@@ -12,8 +12,8 @@ describe("secureExecFileSync", () => {
     expect(() => secureExecFileSync("malicious_tool", [])).toThrow(CommandNotAllowedError);
   });
 
-  it("captures stderr on failure", () => {
-    const result = secureExecFileSync("bash", ["-c", "echo err >&2; exit 1"]);
+  it("captures stderr on failure", async () => {
+    const result = await secureExecFileSync("bash", ["-c", "echo err >&2; exit 1"]);
     expect(result.exitCode).toBe(1);
   });
 });

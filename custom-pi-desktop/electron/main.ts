@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
 import * as fs from "fs";
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess, spawn, spawnSync } from "child_process";
 import { createTray } from "./tray";
 
 const DEV_SERVER_URL = "http://localhost:4321";
@@ -9,6 +9,14 @@ const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 let apiServer: ChildProcess | null = null;
+
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow;
+}
+
+export function setMainWindow(w: BrowserWindow | null): void {
+  mainWindow = w;
+}
 
 function getServerPath(): string {
   if (isDev) {
@@ -49,8 +57,14 @@ async function startApiServer(): Promise<void> {
   if (!fs.existsSync(path.join(clientDist, "index.html"))) {
     console.log("[Desktop] Building web client...");
     const clientDir = path.join(__dirname, "..", "..", "assets", "web", "client");
-    spawn("npm", ["install"], { cwd: clientDir, stdio: "inherit", shell: true });
-    spawn("npm", ["run", "build"], { cwd: clientDir, stdio: "inherit", shell: true });
+    const install = spawnSync("npm", ["install"], { cwd: clientDir, stdio: "inherit", shell: true });
+    if (install.status !== 0) {
+      throw new Error("npm install failed for web client");
+    }
+    const build = spawnSync("npm", ["run", "build"], { cwd: clientDir, stdio: "inherit", shell: true });
+    if (build.status !== 0) {
+      throw new Error("Web client build failed");
+    }
   }
 
   apiServer = spawn("node", [serverPath], {
@@ -75,7 +89,7 @@ async function startApiServer(): Promise<void> {
 }
 
 function createMainWindow(): void {
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 900,
@@ -91,15 +105,17 @@ function createMainWindow(): void {
     show: false,
   });
 
-  mainWindow.loadURL(DEV_SERVER_URL);
+  win.loadURL(DEV_SERVER_URL);
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
+  win.once("ready-to-show", () => {
+    win.show();
   });
 
-  mainWindow.on("closed", () => {
-    mainWindow = null;
+  win.on("closed", () => {
+    setMainWindow(null);
   });
+
+  setMainWindow(win);
 }
 
 app.whenReady().then(async () => {
@@ -112,7 +128,7 @@ app.whenReady().then(async () => {
   }
 
   createMainWindow();
-  createTray(mainWindow);
+  createTray();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

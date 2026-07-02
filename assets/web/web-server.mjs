@@ -139,6 +139,9 @@ async function setSwarmPauseResolve(v) {
 async function getSwarmState() {
   return await withSwarmLock(() => currentSwarmState);
 }
+async function updateSwarmState(fn) {
+  await withSwarmLock(() => { fn(currentSwarmState); });
+}
 
 // ── Token Bucket Rate Limiter ────────────────────────────────────────────────
 // Extracted to lib/rate-limiter.mjs (class) and rateLimiters singleton below
@@ -180,8 +183,8 @@ function redactToolInput(input) {
 // broadcast + track state for persistence across refresh
 function bcast(data) {
   broadcast(data);
-  if (!currentSwarmState) return;
   withSwarmLock(async () => {
+    if (!currentSwarmState) return;
     if (data.type === "ceo_thought" && data.message) {
       currentSwarmState.ceoLogs.push(data.message);
     } else if (data.type === "agent_status" && data.agentId) {
@@ -914,16 +917,11 @@ function expandPath(p) {
 function safeResolve(cwd, p) {
   const resolved = path.resolve(cwd, expandPath(p || "."));
   const realCwd = fs.realpathSync(cwd);
-  let real;
-  try {
-    real = fs.realpathSync(resolved);
-  } catch {
-    throw new Error(`Path does not exist: ${p}`);
-  }
-  if (!real.startsWith(realCwd + path.sep) && real !== realCwd) {
+  const normalized = path.normalize(resolved);
+  if (!normalized.startsWith(realCwd + path.sep) && normalized !== realCwd) {
     throw new Error(`Path traversal denied: ${p}`);
   }
-  return real;
+  return normalized;
 }
 
 async function executeTool(name, args, cwd) {
@@ -2210,7 +2208,31 @@ async function gmailAuth() {
   throw new Error("Gmail auth timeout (5 min). Please complete the browser flow.");
 }
 
+async function sendEmailSMTP(to, subject, body) {
+  const nodemailer = (await import("nodemailer")).default;
+  const email = vaultGet("GMAIL_EMAIL") || to;
+  const appPassword = vaultGet("GMAIL_APP_PASSWORD");
+  if (!appPassword) throw new Error("GMAIL_APP_PASSWORD not set in vault");
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: email, pass: appPassword },
+  });
+
+  await transporter.sendMail({ from: email, to, subject, text: body });
+  return `Email sent to ${to} via SMTP!`;
+}
+
 async function sendEmail(to, subject, body) {
+  const appPassword = vaultGet("GMAIL_APP_PASSWORD");
+  if (appPassword && vaultGet("GMAIL_EMAIL")) {
+    try {
+      return await sendEmailSMTP(to, subject, body);
+    } catch (e) {
+      return `Email error: ${e.message}. Configure Gmail App Password with: vault_set key="GMAIL_EMAIL" value="your.email@gmail.com" and vault_set key="GMAIL_APP_PASSWORD" value="your-16-char-app-password"`;
+    }
+  }
+
   try {
     if (!gmailTokens.accessToken) await gmailAuth();
 
@@ -2236,6 +2258,7 @@ async function sendEmail(to, subject, body) {
 
     if (res.status === 401) {
       gmailTokens = { accessToken: null, refreshToken: null };
+      await gmailAuth();
       return await sendEmail(to, subject, body);
     }
 
@@ -2243,7 +2266,7 @@ async function sendEmail(to, subject, body) {
     if (data.id) return `Email sent to ${to}! Message ID: ${data.id}`;
     return `Gmail error: ${JSON.stringify(data)}`;
   } catch (e) {
-    return `Email error: ${e.message}. Configure Gmail with: vault_set key="GMAIL_CLIENT_ID" value="..." and vault_set key="GMAIL_CLIENT_SECRET" value="..."`;
+    return `Email error: ${e.message}. Configure Gmail with: vault_set key="GMAIL_CLIENT_ID" value="..." and vault_set key="GMAIL_CLIENT_SECRET" value="..." or use App Password: vault_set key="GMAIL_EMAIL" value="..." and vault_set key="GMAIL_APP_PASSWORD" value="..."`;
   }
 }
 
@@ -3155,20 +3178,19 @@ async function executeDagCampaign(socket, goal, dagConfig) {
   const activeTools = getActiveTools();
 
   // Persistent state
-  if (currentSwarmState) {
-    currentSwarmState.dagMode = mode;
-    currentSwarmState.dagConfig = dagConfig;
-    currentSwarmState.pipelineIteration = 0;
-    currentSwarmState.currentWave = 0;
-    currentSwarmState.waveResults = {};
-  }
+  updateSwarmState(s => {
+    if (!s) return;
+    s.dagMode = mode;
+    s.dagConfig = dagConfig;
+    s.pipelineIteration = 0;
+    s.currentWave = 0;
+    s.waveResults = {};
+  });
 
   const allWaveResults = {};
 
-  for (let iter = 0; iter < pipelineCount; iter++) {
-    if (currentSwarmState) {
-      currentSwarmState.pipelineIteration = iter;
-    }
+    for (let iter = 0; iter < pipelineCount; iter++) {
+      updateSwarmState(s => { if (s) s.pipelineIteration = iter; });
 
     if (pipelineCount > 1) {
       bcast({ type: "ceo_thought", message: `Pipeline iteration ${iter + 1}/${pipelineCount}` });
@@ -3186,9 +3208,7 @@ async function executeDagCampaign(socket, goal, dagConfig) {
 
     for (let waveIdx = 0; waveIdx < waves.length; waveIdx++) {
       const wave = waves[waveIdx];
-      if (currentSwarmState) {
-        currentSwarmState.currentWave = waveIdx;
-      }
+      updateSwarmState(s => { if (s) s.currentWave = waveIdx; });
 
       bcast({ type: "ceo_thought", message: `Executing wave ${waveIdx + 1}/${waves.length} with ${wave.length} agent(s)` });
 
@@ -3214,15 +3234,16 @@ async function executeDagCampaign(socket, goal, dagConfig) {
         const agent = wave[i];
         const settled = waveResults[i];
 
-        if (settled.status === "fulfilled") {
-          iterationResults[agent.id] = settled.value;
-          allWaveResults[agent.id] = settled.value;
-          if (currentSwarmState) {
-            if (!currentSwarmState.waveResults) currentSwarmState.waveResults = {};
-            if (!currentSwarmState.waveResults[waveIdx]) currentSwarmState.waveResults[waveIdx] = {};
-            currentSwarmState.waveResults[waveIdx][agent.id] = settled.value;
-          }
-        } else {
+          if (settled.status === "fulfilled") {
+            iterationResults[agent.id] = settled.value;
+            allWaveResults[agent.id] = settled.value;
+            updateSwarmState(s => {
+              if (!s) return;
+              if (!s.waveResults) s.waveResults = {};
+              if (!s.waveResults[waveIdx]) s.waveResults[waveIdx] = {};
+              s.waveResults[waveIdx][agent.id] = settled.value;
+            });
+          } else {
           const errMsg = settled.reason?.message || "Unknown error";
           bcast({ type: "agent_log", agentId: agent.id, message: `Agent '${agent.id}' failed: ${errMsg}` });
           const failedResult = { agentId: agent.id, result: "", logs: [], status: "error", error: errMsg };
@@ -3230,12 +3251,13 @@ async function executeDagCampaign(socket, goal, dagConfig) {
           allWaveResults[agent.id] = failedResult;
         }
 
-        if (currentSwarmState) {
-          const idx = currentSwarmState.agents.findIndex(a => a.id === agent.id);
+        updateSwarmState(s => {
+          if (!s) return;
+          const idx = s.agents.findIndex(a => a.id === agent.id);
           if (idx >= 0) {
-            currentSwarmState.agents[idx].status = settled.status === "fulfilled" ? "completed" : "error";
+            s.agents[idx].status = settled.status === "fulfilled" ? "completed" : "error";
           }
-        }
+        });
       }
 
       saveSwarmState(currentSwarmState);
@@ -3297,11 +3319,12 @@ Write a brief summary for the user.`;
   bcast({ type: "ceo_summary", summary });
   try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {} // cleanup
 
-  if (currentSwarmState) {
-    currentSwarmState.status = "completed";
-    currentSwarmState.summary = summary;
-    saveSwarmState(currentSwarmState);
-  }
+  updateSwarmState(s => {
+    if (!s) return;
+    s.status = "completed";
+    s.summary = summary;
+  });
+  saveSwarmState(currentSwarmState);
 }
 
 async function handleDagGoal(socket, goal, dagConfig) {
@@ -3334,9 +3357,10 @@ async function executeSwarmCampaign(socket, goal, agents) {
   bcast({ type: "ceo_plan", agents });
 
   // Save agents to persistent state
-  if (currentSwarmState) {
-    currentSwarmState.agents = agents.map(a => ({ ...a, status: "pending", logs: [] }));
-  }
+  updateSwarmState(s => {
+    if (!s) return;
+    s.agents = agents.map(a => ({ ...a, status: "pending", logs: [] }));
+  });
 
   const agentResults = {};
   const activeTools = getActiveTools();
@@ -3500,11 +3524,12 @@ console.log("Parsing logs successfully.");
     agentResults[agent.id] = lastTextResult || "Completed.";
 
     // Save persistent state
-    if (currentSwarmState) {
-      currentSwarmState.agentResults = { ...agentResults };
-      const idx = currentSwarmState.agents.findIndex(a => a.id === agent.id);
-      if (idx >= 0) currentSwarmState.agents[idx].status = "completed";
-    }
+    updateSwarmState(s => {
+      if (!s) return;
+      s.agentResults = { ...agentResults };
+      const idx = s.agents.findIndex(a => a.id === agent.id);
+      if (idx >= 0) s.agents[idx].status = "completed";
+    });
 
     await new Promise(r => setTimeout(r, 1000));
   }
@@ -3537,10 +3562,11 @@ Please write a brief summary report for the USER detailing what the sub-agents h
   try { createCheckpoint(`Swarm: ${goal.slice(0, 60)}`); } catch {} // cleanup
 
   // Mark swarm as completed
-  if (currentSwarmState) {
-    currentSwarmState.status = "completed";
-    currentSwarmState.summary = summary;
-  }
+  updateSwarmState(s => {
+    if (!s) return;
+    s.status = "completed";
+    s.summary = summary;
+  });
 }
 
 async function handleSwarmGoal(socket, goal) {

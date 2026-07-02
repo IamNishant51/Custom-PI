@@ -1,6 +1,7 @@
 import fs from "node:fs";
-import path from "node:path";
+import path, { dirname } from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getGraph } from "../state-graph/property-graph";
@@ -8,10 +9,11 @@ import { getDaemon, Daemon } from "../daemon/daemon";
 import { writeAtomic } from "../storage-driver";
 import { logger } from "../logger";
 
-const ALLOWED_SRC_DIR = path.resolve(__dirname, "..", "..", "..", "extensions", "subagents", "src");
+const _dirname = typeof __dirname !== "undefined" ? __dirname : dirname(fileURLToPath(import.meta.url));
+const ALLOWED_SRC_DIR = path.resolve(_dirname, "..", "..", "..", "extensions", "subagents", "src");
 const MAX_ROLLBACKS_PER_SESSION = 3;
-const TSC_BIN = path.resolve(__dirname, "..", "..", "..", "..", "..", "node_modules", ".bin", "tsc");
-const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..", "..", "..");
+const TSC_BIN = path.resolve(_dirname, "..", "..", "..", "..", "..", "node_modules", ".bin", "tsc");
+const PROJECT_ROOT = path.resolve(_dirname, "..", "..", "..", "..", "..");
 
 interface SelfPatch {
   id: string;

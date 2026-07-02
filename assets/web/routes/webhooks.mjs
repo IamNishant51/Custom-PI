@@ -1,7 +1,9 @@
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import { SHARED_PATHS } from "../shared-constants.mjs";
 import { getOrCreateDb } from "../services/db.mjs";
+import { normalizeEvent, validateSignature } from "../listener.js";
 
 const { PI_DIR } = SHARED_PATHS;
 const WEBHOOK_DB_PATH = path.join(PI_DIR, "webhooks.db");
@@ -24,25 +26,27 @@ function initWebhookDb() {
   return db;
 }
 
+// In-memory dedup set when SQLite is unavailable
+const recentDeliveries = new Set();
+
 export default function registerWebhooks(app, { sendError }) {
   const db = initWebhookDb();
 
-  app.post("/api/webhooks/:source", { schema: { body: { type: "object", additionalProperties: true }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, eventId: { type: "string" }, error: { type: "string" }, duplicate: { type: "boolean" } } } } } }, async (req) => {
+  app.post("/api/webhooks/:source", { schema: { body: { type: "object", additionalProperties: true }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, eventId: { type: "string" }, error: { type: "string" }, duplicate: { type: "boolean" } } } } } }, async (req, reply) => {
     try {
       const source = req.params.source;
       if (!source || typeof source !== "string" || source.length > 64) {
-        return { error: "Invalid webhook source" };
+        return sendError(reply, 400, "Invalid webhook source");
       }
       const PAYLOAD_MAX_BYTES = 1024 * 1024;
       const raw = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
       if (Buffer.byteLength(raw, "utf8") > PAYLOAD_MAX_BYTES) {
-        return { error: "Payload exceeds 1MB limit" };
+        return sendError(reply, 413, "Payload exceeds 1MB limit");
       }
-      const { normalizeEvent, validateSignature } = await import("../listener.js");
       const secret = process.env.WEBHOOK_SECRET;
       const sig = req.headers["x-webhook-signature"] || req.headers["x-hub-signature-256"] || "";
       if (secret && !validateSignature(req.body, sig, secret)) {
-        return { error: "Invalid webhook signature" };
+        return sendError(reply, 401, "Invalid webhook signature");
       }
 
       // Extract delivery ID for deduplication (Sentry, GitHub, Datadog all send unique IDs)
@@ -54,7 +58,7 @@ export default function registerWebhooks(app, { sendError }) {
 
       const event = normalizeEvent(source, req.body);
 
-      // Deduplicate via SQLite
+      // Deduplicate via SQLite (or in-memory fallback)
       if (db) {
         const existing = db.prepare("SELECT delivery_id FROM webhook_events WHERE delivery_id = ?").get(deliveryId);
         if (existing) {
@@ -64,6 +68,15 @@ export default function registerWebhooks(app, { sendError }) {
           INSERT INTO webhook_events (delivery_id, source, event_type, payload, received_at)
           VALUES (?, ?, ?, ?, ?)
         `).run(deliveryId, source, event.type, JSON.stringify(event), event.receivedAt);
+      } else {
+        if (recentDeliveries.has(deliveryId)) {
+          return { ok: true, eventId: deliveryId, duplicate: true };
+        }
+        recentDeliveries.add(deliveryId);
+        if (recentDeliveries.size > 1000) {
+          const first = recentDeliveries.values().next().value;
+          if (first) recentDeliveries.delete(first);
+        }
       }
 
       // Also write to file for backward compatibility / debugging
@@ -74,7 +87,7 @@ export default function registerWebhooks(app, { sendError }) {
 
       return { ok: true, eventId: deliveryId, duplicate: false };
     } catch (e) {
-      return { error: "Failed to process webhook" };
+      return sendError(reply, 500, "Failed to process webhook");
     }
   });
 

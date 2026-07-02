@@ -434,8 +434,11 @@ export default function registerSocial(app, { sendError, broadcast }) {
     return { ok: true, id };
   }
 
+  let queueRunning = false;
+
   async function processQueue() {
-    if (!queueDb) return;
+    if (!queueDb || queueRunning) return;
+    queueRunning = true;
     try {
       const now = Math.floor(Date.now() / 1000);
       const rows = queueDb.prepare("SELECT * FROM social_queue WHERE status = 'pending' AND scheduled_at <= ? LIMIT 5").all(now);
@@ -448,7 +451,7 @@ export default function registerSocial(app, { sendError, broadcast }) {
           try {
             let result;
             if (platform === "twitter") result = await postToTwitter(row.text);
-            else if (platform === "reddit") result = await postToReddit(row.subreddit || "programming", row.title || "Shared via Custom-PI", row.text);
+            else if (platform === "reddit") result = await postToReddit(row.subreddit || vaultGet("REDDIT_DEFAULT_SUBREDDIT") || "programming", row.title || "Shared via Custom-PI", row.text);
             else if (platform === "bluesky") result = await postToBluesky(row.text);
             else if (platform === "discord") result = await postToDiscord(row.text);
             else if (platform === "telegram") result = await postToTelegram(row.text);
@@ -474,6 +477,8 @@ export default function registerSocial(app, { sendError, broadcast }) {
       }
     } catch (e) {
       console.error("Queue processor error:", e.message);
+    } finally {
+      queueRunning = false;
     }
   }
 
@@ -832,11 +837,13 @@ Return a JSON array. Each item:
 
   // Manual trigger for autonomous tick
   app.post("/api/social/autonomous/tick", { schema: { body: { type: "object", additionalProperties: true, properties: {} }, response: { 200: { type: "object", properties: { ok: { type: "boolean" }, message: { type: "string" } } } } } }, async () => {
-    autonomousContentTick();
+    autonomousContentTick().catch(e => console.error("[autonomous] tick error:", e));
     return { ok: true, message: "Autonomous content generation started. Check /api/social/drafts in a minute." };
   });
 
   if (process.env.AUTONOMOUS_ENABLED === "true") {
-    setInterval(autonomousContentTick, AUTONOMOUS_INTERVAL);
+    setInterval(() => {
+      autonomousContentTick().catch(e => console.error("[autonomous] scheduled tick error:", e));
+    }, AUTONOMOUS_INTERVAL);
   }
 }

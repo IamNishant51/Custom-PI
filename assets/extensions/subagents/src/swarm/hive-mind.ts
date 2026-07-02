@@ -43,7 +43,7 @@ interface ConsensusProposal {
   description: string;
   options: string[];
   votes: Map<string, string>;
-  status: "voting" | "approved" | "rejected" | "tie";
+  status: "voting" | "approved" | "rejected";
   deadline: number;
   createdAt: number;
 }
@@ -251,7 +251,7 @@ export class HiveMind {
     }
   }
 
-  private resolveVotes(proposal: ConsensusProposal): "approved" | "rejected" | "tie" {
+  private resolveVotes(proposal: ConsensusProposal): "approved" | "rejected" {
     const team = this.teams.get(proposal.teamId);
     const agentCount = team ? team.agents.length : 0;
     const quorum = Math.max(2, Math.ceil(agentCount * 0.4));
@@ -271,7 +271,7 @@ export class HiveMind {
     }
 
     const totalVotes = proposal.votes.size;
-    if (winners.length > 1) return "tie";
+    if (winners.length > 1) return "rejected";
     return maxVotes > totalVotes / 2 ? "approved" : "rejected";
   }
 }

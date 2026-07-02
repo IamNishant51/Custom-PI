@@ -118,7 +118,7 @@ export default function CanvasEditorPanel() {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
-  }, [drawing, history, historyIndex]);
+  }, [undo, redo, zoomFit, download, clearOverlay, drawing]);
 
   const fetchGallery = async () => {
     setLoadingGallery(true);
@@ -131,15 +131,19 @@ export default function CanvasEditorPanel() {
     }
   };
 
+  const historyIndexRef = useRef(historyIndex);
+  historyIndexRef.current = historyIndex;
+
   const pushHistory = useCallback((dataUrl: string) => {
     setHistory(h => {
-      const sliced = h.slice(0, historyIndex + 1);
+      const idx = historyIndexRef.current;
+      const sliced = h.slice(0, idx + 1);
       sliced.push(dataUrl);
       if (sliced.length > 50) sliced.shift();
       setHistoryIndex(sliced.length - 1);
       return sliced;
     });
-  }, [historyIndex]);
+  }, []);
 
   const saveState = useCallback(() => {
     const c = canvasRef.current;
@@ -609,13 +613,19 @@ export default function CanvasEditorPanel() {
   const cursorXRef = useRef(0);
   const cursorYRef = useRef(0);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const cursorRafRef = useRef(0);
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!spaceHeld) {
       const p = getCanvasCoords(e);
       cursorXRef.current = Math.round(p.x);
       cursorYRef.current = Math.round(p.y);
-      setCursorPos({ x: cursorXRef.current, y: cursorYRef.current });
+      if (!cursorRafRef.current) {
+        cursorRafRef.current = requestAnimationFrame(() => {
+          cursorRafRef.current = 0;
+          setCursorPos({ x: cursorXRef.current, y: cursorYRef.current });
+        });
+      }
     }
     handleMouseMove(e);
   };
