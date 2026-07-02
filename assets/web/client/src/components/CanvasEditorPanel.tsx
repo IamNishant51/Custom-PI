@@ -956,42 +956,32 @@ export default function CanvasEditorPanel() {
           minHeight: 200,
         }}
       >
-        {history.length === 0 ? (
-          <div style={{
-            textAlign: "center", color: "var(--mute)", padding: 40,
-            fontFamily: "var(--font-mono)", fontSize: 12,
-          }}>
-            <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>⊞</div>
-            <div style={{ marginBottom: 4 }}>Drop an image or paste a URL</div>
-            <div style={{ fontSize: 10, opacity: 0.6 }}>Supported: PNG, JPEG, WebP, GIF</div>
-          </div>
-        ) : (
-          <div style={{
-            transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
-            transformOrigin: "0 0",
-            position: "relative",
-            boxShadow: "0 2px 20px rgba(0,0,0,0.5)",
-          }}>
-            <canvas
-              ref={canvasRef}
-              style={{
-                display: "block", maxWidth: "none",
-                cursor: spaceHeld ? "grab" : tool === "pen" || tool === "text" ? "crosshair"
-                  : tool === "eraser" ? "cell"
-                  : tool === "crop" ? "crosshair"
-                  : "crosshair",
-              }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={() => { if (drawing) { setDrawing(false); clearOverlay(); } if (panning) { setPanning(false); setPanStart(null); } }}
-            />
-            <canvas
-              ref={overlayRef}
-              style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
-            />
-          </div>
-        )}
+        <div style={{
+          display: history.length === 0 ? "none" : "block",
+          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+          transformOrigin: "0 0",
+          position: "relative",
+          boxShadow: "0 2px 20px rgba(0,0,0,0.5)",
+        }}>
+          <canvas
+            ref={canvasRef}
+            style={{
+              display: "block", maxWidth: "none",
+              cursor: spaceHeld ? "grab" : tool === "pen" || tool === "text" ? "crosshair"
+                : tool === "eraser" ? "cell"
+                : tool === "crop" ? "crosshair"
+                : "crosshair",
+            }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={() => { if (drawing) { setDrawing(false); clearOverlay(); } if (panning) { setPanning(false); setPanStart(null); } }}
+          />
+          <canvas
+            ref={overlayRef}
+            style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+          />
+        </div>
       </div>
 
       {/* Status bar */}
