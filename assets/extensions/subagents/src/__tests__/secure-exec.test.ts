@@ -15,6 +15,7 @@ describe("secureExecFileSync", () => {
   it("captures stderr on failure", async () => {
     const result = await secureExecFileSync("bash", ["-c", "echo err >&2; exit 1"]);
     expect(result.exitCode).toBe(1);
+    expect(result.stderr.trim()).toBe("err");
   });
 });
 
