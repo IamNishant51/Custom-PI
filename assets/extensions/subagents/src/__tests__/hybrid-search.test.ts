@@ -71,14 +71,23 @@ describe("HybridSearch", () => {
     expect(results.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("adds nodes to index", () => {
-    search.addToIndex("test-node-id");
-    expect(true).toBe(true);
+  it("adds node to index invalidates BM25 cache", async () => {
+    const id = graph.addNode("entity", "TestIndexed", {});
+    const before = await search.search("TestIndexed", { strategy: "bm25" });
+    search.addToIndex(id);
+    // after invalidation, search should still find it (rebuilds on next query)
+    const after = await search.search("TestIndexed", { strategy: "bm25" });
+    expect(after.some(r => r.nodeId === id)).toBe(true);
   });
 
-  it("removes nodes from index", () => {
-    search.removeFromIndex("test-node-id");
-    expect(true).toBe(true);
+  it("removes node from index invalidates BM25 cache", async () => {
+    const id = graph.addNode("entity", "RemoveMe", {});
+    await search.search("RemoveMe", { strategy: "bm25" });
+    search.removeFromIndex(id);
+    graph.deleteNode(id);
+    // After removal and node deletion, search should not return it
+    const results = await search.search("RemoveMe", { strategy: "bm25" });
+    expect(results.some(r => r.nodeId === id)).toBe(false);
   });
 
   it("rerank search falls back gracefully", async () => {
