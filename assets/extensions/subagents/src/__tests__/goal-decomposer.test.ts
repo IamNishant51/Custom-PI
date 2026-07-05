@@ -107,15 +107,16 @@ describe("GoalDecomposer", () => {
   });
 
   it("marks tasks as failed and blocks dependents", async () => {
-    const plan = await decomposer.createPlan("Phase A. Phase B. Phase C.");
+    const plan = await decomposer.createPlan("Phase Alpha initialization. Phase Beta configuration. Phase Gamma deployment.");
     const taskIds = Array.from(plan.subTasks.keys());
     plan.status = "executing";
-    decomposer.updateTaskStatus(plan.id, taskIds[0], "failed", undefined, "Error in phase A");
+    decomposer.updateTaskStatus(plan.id, taskIds[0], "failed", undefined, "Error in phase alpha");
     const failed = plan.subTasks.get(taskIds[0]);
     expect(failed).not.toBeNull();
     expect(failed!.status).toBe("failed");
-    expect(failed!.error).toBe("Error in phase A");
+    expect(failed!.error).toBe("Error in phase alpha");
     const hasBlocked = Array.from(plan.subTasks.values()).some(t => t.status === "blocked");
+    expect(hasBlocked).toBe(true);
   });
 
   it("reports progress summary", async () => {
