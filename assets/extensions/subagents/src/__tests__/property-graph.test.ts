@@ -115,12 +115,10 @@ describe("PropertyGraph", () => {
   });
 
   it("counts nodes and edges", () => {
-    graph.addNode("entity", "A");
-    graph.addNode("entity", "B");
+    const aId = graph.addNode("entity", "A");
+    const bId = graph.addNode("entity", "B");
     graph.addNode("session", "S");
-    const a = graph.getNode("A") ? graph.queryNodes({ nodeType: "entity" })[0]?.id : "";
-    const b = graph.getNode("B") ? graph.queryNodes({ nodeType: "entity" })[1]?.id : "";
-    if (a && b) graph.addEdge(a, b, "relates_to");
+    graph.addEdge(aId, bId, "relates_to");
     expect(graph.countNodes()).toBe(3);
     expect(graph.countNodes("entity")).toBe(2);
   });
