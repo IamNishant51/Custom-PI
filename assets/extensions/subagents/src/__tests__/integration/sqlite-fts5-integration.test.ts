@@ -126,15 +126,20 @@ describe("SQLite + FTS5 integration", () => {
     const exists = fs.existsSync(walPath);
     expect(typeof exists).toBe("boolean");
 
+    const count = getMessageCount("wal-test");
+    expect(count).toBe(5);
+
     closeDb();
-    expect(true).toBe(true);
   });
 
-  it("FTS5 delete trigger works (message removal syncs FTS)", () => {
+  it("FTS5 search finds message content after insert", () => {
     ensureSession("fts-delete");
     insertMessage("fts-delete", "user", "unique fts5 content for deletion testing");
     const before = searchSession("deletion testing", "fts-delete", 10);
     expect(before.length).toBe(1);
+
+    const msgs = getMessages("fts-delete");
+    expect(msgs.length).toBe(1);
 
     closeDb();
   });
