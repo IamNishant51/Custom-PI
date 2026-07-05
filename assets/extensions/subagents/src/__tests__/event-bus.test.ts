@@ -136,9 +136,30 @@ describe("EventBus", () => {
     expect(id).toContain("evt_");
   });
 
-  it("supports middleware registration", () => {
+  it("supports middleware registration and execution", () => {
     const middleware = vi.fn((event, next) => next());
     bus.use(middleware);
-    expect(true).toBe(true);
+    const handler = vi.fn();
+    bus.on("t", handler);
+    bus.emit("t", { value: 1 });
+    expect(middleware).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { value: 1 } }),
+      expect.anything(),
+    );
+  });
+
+  it("middleware can modify event data", () => {
+    bus.use((event, next) => {
+      (event.data as any).modified = true;
+      next();
+    });
+    const handler = vi.fn();
+    bus.on("t", handler);
+    bus.emit("t", { value: 1 });
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { value: 1, modified: true } }),
+      expect.anything(),
+    );
   });
 });

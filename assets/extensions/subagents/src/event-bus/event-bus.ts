@@ -77,11 +77,23 @@ export class EventBus {
     };
     const stored: StoredEvent = { id, topic, data, meta };
 
-    const subs = this.subscribers.get(topic) || [];
-    const wildcardSubs = this.subscribers.get("*") || [];
-
     this.storeEvent(stored);
     this.pruneHistory();
+
+    // Run middleware chain synchronously before delivering to subscribers
+    const runMiddlewareSync = (event: StoredEvent): void => {
+      let idx = 0;
+      const next = () => {
+        if (idx < this.middleware.length) {
+          this.middleware[idx++](event, next);
+        }
+      };
+      next();
+    };
+    runMiddlewareSync(stored);
+
+    const subs = this.subscribers.get(topic) || [];
+    const wildcardSubs = this.subscribers.get("*") || [];
 
     if (this.config.lazyEmit && subs.length === 0 && wildcardSubs.length === 0) {
       return id;
