@@ -61,6 +61,42 @@ export class SelfModifier {
     this.sourceDir = ALLOWED_SRC_DIR;
     this.setupListeners();
     this.registerBackgroundTask();
+    // Safety gate: require user approval via sentinel file
+    this.setApprovalCallback(async (patch) => {
+      const pendingPath = path.join(os.homedir(), ".pi", "agent", "pending-patch.json");
+      try {
+        fs.mkdirSync(path.dirname(pendingPath), { recursive: true });
+        fs.writeFileSync(pendingPath, JSON.stringify({
+          id: patch.id,
+          description: patch.description,
+          diff: patch.diff,
+          risk: patch.risk,
+          status: "pending_approval",
+          createdAt: Date.now(),
+        }, null, 2), "utf8");
+        const reviewMsg = `[SelfModifier] Patch "${patch.description}" awaiting approval at ${pendingPath}\n  Set "approved": true in that file to proceed, or delete it to reject.`;
+        logger.warn(reviewMsg);
+        // Poll for up to 5 minutes
+        const deadline = Date.now() + 300_000;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 2000));
+          if (!fs.existsSync(pendingPath)) return false;
+          try {
+            const resp = JSON.parse(fs.readFileSync(pendingPath, "utf8"));
+            if (resp.approved === true) {
+              fs.unlinkSync(pendingPath);
+              return true;
+            }
+          } catch { /* invalid JSON, keep waiting */ }
+        }
+        logger.warn(`[SelfModifier] Patch "${patch.description}" approval timed out.`);
+        fs.unlinkSync(pendingPath);
+        return false;
+      } catch (err) {
+        logger.error(`[SelfModifier] Approval callback error: ${err}`);
+        return false;
+      }
+    });
   }
 
   setApprovalCallback(callback: (patch: SelfPatch) => Promise<boolean>): void {
