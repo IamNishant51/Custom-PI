@@ -3,7 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PATHS } from "./config";
+import { getCache } from "./lru-cache";
 const SOUL_PATH = PATHS.SOUL;
+const SOUL_CACHE = getCache("soul", { capacity: 1, ttlMs: 60_000 });
 
 const PROMPTS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../prompts/system/identity.json");
 function loadDefaultSoul(): string {
@@ -16,15 +18,24 @@ function loadDefaultSoul(): string {
 const DEFAULT_SOUL = loadDefaultSoul();
 
 export function loadSoul(): string {
+  const cached = SOUL_CACHE.get("soul-content");
+  if (cached) return cached as string;
   try {
     if (fs.existsSync(SOUL_PATH)) {
       const content = fs.readFileSync(SOUL_PATH, "utf8").trim();
-      if (content) return content;
+      if (content) {
+        SOUL_CACHE.set("soul-content", content);
+        return content;
+      }
     }
   } catch {
     // Fall through to default
   }
   return DEFAULT_SOUL;
+}
+
+export function invalidateSoulCache(): void {
+  SOUL_CACHE.delete("soul-content");
 }
 
 export function getSoulPath(): string {

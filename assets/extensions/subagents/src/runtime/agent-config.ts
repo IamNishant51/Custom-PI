@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import yaml from "yaml";
 
 import { PATHS } from "../config";
+import { getCache } from "../lru-cache";
 
 export const AGENTS_DIR_GLOBAL = PATHS.AGENTS;
 export const AGENTS_DIR_LOCAL = path.join(process.cwd(), ".pi/agents");
+
+const AGENT_CACHE = getCache("agent-configs", { capacity: 5, ttlMs: 300_000 });
 
 const REQUIRED_AGENT_FIELDS = ["name"] as const;
 
@@ -55,10 +57,9 @@ let agentsCache: { data: Map<string, AgentConfig>; timestamp: number } | null = 
 const AGENTS_CACHE_TTL = 24 * 3600 * 1000; // 24 hours cache
 
 export function loadAgents(): Map<string, AgentConfig> {
-  const now = Date.now();
-  if (agentsCache && (now - agentsCache.timestamp) < AGENTS_CACHE_TTL) {
-    return agentsCache.data;
-  }
+  const cached = AGENT_CACHE.get("all-agents");
+  if (cached) return cached as Map<string, AgentConfig>;
+
   const agents = new Map<string, AgentConfig>();
   const dirs = [AGENTS_DIR_GLOBAL, AGENTS_DIR_LOCAL];
 
@@ -84,10 +85,10 @@ export function loadAgents(): Map<string, AgentConfig> {
       }
     }
   }
-  agentsCache = { data: agents, timestamp: Date.now() };
+  AGENT_CACHE.set("all-agents", agents);
   return agents;
 }
 
 export function invalidateAgentCache(): void {
-  agentsCache = null;
+  AGENT_CACHE.delete("all-agents");
 }
