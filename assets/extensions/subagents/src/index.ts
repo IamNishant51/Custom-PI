@@ -1,4 +1,4 @@
-// @ts-nocheck — Phase 1 decomposition: tools/ + events/ + runtime/
+// Decomposed — tools/ | events/ | runtime/ — strict mode clean
 import { UserMessageComponent, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Container, TUI, visibleWidth, CURSOR_MARKER } from "@earendil-works/pi-tui";
@@ -263,21 +263,21 @@ export default function (pi: ExtensionAPI) {
   // ── Register commands ─────────────────────────────────────────────────────
   pi.registerCommand("help", {
     description: "Show available commands and keyboard shortcuts.",
-    handler(args, ctx) {
+    handler(args: string, ctx: ExtensionContext) {
       ctx.ui.notify(
         "Commands: /memory, /memory-stats, /memory-reset, /consolidate, /detect, /gateguard, /context, /context-budget, /model-routing, /checkpoint, /triplets, /workflows, /telemetry, /plugins, /help. " +
         "Keyboard: e = expand/collapse result card, r = retry sub-agent, q = quit session.",
         "info"
       );
     },
-    execute(args, ctx) {
+    execute(args: string, ctx: ExtensionContext) {
       return (this as any).handler(args, ctx);
     }
   });
 
   pi.registerCommand("checkpoint", {
     description: "Resume from the latest checkpoint. Restores goal, subtasks, and context.",
-    async handler(args, ctx) {
+    async handler(args: string, ctx: ExtensionContext) {
       const cp = await getLatestCheckpoint();
       if (!cp) {
         ctx.ui.notify("No checkpoint found to resume from.", "error");
@@ -302,14 +302,14 @@ export default function (pi: ExtensionAPI) {
         content: [{ type: "text", text: formatted }]
       });
     },
-    execute(args, ctx) {
+    execute(args: string, ctx: ExtensionContext) {
       return (this as any).handler(args, ctx);
     }
   });
 
   pi.registerCommand("help-ext", {
     description: "Show custom-pi extension commands and tools",
-    handler(_args, ctx) {
+    handler(_args: string, ctx: ExtensionContext) {
       const helpText = [
         "Custom-PI Extension Commands:",
         "  /checkpoint   — Resume from last checkpoint",
@@ -319,7 +319,7 @@ export default function (pi: ExtensionAPI) {
       ].join("\n");
       ctx.ui.notify(helpText, "info");
     },
-    execute(_args, ctx) {
+    execute(_args: string, ctx: ExtensionContext) {
       ctx.ui.notify("Custom-PI Extension Commands: /checkpoint, /help-ext", "info");
     },
   });
