@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
@@ -26,37 +26,32 @@ interface VaultData {
   version: number;
 }
 
-function ensureVaultDir(): void {
-  if (!fs.existsSync(VAULT_DIR)) {
-    fs.mkdirSync(VAULT_DIR, { recursive: true });
-  }
+async function ensureVaultDir(): Promise<void> {
+  await fs.mkdir(VAULT_DIR, { recursive: true });
 }
 
-function getMasterKey(): Buffer {
-  // Allow override via env var (more secure than file on shared systems)
+async function getMasterKey(): Promise<Buffer> {
   const envKey = process.env.CUSTOM_PI_VAULT_KEY || process.env.PI_VAULT_KEY;
   if (envKey) {
     const decoded = Buffer.from(envKey, "hex");
     if (decoded.length === KEY_LENGTH) return decoded;
   }
-  ensureVaultDir();
-  if (fs.existsSync(KEY_FILE)) {
-    const keyRaw = fs.readFileSync(KEY_FILE, "utf8").trim();
+  await ensureVaultDir();
+  try {
+    const keyRaw = (await fs.readFile(KEY_FILE, "utf8")).trim();
     return Buffer.from(keyRaw, "hex");
+  } catch {
+    const key = crypto.randomBytes(KEY_LENGTH);
+    await fs.writeFile(KEY_FILE, key.toString("hex"), "utf8");
+    await fs.chmod(KEY_FILE, 0o600);
+    return key;
   }
-  const key = crypto.randomBytes(KEY_LENGTH);
-  fs.writeFileSync(KEY_FILE, key.toString("hex"), "utf8");
-  fs.chmodSync(KEY_FILE, 0o600);
-  return key;
 }
 
-function readVault(): VaultData {
-  ensureVaultDir();
-  if (!fs.existsSync(VAULT_FILE)) {
-    return { entries: {}, version: 1 };
-  }
+async function readVault(): Promise<VaultData> {
+  await ensureVaultDir();
   try {
-    const data = JSON.parse(fs.readFileSync(VAULT_FILE, "utf8"));
+    const data = JSON.parse(await fs.readFile(VAULT_FILE, "utf8"));
     data.entries = data.entries || {};
     data.version = data.version || 1;
     return data;
@@ -65,12 +60,12 @@ function readVault(): VaultData {
   }
 }
 
-function writeVault(data: VaultData): void {
-  ensureVaultDir();
+async function writeVault(data: VaultData): Promise<void> {
+  await ensureVaultDir();
   const tmp = VAULT_FILE + ".tmp." + Date.now();
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-  fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, VAULT_FILE);
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
+  await fs.chmod(tmp, 0o600);
+  await fs.rename(tmp, VAULT_FILE);
 }
 
 function encrypt(plaintext: string, key: Buffer): EncryptedMaterial {
@@ -107,17 +102,17 @@ export interface SecretEntry {
   updatedAt: string;
 }
 
-export function vaultSet(key: string, value: string): void {
-  const masterKey = getMasterKey();
-  const vault = readVault();
+export async function vaultSet(key: string, value: string): Promise<void> {
+  const masterKey = await getMasterKey();
+  const vault = await readVault();
   const material = encrypt(value, masterKey);
   vault.entries[key] = material;
-  writeVault(vault);
+  await writeVault(vault);
 }
 
-export function vaultGet(key: string): string | null {
-  const masterKey = getMasterKey();
-  const vault = readVault();
+export async function vaultGet(key: string): Promise<string | null> {
+  const masterKey = await getMasterKey();
+  const vault = await readVault();
   const material = vault.entries[key];
   if (!material) return null;
   try {
@@ -127,45 +122,52 @@ export function vaultGet(key: string): string | null {
   }
 }
 
-export function vaultDelete(key: string): boolean {
-  const vault = readVault();
+export async function vaultDelete(key: string): Promise<boolean> {
+  const vault = await readVault();
   if (!vault.entries[key]) return false;
   delete vault.entries[key];
-  writeVault(vault);
+  await writeVault(vault);
   return true;
 }
 
-export function vaultList(): string[] {
-  const vault = readVault();
+export async function vaultList(): Promise<string[]> {
+  const vault = await readVault();
   return Object.keys(vault.entries);
 }
 
-export function vaultHas(key: string): boolean {
-  const vault = readVault();
+export async function vaultHas(key: string): Promise<boolean> {
+  const vault = await readVault();
   return key in vault.entries;
 }
 
-export function vaultExists(): boolean {
-  return fs.existsSync(VAULT_FILE) && fs.existsSync(KEY_FILE);
+export async function vaultExists(): Promise<boolean> {
+  try {
+    await fs.access(VAULT_FILE);
+    await fs.access(KEY_FILE);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function vaultHealth(): { ok: boolean; message: string } {
+export async function vaultHealth(): Promise<{ ok: boolean; message: string }> {
   try {
-    if (!fs.existsSync(KEY_FILE)) {
+    try {
+      await fs.access(KEY_FILE);
+    } catch {
       return { ok: false, message: "Master key not initialized. Run vault_set to create it." };
     }
-    const key = getMasterKey();
+    const key = await getMasterKey();
     if (key.length !== KEY_LENGTH) {
       return { ok: false, message: `Master key has invalid length (${key.length}, expected ${KEY_LENGTH}).` };
     }
-    // In-memory round-trip test instead of writing a ghost key
     const testPlaintext = "health-check-" + Date.now();
     const encrypted = encrypt(testPlaintext, key);
     const decrypted = decrypt(encrypted, key);
     if (decrypted !== testPlaintext) {
       return { ok: false, message: "Encrypt/decrypt round-trip failed." };
     }
-    const vault = readVault();
+    const vault = await readVault();
     return { ok: true, message: `Vault healthy. ${Object.keys(vault.entries).length} entries stored.` };
   } catch (e: any) {
     return { ok: false, message: `Vault error: ${e.message}` };
@@ -177,8 +179,8 @@ export async function vaultImportFromEnv(keys: string[]): Promise<string[]> {
   for (const key of keys) {
     const envKey = key.replace(/-/g, "_").toUpperCase();
     const envVal = process.env[envKey] || process.env[key];
-    if (envVal && !vaultHas(key)) {
-      vaultSet(key, envVal);
+    if (envVal && !(await vaultHas(key))) {
+      await vaultSet(key, envVal);
       imported.push(key);
     }
   }
@@ -187,7 +189,7 @@ export async function vaultImportFromEnv(keys: string[]): Promise<string[]> {
 
 export async function vaultExportToEnv(keys: string[]): Promise<void> {
   for (const key of keys) {
-    const val = vaultGet(key);
+    const val = await vaultGet(key);
     if (val) {
       const envKey = key.replace(/-/g, "_").toUpperCase();
       process.env[envKey] = val;
@@ -195,10 +197,10 @@ export async function vaultExportToEnv(keys: string[]): Promise<void> {
   }
 }
 
-export function vaultRotateKey(): { ok: boolean; message: string } {
+export async function vaultRotateKey(): Promise<{ ok: boolean; message: string }> {
   try {
-    const oldKey = getMasterKey();
-    const vault = readVault();
+    const oldKey = await getMasterKey();
+    const vault = await readVault();
     const entries = vault.entries;
     const newKey = crypto.randomBytes(KEY_LENGTH);
     const reEncrypted: Record<string, EncryptedMaterial> = {};
@@ -211,13 +213,16 @@ export function vaultRotateKey(): { ok: boolean; message: string } {
       }
     }
     const backupPath = KEY_FILE + ".bak." + Date.now();
-    if (fs.existsSync(KEY_FILE)) {
-      fs.copyFileSync(KEY_FILE, backupPath);
+    try {
+      await fs.access(KEY_FILE);
+      await fs.copyFile(KEY_FILE, backupPath);
+    } catch {
+      // key file might not exist
     }
-    fs.writeFileSync(KEY_FILE, newKey.toString("hex"), "utf8");
-    fs.chmodSync(KEY_FILE, 0o600);
+    await fs.writeFile(KEY_FILE, newKey.toString("hex"), "utf8");
+    await fs.chmod(KEY_FILE, 0o600);
     vault.entries = reEncrypted;
-    writeVault(vault);
+    await writeVault(vault);
     return { ok: true, message: `Key rotated. ${Object.keys(reEncrypted).length} entries re-encrypted. Backup saved to ${backupPath}.` };
   } catch (e: any) {
     return { ok: false, message: `Key rotation failed: ${e.message}` };

@@ -1,7 +1,7 @@
 import type { MemoryEntry, MemoryStats, MemoryType, SkillMeta } from "./memory-types";
 import { embed, cosineSimilarity } from "./memory-embedding";
 import { logger } from "./logger";
-import { encryptMemory, decryptMemory } from "./memory-encryption";
+import { encryptMemory, decryptMemory, ensureEncryptionKey } from "./memory-encryption";
 import { assignAndUpdate } from "./ann-cluster";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -66,6 +66,7 @@ export async function loadEntries(): Promise<MemoryEntry[]> {
   }
   try {
     const raw = fs.readFileSync(SEMANTIC_FILE, "utf8");
+    await ensureEncryptionKey();
     const decrypted = decryptMemory(raw) || raw;
     const rawEntries: any[] = JSON.parse(decrypted);
     const entries = rawEntries.map(migrateEntry);

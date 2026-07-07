@@ -11,35 +11,34 @@ export interface RetrievedSkill {
 
 const LEVEL0_DISPLAY_CHARS = 200;
 
-export function retrieveSkills(query: string, topK: number = 5): RetrievedSkill[] {
-  const skills = listSkills("agent");
+export async function retrieveSkills(query: string, topK: number = 5): Promise<RetrievedSkill[]> {
+  const skills = await listSkills("agent");
   const queryLower = query.toLowerCase();
   const queryTokens = queryLower.split(/\s+/).filter(t => t.length > 2);
 
-  const scored: RetrievedSkill[] = skills.map(s => {
-    const lifecycle = computeLifecycle(s);
-    const usage = getAllUsage()[s.frontmatter.name];
-    const useCount = usage?.useCount || 0;
+  const usage = await getAllUsage();
+  const scored: RetrievedSkill[] = [];
+  for (const s of skills) {
+    const lifecycle = await computeLifecycle(s);
+    const record = usage[s.frontmatter.name];
+    const useCount = record?.useCount || 0;
 
     let score = 0;
     const nameDesc = (s.frontmatter.name + " " + s.frontmatter.description).toLowerCase();
     const bodyLower = s.body.toLowerCase();
 
-    // Exact phrase match in name/description
     if (nameDesc.includes(queryLower)) score += 10;
 
-    // Token matches
     const matchedInNameDesc = queryTokens.filter(t => nameDesc.includes(t)).length;
     score += matchedInNameDesc * 5;
 
     const matchedInBody = queryTokens.filter(t => bodyLower.includes(t)).length;
     score += matchedInBody * 2;
 
-    // Boost for frequently used skills
     score += Math.min(useCount * 0.5, 5);
 
-    return { skill: s, lifecycle, relevanceScore: score, useCount, confidence: Math.min(1, score / 20) };
-  });
+    scored.push({ skill: s, lifecycle, relevanceScore: score, useCount, confidence: Math.min(1, score / 20) });
+  }
 
   return scored
     .filter(s => s.relevanceScore > 0)
@@ -47,19 +46,25 @@ export function retrieveSkills(query: string, topK: number = 5): RetrievedSkill[
     .slice(0, topK);
 }
 
-export function retrieveSkillsWithConfidence(query: string, topK: number = 5, minConfidence: number = 0.7): RetrievedSkill[] {
-  return retrieveSkills(query, topK).filter(s => s.confidence >= minConfidence);
+export async function retrieveSkillsWithConfidence(query: string, topK: number = 5, minConfidence: number = 0.7): Promise<RetrievedSkill[]> {
+  const results = await retrieveSkills(query, topK);
+  return results.filter(s => s.confidence >= minConfidence);
 }
 
-export function retrieveAllSkills(): RetrievedSkill[] {
-  const skills = listSkills();
-  return skills.map(s => ({
-    skill: s,
-    lifecycle: computeLifecycle(s),
-    relevanceScore: 0,
-    useCount: (getAllUsage()[s.frontmatter.name]?.useCount || 0),
-    confidence: 0,
-  }));
+export async function retrieveAllSkills(): Promise<RetrievedSkill[]> {
+  const skills = await listSkills();
+  const usage = await getAllUsage();
+  const results: RetrievedSkill[] = [];
+  for (const s of skills) {
+    results.push({
+      skill: s,
+      lifecycle: await computeLifecycle(s),
+      relevanceScore: 0,
+      useCount: (usage[s.frontmatter.name]?.useCount || 0),
+      confidence: 0,
+    });
+  }
+  return results;
 }
 
 export const LEVEL0_RENDER = Symbol("level0");
@@ -91,5 +96,5 @@ export function formatSkillsContextBlock(skills: RetrievedSkill[]): string {
     const preview = s.skill.body.slice(0, 100).replace(/\n/g, " ");
     return `  ${i + 1}. **${s.skill.frontmatter.name}**: ${preview}${tags}${usage}${confidence}`;
   });
-  return `\n# 🔧 RELEVANT SKILLS\n${lines.join("\n")}\n`;
+  return `\n# RELEVANT SKILLS\n${lines.join("\n")}\n`;
 }

@@ -1,4 +1,5 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { writeAtomic, writeAtomicAsync } from "./storage-driver";
@@ -45,7 +46,7 @@ function maybeCheckpointWal(): void {
 
 function openDb(): any {
   if (db) return db;
-  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+  if (!fsSync.existsSync(DB_DIR)) fsSync.mkdirSync(DB_DIR, { recursive: true });
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
@@ -161,7 +162,6 @@ function initializeSchema(): void {
     );
   `);
 
-  // Triggers to keep FTS index in sync
   const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'messages_fts_%'").all();
   if (triggers.length === 0) {
     db.exec(`
@@ -250,7 +250,6 @@ export function getMessages(sessionId: string, limit: number = 50, offset: numbe
 export function searchSession(query: string, sessionId?: string, k: number = 10): FtsResult[] {
   const d = openDb();
   if (!query.trim()) return [];
-  // FTS5 MATCH parameter is bound via prepared statement, not concatenated
   const q = query.trim();
   let sql: string;
   let params: any[];
@@ -421,7 +420,6 @@ export function findConnectedEntities(entityId: string): ConnectedEntity[] {
   const d = openDb();
   const results: ConnectedEntity[] = [];
 
-  // Outgoing: this entity is the subject
   const outgoing = d.prepare(`
     SELECT object_id as entityId, object_type as entityType, object_label as entityLabel,
            predicate_label as relationship, confidence_score as confidenceScore
@@ -433,7 +431,6 @@ export function findConnectedEntities(entityId: string): ConnectedEntity[] {
     results.push({ ...r, direction: "outgoing" });
   }
 
-  // Incoming: this entity is the object
   const incoming = d.prepare(`
     SELECT subject_id as entityId, subject_type as entityType, subject_label as entityLabel,
            predicate_label as relationship, confidence_score as confidenceScore
@@ -482,14 +479,17 @@ export interface PruneResult {
 
 const PRUNE_LOG_PATH = path.join(DB_DIR, "prune-log.json");
 
-function appendPruneLog(entry: any): void {
+async function appendPruneLog(entry: any): Promise<void> {
   try {
-    const log: any[] = fs.existsSync(PRUNE_LOG_PATH)
-      ? JSON.parse(fs.readFileSync(PRUNE_LOG_PATH, "utf8"))
-      : [];
+    let log: any[];
+    try {
+      log = JSON.parse(await fs.readFile(PRUNE_LOG_PATH, "utf8"));
+    } catch {
+      log = [];
+    }
     log.push({ ...entry, timestamp: Date.now() });
     if (log.length > 100) log.splice(0, log.length - 100);
-    fs.writeFileSync(PRUNE_LOG_PATH, JSON.stringify(log, null, 2));
+    await fs.writeFile(PRUNE_LOG_PATH, JSON.stringify(log, null, 2));
   } catch { /* prune log is best-effort */ }
 }
 
@@ -559,7 +559,6 @@ export function mergeRedundantTriplets(): { count: number; items: { kept: string
       const a = all[i];
       const b = all[j];
 
-      // Combined similarity: exact field match + label token overlap
       const fieldSim =
         (a.subject_id === b.subject_id ? 0.25 : labelSimilarity(a.subject_label, b.subject_label) * 0.25) +
         (a.predicate_type === b.predicate_type ? 0.25 : labelSimilarity(a.predicate_label, b.predicate_label) * 0.15) +
@@ -567,7 +566,6 @@ export function mergeRedundantTriplets(): { count: number; items: { kept: string
         (a.confidence_score > 0.7 && b.confidence_score > 0.7 ? 0.1 : 0);
 
       if (fieldSim >= REDUNDANCY_SIMILARITY_THRESHOLD) {
-        // Keep the higher-confidence entry, delete the other
         if (a.confidence_score >= b.confidence_score) {
           d.prepare("DELETE FROM triplets WHERE id = ?").run(b.id);
           processed.add(b.id);
@@ -585,7 +583,7 @@ export function mergeRedundantTriplets(): { count: number; items: { kept: string
   return { count: items.length, items };
 }
 
-export function pruneTriplets(): PruneResult {
+export async function pruneTriplets(): Promise<PruneResult> {
   const d = openDb();
   const totalBefore = (d.prepare("SELECT COUNT(*) as c FROM triplets").get() as any).c;
   const stale = pruneStaleTriplets();
@@ -593,7 +591,7 @@ export function pruneTriplets(): PruneResult {
   const totalAfter = (d.prepare("SELECT COUNT(*) as c FROM triplets").get() as any).c;
   const result: PruneResult = { staleDeleted: stale.count, redundantMerged: redundant.count, totalBefore, totalAfter, staleItems: stale.items, mergedItems: redundant.items };
   if (result.staleDeleted > 0 || result.redundantMerged > 0) {
-    appendPruneLog({ action: "prune", result });
+    await appendPruneLog({ action: "prune", result });
   }
   return result;
 }
@@ -607,54 +605,60 @@ export function closeDb(): void {
 
 // ── Checkpointing ───────────────────────────────────────────────────────────
 
-function ensureCheckpointDir(): void {
-  if (!fs.existsSync(CHECKPOINT_DIR)) {
-    fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
-  }
+async function ensureCheckpointDir(): Promise<void> {
+  await fs.mkdir(CHECKPOINT_DIR, { recursive: true });
 }
 
-export function saveCheckpoint(cp: Checkpoint): void {
-  ensureCheckpointDir();
-  const filePath = path.join(CHECKPOINT_DIR, `${cp.sessionId}.json`);
-  writeAtomic(filePath, JSON.stringify(cp, null, 2));
-}
-
-export async function saveCheckpointAsync(cp: Checkpoint): Promise<void> {
-  ensureCheckpointDir();
+export async function saveCheckpoint(cp: Checkpoint): Promise<void> {
+  await ensureCheckpointDir();
   const filePath = path.join(CHECKPOINT_DIR, `${cp.sessionId}.json`);
   await writeAtomicAsync(filePath, JSON.stringify(cp, null, 2));
 }
 
-export function loadCheckpoint(sessionId: string): Checkpoint | null {
+export async function saveCheckpointAsync(cp: Checkpoint): Promise<void> {
+  await ensureCheckpointDir();
+  const filePath = path.join(CHECKPOINT_DIR, `${cp.sessionId}.json`);
+  await writeAtomicAsync(filePath, JSON.stringify(cp, null, 2));
+}
+
+export async function loadCheckpoint(sessionId: string): Promise<Checkpoint | null> {
   const filePath = path.join(CHECKPOINT_DIR, `${sessionId}.json`);
-  if (!fs.existsSync(filePath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as Checkpoint;
+    await fs.access(filePath);
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as Checkpoint;
   } catch {
     return null;
   }
 }
 
-export function listCheckpoints(): string[] {
-  ensureCheckpointDir();
-  return fs.readdirSync(CHECKPOINT_DIR)
+export async function listCheckpoints(): Promise<string[]> {
+  await ensureCheckpointDir();
+  const files = await fs.readdir(CHECKPOINT_DIR);
+  return files
     .filter(f => f.endsWith(".json"))
     .map(f => f.replace(/\.json$/, ""));
 }
 
-export function deleteCheckpoint(sessionId: string): void {
+export async function deleteCheckpoint(sessionId: string): Promise<void> {
   const filePath = path.join(CHECKPOINT_DIR, `${sessionId}.json`);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+  try {
+    await fs.access(filePath);
+    await fs.unlink(filePath);
+  } catch {
+    // doesn't exist
   }
 }
 
-export function getLatestCheckpoint(): Checkpoint | null {
-  const ids = listCheckpoints();
+export async function getLatestCheckpoint(): Promise<Checkpoint | null> {
+  const ids = await listCheckpoints();
   if (ids.length === 0) return null;
   let latest: Checkpoint | null = null;
   for (const id of ids) {
-    const cp = loadCheckpoint(id);
+    const cp = await loadCheckpoint(id);
     if (cp && (!latest || cp.timestamp > latest.timestamp)) {
       latest = cp;
     }
@@ -662,8 +666,8 @@ export function getLatestCheckpoint(): Checkpoint | null {
   return latest;
 }
 
-export function restoreCheckpoint(sessionId: string): { success: boolean; checkpoint: Checkpoint | null; error?: string } {
-  const cp = loadCheckpoint(sessionId);
+export async function restoreCheckpoint(sessionId: string): Promise<{ success: boolean; checkpoint: Checkpoint | null; error?: string }> {
+  const cp = await loadCheckpoint(sessionId);
   if (!cp) {
     return { success: false, checkpoint: null, error: `Checkpoint not found for session: ${sessionId}` };
   }

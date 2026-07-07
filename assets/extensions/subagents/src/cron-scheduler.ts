@@ -98,11 +98,9 @@ export function nextCronTick(cron: ParsedCron, after: Date): Date | null {
     return true;
   };
 
-  // Pre-compute next candidate via date math
   // Start with next minute
   current.setUTCMinutes(current.getUTCMinutes() + 1, 0, 0);
 
-  // Try next few hours/minutes using pre-computed fields
   const sortedMinutes = cron.minutes;
   const sortedHours = cron.hours;
 
@@ -140,7 +138,6 @@ export function nextCronTick(cron: ParsedCron, after: Date): Date | null {
     candidate.setUTCDate(candidate.getUTCDate() + dayOffset);
     candidate.setUTCHours(sortedHours[0], sortedMinutes[0], 0, 0);
 
-    // Check all hour:minute combos for this day
     for (const h of sortedHours) {
       for (const m of sortedMinutes) {
         candidate.setUTCHours(h, m, 0, 0);
@@ -258,7 +255,6 @@ export function startCronJobs(
   const cfg = { ...DEFAULT_CONFIG, ...config };
   registeredJobs = cfg.customJobs;
 
-  // Curator job — with exponential backoff
   const curatorTimer = setInterval(async () => {
     await withBackoff("curator", async () => {
       const report = await runCurator(model, auth);
@@ -266,7 +262,6 @@ export function startCronJobs(
     });
   }, cfg.curatorIntervalMs);
 
-  // File consolidation job — with exponential backoff
   const consolidationTimer = setInterval(async () => {
     await withBackoff("consolidation", async () => {
       await fileConsolidate("memory");
@@ -274,10 +269,9 @@ export function startCronJobs(
     });
   }, cfg.consolidationIntervalMs);
 
-  // DB cleanup / maintenance — prune stale triplets, then reopen
   const dbTimer = setInterval(() => {
     withBackoff("db-cleanup", async () => {
-      const result = pruneTriplets();
+      const result = await pruneTriplets();
       if (result.staleDeleted > 0 || result.redundantMerged > 0) {
         // Triplet housekeeping happened
       }
@@ -286,7 +280,6 @@ export function startCronJobs(
     });
   }, cfg.dbCleanupIntervalMs);
 
-  // Health check job — probe enabled MCP servers and known providers
   const healthTimer = setInterval(async () => {
     await withBackoff("health-check", async () => {
       const servers = loadMcpServers().filter(s => s.enabled);
@@ -301,16 +294,14 @@ export function startCronJobs(
     });
   }, cfg.healthCheckIntervalMs);
 
-  // Log rotation job
   const logRotationTimer = setInterval(async () => {
     await withBackoff("log-rotation", async () => {
       await rotateLogFiles();
     });
-  }, 24 * 60 * 60 * 1000); // once per day
+  }, 24 * 60 * 60 * 1000);
 
   timers = [curatorTimer, consolidationTimer, dbTimer, healthTimer, logRotationTimer];
 
-  // Schedule any custom cron jobs registered before start
   for (const job of registeredJobs) {
     if (job.enabled) scheduleCustomJob(job);
   }
@@ -331,7 +322,6 @@ function scheduleCustomJob(job: CronJob): void {
   const parsed = parseCron(job.expression);
   if (!parsed) return;
 
-  // Use setInterval with real-time check to avoid clock jump issues
   const timer = setInterval(async () => {
     const now = new Date();
     const tick = nextCronTick(parsed, new Date(now.getTime() - 60000));

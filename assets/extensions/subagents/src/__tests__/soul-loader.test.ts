@@ -38,18 +38,18 @@ describe("soul-loader", () => {
     } catch {}
   });
 
-  it("loadSoul returns default content when no file exists", () => {
-    const soul = loadSoul();
+  it("loadSoul returns default content when no file exists", async () => {
+    const soul = await loadSoul();
     expect(soul).toContain("Custom-PI");
     expect(soul).toContain("autonomous AI software engineer");
   });
 
-  it("loadSoul reads from file when it exists", () => {
+  it("loadSoul reads from file when it exists", async () => {
     const dir = path.dirname(SOUL_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const custom = "You are a custom test identity.";
     fs.writeFileSync(SOUL_PATH, custom, "utf8");
-    const soul = loadSoul();
+    const soul = await loadSoul();
     expect(soul).toBe(custom);
   });
 
@@ -57,9 +57,9 @@ describe("soul-loader", () => {
     expect(getSoulPath()).toBe(SOUL_PATH);
   });
 
-  it("ensureSoulFile creates the file if missing", () => {
+  it("ensureSoulFile creates the file if missing", async () => {
     expect(fs.existsSync(SOUL_PATH)).toBe(false);
-    ensureSoulFile();
+    await ensureSoulFile();
     expect(fs.existsSync(SOUL_PATH)).toBe(true);
     const content = fs.readFileSync(SOUL_PATH, "utf8");
     expect(content).toContain("Custom-PI");

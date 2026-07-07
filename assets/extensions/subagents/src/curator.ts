@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { logger } from "./logger";
@@ -36,8 +36,8 @@ export async function runCurator(model: any, auth: { apiKey?: string; headers?: 
   const report: CuratorReport = { archived: [], deleted: [], staleCount: 0, activeCount: 0 };
 
   try {
-    const skills = listSkills("agent");
-    const usage = getAllUsage();
+    const skills = await listSkills("agent");
+    const usage = await getAllUsage();
 
     let staleCount = 0;
     let activeCount = 0;
@@ -77,20 +77,19 @@ export async function runCurator(model: any, auth: { apiKey?: string; headers?: 
 
     const decision = JSON.parse(text);
 
-    // Archive skills — move to archived subdirectory
     if (Array.isArray(decision.toArchive)) {
       if (dryRun) {
         report.archived.push(...decision.toArchive.map((n: string) => `${n} (dry-run)`));
       } else {
         const archiveDir = path.join(os.homedir(), SKILLS_DIR, "archived");
-        if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+        await fs.mkdir(archiveDir, { recursive: true });
         for (const name of decision.toArchive) {
           const skill = skills.find(s => s.frontmatter.name === name);
           if (skill && skill.filePath) {
             try {
               const dest = path.join(archiveDir, path.basename(skill.filePath));
-              fs.copyFileSync(skill.filePath, dest);
-              fs.unlinkSync(skill.filePath);
+              await fs.copyFile(skill.filePath, dest);
+              await fs.unlink(skill.filePath);
               report.archived.push(name);
           } catch (e) { logger.warn("Failed to archive skill", { name, error: String(e) }); }
           }
@@ -98,13 +97,12 @@ export async function runCurator(model: any, auth: { apiKey?: string; headers?: 
       }
     }
 
-    // Delete skills
     if (Array.isArray(decision.toDelete)) {
       if (dryRun) {
         report.deleted.push(...decision.toDelete.map((n: string) => `${n} (dry-run)`));
       } else {
         for (const name of decision.toDelete) {
-          if (deleteSkill(name)) {
+          if (await deleteSkill(name)) {
             report.deleted.push(name);
           }
         }
@@ -144,7 +142,6 @@ export function validateSkillExecution(
   const warnings: string[] = [];
   const fm = skill.frontmatter;
 
-  // Check prerequisites
   if (fm.prerequisites && fm.prerequisites.length > 0 && availableTools) {
     for (const prereq of fm.prerequisites) {
       if (!availableTools.includes(prereq)) {
@@ -153,7 +150,6 @@ export function validateSkillExecution(
     }
   }
 
-  // Check input schema
   if (fm.input_schema) {
     const schema = fm.input_schema;
     if (schema.type === "object" && schema.properties) {
@@ -170,7 +166,6 @@ export function validateSkillExecution(
     }
   }
 
-  // Check output contract (informational only)
   if (fm.output_contract && !errors.length) {
     // output contract is for documentation / downstream consumers
   }
@@ -178,8 +173,8 @@ export function validateSkillExecution(
   return { valid: errors.length === 0, errors, warnings };
 }
 
-export function validateAllSkills(availableTools?: string[]): Record<string, ValidationResult> {
-  const skills = listSkills();
+export async function validateAllSkills(availableTools?: string[]): Promise<Record<string, ValidationResult>> {
+  const skills = await listSkills();
   const results: Record<string, ValidationResult> = {};
   for (const skill of skills) {
     results[skill.frontmatter.name] = validateSkillExecution(skill, {}, availableTools);

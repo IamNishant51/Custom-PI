@@ -605,7 +605,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
 
         // Save checkpoint before delegation
         try {
-          saveCheckpoint({
+          await saveCheckpoint({
             taskId: id,
             sessionId: context.sessionId || "unknown",
             timestamp: Date.now(),
@@ -734,7 +734,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
 
       // Save checkpoint before parallel delegation
       try {
-        saveCheckpoint({
+        await saveCheckpoint({
           taskId: id,
           sessionId: context.sessionId || "unknown",
           timestamp: Date.now(),
@@ -1085,7 +1085,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     }),
     async execute(_id, params, _signal, _update, _context) {
       try {
-        vaultSet(params.key, params.value);
+        await vaultSet(params.key, params.value);
         return { content: [{ type: "text", text: `Secret '${params.key}' stored securely in vault.` }] };
       } catch (e: any) {
         return { content: [{ type: "text", text: `Failed to store secret: ${e.message}` }], isError: true };
@@ -1102,7 +1102,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     }),
     async execute(_id, params, _signal, _update, _context) {
       try {
-        const value = vaultGet(params.key);
+        const value = await vaultGet(params.key);
         if (value === null) {
           return { content: [{ type: "text", text: `Secret '${params.key}' not found in vault.` }], isError: true };
         }
@@ -1122,7 +1122,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     }),
     async execute(_id, params, _signal, _update, _context) {
       try {
-        const ok = vaultDelete(params.key);
+        const ok = await vaultDelete(params.key);
         if (ok) {
           return { content: [{ type: "text", text: `Secret '${params.key}' deleted from vault.` }] };
         }
@@ -1140,7 +1140,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _update, _context) {
       try {
-        const keys = vaultList();
+        const keys = await vaultList();
         if (keys.length === 0) {
           return { content: [{ type: "text", text: "Vault is empty. Use vault_set to store secrets." }] };
         }
@@ -1158,7 +1158,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _update, _context) {
       try {
-        const health = vaultHealth();
+        const health = await vaultHealth();
         return { content: [{ type: "text", text: `Vault status: ${health.ok ? "healthy" : "unhealthy"}\n${health.message}` }] };
       } catch (e: any) {
         return { content: [{ type: "text", text: `Vault check failed: ${e.message}` }], isError: true };
@@ -2112,8 +2112,8 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
   // ── Resume Command ──────────────────────────────────────────────────────────
   pi.registerCommand("checkpoint", {
     description: "Resume from the latest checkpoint. Restores goal, subtasks, and context.",
-    handler(args, ctx) {
-      const cp = getLatestCheckpoint();
+    async handler(args, ctx) {
+      const cp = await getLatestCheckpoint();
       if (!cp) {
         ctx.ui.notify("No checkpoint found to resume from.", "error");
         return;
@@ -2208,7 +2208,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     } catch { logger.warn("MCP config init write failed"); }
 
     // Initialize file-based memory and nudge system
-    ensureSoulFile();
+    await ensureSoulFile();
     ensureMemoryFiles();
     initNudgeState();
 
@@ -2230,7 +2230,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
     // Check for recovery checkpoint on startup
     try {
-      const latest = getLatestCheckpoint();
+      const latest = await getLatestCheckpoint();
       if (latest && Date.now() - latest.timestamp < CHECKPOINT_STALE_MS) {
         const age = Math.round((Date.now() - latest.timestamp) / 1000);
         ctx.ui.notify(
@@ -2368,7 +2368,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     const blocks: { priority: number; content: string; label: string }[] = [];
 
     // Tier 1: SOUL.md — identity layer (always included, but trimmed for small contexts)
-    const soul = loadSoul();
+    const soul = await loadSoul();
     const soulBlock = isSmallContext
       ? `\n\n# IDENTITY\n${soul.split("\n").slice(0, 4).join("\n")}\n`
       : `\n\n# 🧬 IDENTITY & CORE PRINCIPLES\n${soul}\n`;
@@ -2850,7 +2850,7 @@ If nothing to report, return: {}`;
     }
     // Save final checkpoint for recovery
     try {
-      saveCheckpoint({
+      await saveCheckpoint({
         taskId: "shutdown",
         sessionId: "session_end",
         timestamp: Date.now(),

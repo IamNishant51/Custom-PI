@@ -43,56 +43,56 @@ describe("skill-store", () => {
     try { fs.rmSync(SKILLS_DIR, { recursive: true, force: true }); } catch {}
   });
 
-  it("saveSkill creates a skill file", () => {
-    const skill = saveSkill("test-skill", "A test skill", "## Steps\n1. Do this\n2. Do that", "agent");
+  it("saveSkill creates a skill file", async () => {
+    const skill = await saveSkill("test-skill", "A test skill", "## Steps\n1. Do this\n2. Do that", "agent");
     expect(skill.frontmatter.name).toBe("test-skill");
     expect(fs.existsSync(skill.filePath)).toBe(true);
   });
 
-  it("getSkill retrieves a saved skill", () => {
-    saveSkill("my-skill", "My description", "Body content", "agent");
-    const retrieved = getSkill("my-skill");
+  it("getSkill retrieves a saved skill", async () => {
+    await saveSkill("my-skill", "My description", "Body content", "agent");
+    const retrieved = await getSkill("my-skill");
     expect(retrieved).not.toBeNull();
     expect(retrieved!.frontmatter.description).toBe("My description");
   });
 
-  it("listSkills returns all skills", () => {
-    saveSkill("skill-a", "A", "Body a", "agent");
-    saveSkill("skill-b", "B", "Body b", "user");
-    const all = listSkills();
+  it("listSkills returns all skills", async () => {
+    await saveSkill("skill-a", "A", "Body a", "agent");
+    await saveSkill("skill-b", "B", "Body b", "user");
+    const all = await listSkills();
     expect(all.length).toBe(2);
-    const agentOnly = listSkills("agent");
+    const agentOnly = await listSkills("agent");
     expect(agentOnly.length).toBe(1);
     expect(agentOnly[0].frontmatter.name).toBe("skill-a");
   });
 
-  it("deleteSkill removes a skill", () => {
-    saveSkill("delete-me", "To delete", "Body", "agent");
-    expect(getSkill("delete-me")).not.toBeNull();
-    const ok = deleteSkill("delete-me");
+  it("deleteSkill removes a skill", async () => {
+    await saveSkill("delete-me", "To delete", "Body", "agent");
+    expect(await getSkill("delete-me")).not.toBeNull();
+    const ok = await deleteSkill("delete-me");
     expect(ok).toBe(true);
-    expect(getSkill("delete-me")).toBeNull();
+    expect(await getSkill("delete-me")).toBeNull();
   });
 
-  it("recordSkillUsage tracks usage", () => {
-    saveSkill("tracked", "Tracked skill", "Body", "agent");
-    recordSkillUsage("tracked", "sess-1", true);
-    recordSkillUsage("tracked", "sess-2", true);
-    recordSkillUsage("tracked", "sess-3", false);
+  it("recordSkillUsage tracks usage", async () => {
+    await saveSkill("tracked", "Tracked skill", "Body", "agent");
+    await recordSkillUsage("tracked", "sess-1", true);
+    await recordSkillUsage("tracked", "sess-2", true);
+    await recordSkillUsage("tracked", "sess-3", false);
 
-    const usage = getSkillUsage("tracked");
+    const usage = await getSkillUsage("tracked");
     expect(usage).not.toBeNull();
     expect(usage!.useCount).toBe(3);
     expect(usage!.successRate).toBeCloseTo(2 / 3, 2);
     expect(usage!.sessionsUsed.length).toBe(3);
   });
 
-  it("getAllUsage returns all records", () => {
-    saveSkill("u1", "U1", "Body", "agent");
-    saveSkill("u2", "U2", "Body", "agent");
-    recordSkillUsage("u1", "s1", true);
-    recordSkillUsage("u2", "s2", false);
-    const all = getAllUsage();
+  it("getAllUsage returns all records", async () => {
+    await saveSkill("u1", "U1", "Body", "agent");
+    await saveSkill("u2", "U2", "Body", "agent");
+    await recordSkillUsage("u1", "s1", true);
+    await recordSkillUsage("u2", "s2", false);
+    const all = await getAllUsage();
     expect(Object.keys(all).length).toBe(2);
   });
 

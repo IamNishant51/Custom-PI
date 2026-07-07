@@ -8,9 +8,13 @@ const TAG_LENGTH = 16;
 let _encryptionKey: Buffer | null = null;
 
 function getEncryptionKey(): Buffer | null {
+  return _encryptionKey;
+}
+
+async function ensureKey(): Promise<Buffer> {
   if (_encryptionKey) return _encryptionKey;
   try {
-    const keyStr = vaultGet("__memory_encryption_key__");
+    const keyStr = await vaultGet("__memory_encryption_key__");
     if (keyStr) {
       const key = Buffer.from(keyStr, "hex");
       if (key.length === 32) {
@@ -18,19 +22,11 @@ function getEncryptionKey(): Buffer | null {
         return key;
       }
     }
-    } catch (err) {
-      console.error("[MemoryEncryption] Failed to get encryption key:", err);
-    }
-  return null;
-}
-
-async function ensureKey(): Promise<Buffer> {
-  const existing = getEncryptionKey();
-  if (existing) return existing;
+  } catch {}
   const key = crypto.randomBytes(32);
   try {
     const { vaultSet } = await import("./secret-vault");
-    vaultSet("__memory_encryption_key__", key.toString("hex"));
+    await vaultSet("__memory_encryption_key__", key.toString("hex"));
   } catch (err) {
     console.error("[MemoryEncryption] Failed to store encryption key:", err);
   }
@@ -39,13 +35,13 @@ async function ensureKey(): Promise<Buffer> {
 }
 
 export async function ensureEncryptionKey(): Promise<boolean> {
-  if (getEncryptionKey()) return true;
+  if (_encryptionKey) return true;
   await ensureKey();
   return true;
 }
 
 export function isMemoryEncryptionEnabled(): boolean {
-  return !!(process.env.PI_MEMORY_ENCRYPT || getEncryptionKey());
+  return !!(process.env.PI_MEMORY_ENCRYPT || _encryptionKey);
 }
 
 export async function encryptMemory(plaintext: string): Promise<string> {

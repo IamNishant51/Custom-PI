@@ -35,46 +35,46 @@ describe("skill-retrieval", () => {
     try { fs.rmSync(SKILLS_DIR, { recursive: true, force: true }); } catch {}
   });
 
-  it("retrieveSkills returns matching skills", () => {
-    saveSkill("react-setup", "React project setup and configuration", "Steps for React setup with Vite", "agent", ["react", "frontend"]);
-    saveSkill("api-design", "REST API design patterns", "Design REST endpoints following best practices", "agent", ["api", "backend"]);
-    saveSkill("database-migration", "Database migration patterns", "Run SQL migrations safely", "agent", ["database"]);
+  it("retrieveSkills returns matching skills", async () => {
+    await saveSkill("react-setup", "React project setup and configuration", "Steps for React setup with Vite", "agent", ["react", "frontend"]);
+    await saveSkill("api-design", "REST API design patterns", "Design REST endpoints following best practices", "agent", ["api", "backend"]);
+    await saveSkill("database-migration", "Database migration patterns", "Run SQL migrations safely", "agent", ["database"]);
 
-    const results = retrieveSkills("react frontend", 5);
+    const results = await retrieveSkills("react frontend", 5);
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].skill.frontmatter.name).toBe("react-setup");
   });
 
-  it("retrieveSkills returns empty for no match", () => {
-    saveSkill("test-skill", "Test", "Body", "agent");
-    const results = retrieveSkills("xyznonexistent12345", 5);
+  it("retrieveSkills returns empty for no match", async () => {
+    await saveSkill("test-skill", "Test", "Body", "agent");
+    const results = await retrieveSkills("xyznonexistent12345", 5);
     expect(results.length).toBe(0);
   });
 
-  it("retrieveSkills boosts frequently used skills", () => {
-    saveSkill("frequent", "Frequently used skill", "Body content", "agent");
-    saveSkill("rare", "Rarely used skill", "Body content", "agent");
-    recordSkillUsage("frequent", "s1", true);
-    recordSkillUsage("frequent", "s2", true);
-    recordSkillUsage("frequent", "s3", true);
+  it("retrieveSkills boosts frequently used skills", async () => {
+    await saveSkill("frequent", "Frequently used skill", "Body content", "agent");
+    await saveSkill("rare", "Rarely used skill", "Body content", "agent");
+    await recordSkillUsage("frequent", "s1", true);
+    await recordSkillUsage("frequent", "s2", true);
+    await recordSkillUsage("frequent", "s3", true);
 
-    const results = retrieveSkills("skill", 5);
+    const results = await retrieveSkills("skill", 5);
     expect(results.length).toBe(2);
     expect(results[0].skill.frontmatter.name).toBe("frequent");
     expect(results[0].useCount).toBe(3);
   });
 
-  it("renderSkillProgressive level 0 shows truncated body", () => {
-    const skill = saveSkill("render-test", "Render test", "A".repeat(300), "agent");
+  it("renderSkillProgressive level 0 shows truncated body", async () => {
+    const skill = await saveSkill("render-test", "Render test", "A".repeat(300), "agent");
     const rendered = renderSkillProgressive(skill, 0);
     expect(rendered).toContain("render-test");
     expect(rendered.length).toBeLessThan(400);
   });
 
-  it("formatSkillsContextBlock formats skills", () => {
-    const skill = saveSkill("ctx-skill", "Context skill", "Body", "agent");
-    recordSkillUsage("ctx-skill", "s1", true);
-    const retrieved = retrieveSkills("context", 5);
+  it("formatSkillsContextBlock formats skills", async () => {
+    const skill = await saveSkill("ctx-skill", "Context skill", "Body", "agent");
+    await recordSkillUsage("ctx-skill", "s1", true);
+    const retrieved = await retrieveSkills("context", 5);
     const block = formatSkillsContextBlock(retrieved);
     expect(block).toContain("RELEVANT SKILLS");
     expect(block).toContain("ctx-skill");

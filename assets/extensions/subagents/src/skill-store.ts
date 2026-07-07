@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import yaml from "yaml";
@@ -33,42 +33,53 @@ function usageFilePath(): string {
   return path.join(getSkillsDir(), SKILL_USAGE_FILE);
 }
 
-function ensureDirs(): void {
-  for (const dir of [getSkillsDir(), getAgentSkillsDir(), getUserSkillsDir()]) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  }
+async function ensureDirs(): Promise<void> {
+  await Promise.all([
+    fs.mkdir(getSkillsDir(), { recursive: true }),
+    fs.mkdir(getAgentSkillsDir(), { recursive: true }),
+    fs.mkdir(getUserSkillsDir(), { recursive: true }),
+  ]);
 }
 
-function readUsage(): Record<string, SkillUsageRecord> {
-  ensureDirs();
+async function readUsage(): Promise<Record<string, SkillUsageRecord>> {
+  await ensureDirs();
   const fp = usageFilePath();
-  if (!fs.existsSync(fp)) return {};
   try {
-    return JSON.parse(fs.readFileSync(fp, "utf8"));
+    return JSON.parse(await fs.readFile(fp, "utf8"));
   } catch {
     return {};
   }
 }
 
-function writeUsage(usage: Record<string, SkillUsageRecord>): void {
-  ensureDirs();
-  fs.writeFileSync(usageFilePath(), JSON.stringify(usage, null, 2), "utf8");
+async function writeUsage(usage: Record<string, SkillUsageRecord>): Promise<void> {
+  await ensureDirs();
+  await fs.writeFile(usageFilePath(), JSON.stringify(usage, null, 2), "utf8");
 }
 
-export function listSkills(author?: SkillAuthor): SkillFile[] {
-  ensureDirs();
+export async function listSkills(author?: SkillAuthor): Promise<SkillFile[]> {
+  await ensureDirs();
   const results: SkillFile[] = [];
   const dirs = author === "user" ? [getUserSkillsDir()]
     : author === "agent" ? [getAgentSkillsDir()]
     : [getAgentSkillsDir(), getUserSkillsDir()];
 
   for (const dir of dirs) {
-    if (!fs.existsSync(dir)) continue;
-    for (const file of fs.readdirSync(dir)) {
+    try {
+      await fs.access(dir);
+    } catch {
+      continue;
+    }
+    let files: string[];
+    try {
+      files = await fs.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
       if (!file.endsWith(".md")) continue;
       const filePath = path.join(dir, file);
       try {
-        const content = fs.readFileSync(filePath, "utf8");
+        const content = await fs.readFile(filePath, "utf8");
         const parsed = parseSkillFile(content, filePath);
         if (parsed) results.push(parsed);
       } catch { logger.warn("Failed to parse skill file", { file: filePath }); }
@@ -98,20 +109,20 @@ export function parseSkillFile(content: string, filePath: string): SkillFile | n
   }
 }
 
-export function getSkill(name: string): SkillFile | null {
-  const skills = listSkills();
+export async function getSkill(name: string): Promise<SkillFile | null> {
+  const skills = await listSkills();
   return skills.find(s => s.frontmatter.name === name || path.basename(s.filePath, ".md") === makeSkillFilename(name)) || null;
 }
 
-export function saveSkill(
+export async function saveSkill(
   name: string,
   description: string,
   body: string,
   author: SkillAuthor = "agent",
   tags: string[] = [],
   complexity: number = 3,
-): SkillFile {
-  ensureDirs();
+): Promise<SkillFile> {
+  await ensureDirs();
   const filename = makeSkillFilename(name);
   const dir = author === "user" ? getUserSkillsDir() : getAgentSkillsDir();
   const filePath = path.join(dir, filename);
@@ -128,26 +139,26 @@ export function saveSkill(
   };
 
   const content = `---\n${yaml.stringify(frontmatter)}---\n${body}\n`;
-  fs.writeFileSync(filePath, content, "utf8");
+  await fs.writeFile(filePath, content, "utf8");
   return { frontmatter, body, filePath };
 }
 
-export function deleteSkill(name: string): boolean {
-  const skill = getSkill(name);
+export async function deleteSkill(name: string): Promise<boolean> {
+  const skill = await getSkill(name);
   if (!skill) return false;
   try {
-    fs.unlinkSync(skill.filePath);
-    const usage = readUsage();
+    await fs.unlink(skill.filePath);
+    const usage = await readUsage();
     delete usage[skill.frontmatter.name];
-    writeUsage(usage);
+    await writeUsage(usage);
     return true;
   } catch {
     return false;
   }
 }
 
-export function recordSkillUsage(name: string, sessionId: string, success: boolean): void {
-  const usage = readUsage();
+export async function recordSkillUsage(name: string, sessionId: string, success: boolean): Promise<void> {
+  const usage = await readUsage();
   const now = new Date().toISOString();
   const existing = usage[name];
   if (existing) {
@@ -168,20 +179,20 @@ export function recordSkillUsage(name: string, sessionId: string, success: boole
       successRate: success ? 1 : 0,
     };
   }
-  writeUsage(usage);
+  await writeUsage(usage);
 }
 
-export function getSkillUsage(name: string): SkillUsageRecord | null {
-  const usage = readUsage();
+export async function getSkillUsage(name: string): Promise<SkillUsageRecord | null> {
+  const usage = await readUsage();
   return usage[name] || null;
 }
 
-export function getAllUsage(): Record<string, SkillUsageRecord> {
+export async function getAllUsage(): Promise<Record<string, SkillUsageRecord>> {
   return readUsage();
 }
 
-export function computeLifecycle(skill: SkillFile): SkillLifecycle {
-  const usage = readUsage();
+export async function computeLifecycle(skill: SkillFile): Promise<SkillLifecycle> {
+  const usage = await readUsage();
   const record = usage[skill.frontmatter.name];
   if (!record) return "active";
   const lastUsed = new Date(record.lastUsed).getTime();
@@ -192,10 +203,20 @@ export function computeLifecycle(skill: SkillFile): SkillLifecycle {
   return "active";
 }
 
-export function getStaleSkills(): SkillFile[] {
-  return listSkills("agent").filter(s => computeLifecycle(s) === "stale");
+export async function getStaleSkills(): Promise<SkillFile[]> {
+  const skills = await listSkills("agent");
+  const results: SkillFile[] = [];
+  for (const s of skills) {
+    if (await computeLifecycle(s) === "stale") results.push(s);
+  }
+  return results;
 }
 
-export function getArchivedSkills(): SkillFile[] {
-  return listSkills("agent").filter(s => computeLifecycle(s) === "archived");
+export async function getArchivedSkills(): Promise<SkillFile[]> {
+  const skills = await listSkills("agent");
+  const results: SkillFile[] = [];
+  for (const s of skills) {
+    if (await computeLifecycle(s) === "archived") results.push(s);
+  }
+  return results;
 }
