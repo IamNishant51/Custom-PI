@@ -3,9 +3,9 @@ import path from "node:path";
 import { ValidationError, NotFoundError, SecurityError } from "../errors";
 import { PATHS } from "../config";
 import os from "node:os";
-import vm from "node:vm";
 import { spawn } from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
+import { executeInSandbox } from "./plugin-sandbox";
 
 export interface PluginManifest {
   name: string;
@@ -204,25 +204,16 @@ export class PluginMarketplace {
 
       const code = fs.readFileSync(entryPath, "utf8");
 
-      return (context: SandboxContext) => {
+      return async (context: SandboxContext) => {
         try {
-          const sandbox = vm.createContext(Object.create(null));
-          sandbox.exports = {};
-          sandbox.console = { log: console.log, warn: console.warn, error: console.error };
-          sandbox.setTimeout = setTimeout;
-          sandbox.clearTimeout = clearTimeout;
-          sandbox.context = context;
-
-          const script = new vm.Script(
-            `"use strict";\n${code}\n;exports["${hook}"](context);`,
-            { filename: entryPath }
-          );
-          script.runInContext(sandbox, { timeout: 5000, breakOnSigint: true });
-          return sandbox.exports;
+          const result = await executeInSandbox(code, hook, context);
+          if (!result.ok) {
+            plugin.loadErrors = plugin.loadErrors || [];
+            plugin.loadErrors.push(`Hook ${hook} execution: ${result.error}`);
+          }
         } catch (e) {
           plugin.loadErrors = plugin.loadErrors || [];
           plugin.loadErrors.push(`Hook ${hook} execution: ${e instanceof Error ? e.message : String(e)}`);
-          return null;
         }
       };
     } catch (err) {
