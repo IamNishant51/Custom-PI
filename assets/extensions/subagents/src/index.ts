@@ -2578,8 +2578,9 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  let backgroundTaskCounter = 0;
   let isProcessingBackground = false;
+  let backgroundDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const BACKGROUND_DEBOUNCE_MS = 2000;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Message persistence — store EVERY message (user, assistant, tool) to SQLite
@@ -2601,68 +2602,27 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     }
   });
 
-  // Nudge-driven background processing: replaces 3 separate LLM calls with 1
-  pi.on("message_end", async (event, ctx) => {
-    if (event.message.role !== "assistant") return;
-    const msgHasToolCalls = event.message.content.some((c: any) => c.type === "toolCall");
-    if (msgHasToolCalls) return;
+  // Nudge-driven background processing: debounced + coalesced
+  async function runBackgroundProcessing(ctx: any): Promise<void> {
     if (isProcessingBackground) return;
-
-    incrementTurn();
-    const nudgeState = getNudgeState();
-
-    // Every 3rd turn: task state tracking (keep existing behavior)
-    backgroundTaskCounter++;
-    if (backgroundTaskCounter % 3 !== 0) {
-      // On non-task-tracking turns, check memory/skill nudges
-      const nudgeModel = resolveFastModel(ctx);
-      const nudgeAuth = await ctx.modelRegistry.getApiKeyAndHeaders(nudgeModel);
-      if (shouldNudgeMemory() && nudgeAuth.ok) {
-        isProcessingBackground = true;
-        try {
-          const branch = ctx.sessionManager.getBranch();
-          if (!branch) { isProcessingBackground = false; return; }
-          const messages = branch.filter((e: any) => e.type === "message").map((e: any) => e.message);
-          const conversation = getConversationText(messages.slice(-10));
-          const result = await runMemoryReview(nudgeModel, { apiKey: nudgeAuth.apiKey, headers: nudgeAuth.headers }, conversation);
-          if (result.memoryAdded.length > 0 || result.userAdded.length > 0) {
-            logger.info("memory_nudge", { summary: result.summary });
-          }
-          resetMemoryNudge();
-        } catch (e: any) {
-          try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Memory nudge error: ${e.message}\n`, "utf8"); } catch { logger.warn("MCP config init write failed"); }
-        } finally {
-          isProcessingBackground = false;
-        }
-      }
-      if (shouldNudgeSkill() && nudgeAuth.ok) {
-        isProcessingBackground = true;
-        try {
-          const branch = ctx.sessionManager.getBranch();
-          if (!branch) { isProcessingBackground = false; return; }
-          const messages = branch.filter((e: any) => e.type === "message").map((e: any) => e.message);
-          const conversation = getConversationText(messages.slice(-10));
-          const result = await runSkillReview(nudgeModel, { apiKey: nudgeAuth.apiKey, headers: nudgeAuth.headers }, conversation);
-          if (result.summary) logger.info("skill_nudge", { summary: result.summary });
-          resetSkillNudge();
-        } catch (e: any) {
-          try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Skill nudge error: ${e.message}\n`, "utf8"); } catch { logger.warn("MCP config init write failed"); }
-        } finally {
-          isProcessingBackground = false;
-        }
-      }
-      return;
-    }
-
     isProcessingBackground = true;
 
     try {
+      incrementTurn();
+      const nudgeModel = resolveFastModel(ctx);
+      const nudgeAuth = await ctx.modelRegistry.getApiKeyAndHeaders(nudgeModel);
+      const turn = getNudgeState().totalTurns;
+
       const branch = ctx.sessionManager.getBranch();
       if (!branch) return;
       const messages = branch
         .filter((e: any) => e.type === "message")
         .map((e: any) => e.message);
       if (messages.length === 0) return;
+
+      const model = resolveFastModel(ctx);
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) return;
 
       const sessionFile = ctx.sessionManager.getSessionFile();
       const stateFile = sessionFile ? sessionFile.replace(".jsonl", "-task-state.json") : null;
@@ -2674,18 +2634,16 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         return sum + (m.role === "assistant" ? countToolCalls(m) : 0);
       }, 0);
 
-      let currentStateStr = "{}";
-      if (stateFile && fs.existsSync(stateFile)) {
-        try {
-          currentStateStr = fs.readFileSync(stateFile, "utf8");
-        } catch { logger.warn("MCP config init write failed"); }
-      }
+      // Every 3rd turn: task state tracking (memory/skill nudges combined into the same LLM prompt)
+      if (turn % 3 === 0) {
+        let currentStateStr = "{}";
+        if (stateFile && fs.existsSync(stateFile)) {
+          try {
+            currentStateStr = fs.readFileSync(stateFile, "utf8");
+          } catch { logger.warn("MCP config init write failed"); }
+        }
 
-      const model = resolveFastModel(ctx);
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-      if (!auth.ok) return;
-
-      const prompt = `Analyze the recent conversation and return a JSON object.
+        const prompt = `Analyze the recent conversation and return a JSON object.
 
 Current Task State:
 ${currentStateStr}
@@ -2726,67 +2684,83 @@ Omit if no active task.
 
 If nothing to report, return: {}`;
 
-      const response = await completeSimple(model, {
-        messages: [{ role: "user", content: prompt, timestamp: Date.now() }]
-      }, {
-        apiKey: auth.apiKey,
-        headers: auth.headers,
+        const response = await completeSimple(model, {
+          messages: [{ role: "user", content: prompt, timestamp: Date.now() }]
+        }, {
+          apiKey: auth.apiKey,
+          headers: auth.headers,
           reasoning: undefined
-      });
+        });
 
-      const responseText = response.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("\n");
+        const responseText = response.content
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => c.text)
+          .join("\n");
 
-      const cleanJson = responseText.replace(/```json|```/g, "").trim();
-      let parsed: any;
-      try {
-        parsed = JSON.parse(cleanJson);
-      } catch {
-        logger.warn("Failed to parse background JSON from LLM output");
-        return;
-      }
-      if (!parsed || typeof parsed !== "object") return;
-
-      if (parsed.taskState && stateFile) {
+        const cleanJson = responseText.replace(/```json|```/g, "").trim();
+        let parsed: any;
         try {
-          fs.writeFileSync(stateFile, JSON.stringify(parsed.taskState, null, 2), "utf8");
-        } catch (err: any) { logger.warn(`Task state write failed: ${err.message}`); }
-      }
+          parsed = JSON.parse(cleanJson);
+        } catch {
+          logger.warn("Failed to parse background JSON from LLM output");
+          return;
+        }
+        if (!parsed || typeof parsed !== "object") return;
 
-      // Pre-compression flush: save important facts before context gets summarized
-      if (totalToolCalls > MAX_BACKGROUND_TOOL_CALLS) {
-        try {
-          const flushMessages = getConversationText(messages.slice(-5), 500);
-          await runPreCompressionFlush(model, { apiKey: auth.apiKey, headers: auth.headers }, flushMessages);
-        } catch (err: any) { logger.warn(`Pre-compression flush failed: ${err.message}`); }
-      }
+        if (parsed.taskState && stateFile) {
+          try {
+            fs.writeFileSync(stateFile, JSON.stringify(parsed.taskState, null, 2), "utf8");
+          } catch (err: any) { logger.warn(`Task state write failed: ${err.message}`); }
+        }
 
-      if (parsed.memory && parsed.memory.content) {
-        const importance = Math.min(10, Math.max(1, Math.floor(parsed.memory.importance ?? 5)));
-        const type = parsed.memory.type || "fact";
-        const tags = parsed.memory.tags || [];
-        const validTypes = ["fact", "decision", "preference", "pattern", "skill"];
-        if (validTypes.includes(type)) {
-          const newId = await storeMemory(parsed.memory.content, type, importance, project, tags, MEMORY_TTL_DAYS);
-          if (parsed.memory.contradicts) {
-            await markContradicted(parsed.memory.contradicts, newId);
+        // Pre-compression flush: save important facts before context gets summarized
+        if (totalToolCalls > MAX_BACKGROUND_TOOL_CALLS) {
+          try {
+            const flushMessages = getConversationText(messages.slice(-5), 500);
+            await runPreCompressionFlush(model, { apiKey: auth.apiKey, headers: auth.headers }, flushMessages);
+          } catch (err: any) { logger.warn(`Pre-compression flush failed: ${err.message}`); }
+        }
+
+        if (parsed.memory && parsed.memory.content) {
+          const importance = Math.min(10, Math.max(1, Math.floor(parsed.memory.importance ?? 5)));
+          const type = parsed.memory.type || "fact";
+          const tags = parsed.memory.tags || [];
+          const validTypes = ["fact", "decision", "preference", "pattern", "skill"];
+          if (validTypes.includes(type)) {
+            const newId = await storeMemory(parsed.memory.content, type, importance, project, tags, MEMORY_TTL_DAYS);
+            if (parsed.memory.contradicts) {
+              await markContradicted(parsed.memory.contradicts, newId);
+            }
           }
         }
-      }
 
-      if (parsed.skill && parsed.skill.content && totalToolCalls >= MIN_SKILL_TOOL_CALLS) {
-        const tags = [...(parsed.skill.tags || []), "skill", parsed.skill.problemType || "general"].filter(Boolean);
-        const importance = Math.min(10, Math.max(1, parsed.skill.complexityScore ?? 5));
-        const skillMeta = {
-          problemType: parsed.skill.problemType || "general",
-          approach: parsed.skill.approach || "",
-          keySteps: parsed.skill.keySteps || [],
-          complexityScore: parsed.skill.complexityScore || 5,
-          successCount: 1,
-        };
-        await storeMemory(parsed.skill.content, "skill", importance + 2, project, tags, SKILL_TTL_DAYS, skillMeta);
+        if (parsed.skill && parsed.skill.content && totalToolCalls >= MIN_SKILL_TOOL_CALLS) {
+          const tags = [...(parsed.skill.tags || []), "skill", parsed.skill.problemType || "general"].filter(Boolean);
+          const importance = Math.min(10, Math.max(1, parsed.skill.complexityScore ?? 5));
+          const skillMeta = {
+            problemType: parsed.skill.problemType || "general",
+            approach: parsed.skill.approach || "",
+            keySteps: parsed.skill.keySteps || [],
+            complexityScore: parsed.skill.complexityScore || 5,
+            successCount: 1,
+          };
+          await storeMemory(parsed.skill.content, "skill", importance + 2, project, tags, SKILL_TTL_DAYS, skillMeta);
+        }
+      } else if (nudgeAuth.ok) {
+        // Non-task-tracking turns: coalesced memory+skill nudge
+        const conversation = getConversationText(messages.slice(-10));
+        if (shouldNudgeMemory()) {
+          const result = await runMemoryReview(nudgeModel, { apiKey: nudgeAuth.apiKey, headers: nudgeAuth.headers }, conversation);
+          if (result.memoryAdded.length > 0 || result.userAdded.length > 0) {
+            logger.info("memory_nudge", { summary: result.summary });
+          }
+          resetMemoryNudge();
+        }
+        if (shouldNudgeSkill()) {
+          const result = await runSkillReview(nudgeModel, { apiKey: nudgeAuth.apiKey, headers: nudgeAuth.headers }, conversation);
+          if (result.summary) logger.info("skill_nudge", { summary: result.summary });
+          resetSkillNudge();
+        }
       }
     } catch (e: any) {
       try {
@@ -2796,6 +2770,19 @@ If nothing to report, return: {}`;
     } finally {
       isProcessingBackground = false;
     }
+  }
+
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message.role !== "assistant") return;
+    const msgHasToolCalls = event.message.content.some((c: any) => c.type === "toolCall");
+    if (msgHasToolCalls) return;
+
+    // Debounce: reset timer on each message, only fire after 2s quiet
+    if (backgroundDebounceTimer) clearTimeout(backgroundDebounceTimer);
+    backgroundDebounceTimer = setTimeout(() => {
+      backgroundDebounceTimer = null;
+      runBackgroundProcessing(ctx);
+    }, BACKGROUND_DEBOUNCE_MS);
   });
 
   // ─────────────────────────────────────────────────────────────────────────
