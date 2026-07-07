@@ -39,7 +39,7 @@ import { ensureMemoryFiles, loadMemorySnapshot, memoryWrite, memoryConsolidate a
 import { initNudgeState, incrementTurn, shouldNudgeMemory, shouldNudgeSkill, resetMemoryNudge, resetSkillNudge, getNudgeState } from "./memory-nudge";
 import { runMemoryReview, runSkillReview, runPreCompressionFlush } from "./background-review";
 import { startCronJobs, stopCronJobs, isCronRunning } from "./cron-scheduler";
-import { ensureSession, insertMessage, getMessages, getMessageCount, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities } from "./state-db";
+import { ensureSession, insertMessage, getMessages, getMessageCount, closeDb, saveCheckpoint, getLatestCheckpoint, queryTriplets, aggregateByEntity, findConnectedEntities, searchSession } from "./state-db";
 import {
   vaultSet, vaultGet, vaultDelete, vaultList, vaultHealth, vaultHas, vaultExists, vaultImportFromEnv,
 } from "./secret-vault";
@@ -1287,78 +1287,33 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
     parameters: Type.Object({
       query: Type.String({ description: "Search terms to find in the current session messages" }),
       k: Type.Optional(Type.Number({ description: "Number of results to return (default: 10)" })),
-      includeRoles: Type.Optional(Type.Array(Type.String(), { description: "Only include specific roles: 'user', 'assistant', 'tool'. Default: all." })),
     }),
     async execute(id, params, _signal, _update, context) {
       try {
-        const branch = context.sessionManager.getBranch();
-        if (!branch || !branch.length) {
-          return { content: [{ type: "text", text: "No current session data available." }] };
+        const query = params.query.trim();
+        if (!query || query.split(/\s+/).filter(t => t.length > 2).length === 0) {
+          return { content: [{ type: "text", text: "Please provide a more specific query (words > 2 chars)." }], isError: true };
         }
 
-        const query = params.query.toLowerCase();
+        const sessionFile = context.sessionManager?.getSessionFile();
+        const sessionId = sessionFile ? path.basename(sessionFile, ".jsonl") : null;
         const k = Math.min(50, Math.max(1, params.k ?? 10));
-        const includeRoles = params.includeRoles || ["user", "assistant", "tool"];
+        const results = searchSession(query, sessionId || undefined, Math.max(k, 100));
 
-        const queryTokens = query.split(/\s+/).filter(t => t.length > 2);
-        if (!queryTokens.length) {
-          return { content: [{ type: "text", text: "Please provide a more specific query." }], isError: true };
-        }
-
-        const scored: Array<{ score: number; role: string; text: string; timestamp: number }> = [];
-
-        for (const entry of branch) {
-          if (entry.type !== "message") continue;
-          const msg = entry.message;
-          if (!includeRoles.includes(msg.role)) continue;
-
-          let text = "";
-          if (typeof msg.content === "string") {
-            text = msg.content;
-          } else if (Array.isArray(msg.content)) {
-            text = msg.content
-              .filter((c: any) => c.type === "text")
-              .map((c: any) => c.text)
-              .join(" ");
-          }
-          if (!text) continue;
-
-          const lowerText = text.toLowerCase();
-
-          // Score: exact phrase match > all tokens match > partial token match
-          let score = 0;
-          if (lowerText.includes(query)) {
-            score = queryTokens.length + 5;
-          } else {
-            const matched = queryTokens.filter(t => lowerText.includes(t)).length;
-            if (matched > 0) {
-              score = matched + (matched / queryTokens.length) * 2;
-            }
-          }
-
-          if (score > 0) {
-            const timestamp = entry.timestamp || entry.id ? Date.parse(String(entry.timestamp || entry.id)) || 0 : 0;
-            scored.push({ score, role: msg.role, text: text.slice(0, 2000), timestamp });
-          }
-        }
-
-        // Sort by score desc, then by timestamp desc (most recent first for ties)
-        scored.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp);
-
-        const top = scored.slice(0, k);
-        if (!top.length) {
+        if (!results.length) {
           return { content: [{ type: "text", text: `No messages in the current session matched "${params.query}". Try different keywords or check the memory_search tool for persistent memories.` }] };
         }
 
         const iconForRole: Record<string, string> = { user: "\u25c6", assistant: "\u25a3", tool: "\u25d8" };
-        const lines = top.map((m, i) => {
-          const timeStr = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : "";
+        const lines = results.slice(0, k).map((m, i) => {
+          const timeStr = m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : "";
           const roleLabel = (iconForRole[m.role] || "") + ` ${m.role.toUpperCase()}`;
-          const preview = m.text.length > 300 ? m.text.slice(0, 300) + "..." : m.text;
+          const snippet = m.snippet || m.content.slice(0, 300);
+          const preview = snippet.length > 300 ? snippet.slice(0, 300) + "..." : snippet;
           return `${i + 1}. ${roleLabel} (${timeStr}): ${preview}`;
         });
 
-        const summary = `Found ${top.length} relevant message(s) in the current session:\n\n${lines.join("\n\n")}`;
+        const summary = `Found ${results.length} relevant message(s) in the current session:\n\n${lines.join("\n\n")}`;
         return { content: [{ type: "text", text: summary }] };
       } catch (e: any) {
         return { content: [{ type: "text", text: `Session search failed: ${e.message}` }], isError: true };
