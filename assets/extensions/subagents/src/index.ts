@@ -431,7 +431,7 @@ export default function (pi: ExtensionAPI) {
       daemonEnabled: true,
       autoDiscoverMcp: false,
       healthCheckInterval: 300000,
-    });
+    }).catch((e: any) => logger.error(`[Ascension] Initialization failed: ${e.message}`));
   } catch (e: any) {
     logger.error(`[Ascension] Initialization failed: ${e.message}`);
   }
@@ -2827,7 +2827,7 @@ If nothing to report, return: {}`;
   pi.on("session_shutdown", async (_event, ctx) => {
     logger.info("session_shutdown");
     // Shutdown ascension subsystems (daemon, event bus, state graph, etc.)
-    try { shutdownAscension(); } catch (e: any) { logger.error(`[Ascension] shutdown error: ${e.message}`); }
+    try { await shutdownAscension(); } catch (e: any) { logger.error(`[Ascension] shutdown error: ${e.message}`); }
     // Flush auto-learn triplets before shutdown
     try {
       const stored = await contextMonitor.flushAutoLearn();
