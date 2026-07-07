@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import { spawn, ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -113,7 +114,7 @@ export class MCPEcosystem {
           });
         }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   private saveConfig(): void {
@@ -131,7 +132,7 @@ export class MCPEcosystem {
       const tmp = this.configPath + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
       fs.renameSync(tmp, this.configPath);
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   async startServer(name: string): Promise<boolean> {
@@ -147,7 +148,7 @@ export class MCPEcosystem {
           server.command = globalMcpPath;
           server.args = [];
         }
-      } catch {}
+      } catch { logger.warn("empty catch block") }
     }
 
     server.status = "starting";
@@ -208,9 +209,9 @@ export class MCPEcosystem {
     try {
       server.process.kill("SIGTERM");
       setTimeout(() => {
-        try { server.process?.kill("SIGKILL"); } catch {}
+        try { server.process?.kill("SIGKILL"); } catch { logger.warn("empty catch block") }
       }, 3000);
-    } catch {}
+    } catch { logger.warn("empty catch block") }
     server.status = "stopped";
     server.process = undefined;
   }
@@ -299,7 +300,7 @@ export class MCPEcosystem {
           discovered++;
         }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
     return discovered;
   }
 
@@ -333,7 +334,7 @@ export class MCPEcosystem {
           }
         }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 }
 

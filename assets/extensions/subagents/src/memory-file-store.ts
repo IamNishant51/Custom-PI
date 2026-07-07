@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -100,7 +101,7 @@ function detectExternalDrift(target: "memory" | "user"): boolean {
     const bakPath = filePath + ".bak." + Date.now();
     try {
       fs.copyFileSync(filePath, bakPath);
-    } catch {}
+    } catch { logger.warn("empty catch") }
     return true;
   }
   for (const entry of entries) {

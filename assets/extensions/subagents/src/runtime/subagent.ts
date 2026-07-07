@@ -17,6 +17,7 @@ import { localGrep } from "../tools/grep";
 import { AGENTS_DIR_GLOBAL, loadAgents, parseMarkdownAgent } from "./agent-config";
 import { resolveModel, resolveFastModel, SUBAGENT_TOOLS } from "./tool-registry";
 import { secureSpawn } from "../secure-exec";
+import { logger } from "../logger";
 
 interface SubAgentProgress {
   id: string;
@@ -177,7 +178,7 @@ export class SubAgentRuntime {
     this.tracker.currentToolArgs = JSON.stringify(args).slice(0, 100);
     this.tracker.toolCallCount++;
 
-    try { contextMonitor.recordToolCall(name, args); } catch {}
+    try { contextMonitor.recordToolCall(name, args); } catch { logger.warn("empty catch block") }
     try {
       contextMonitor.recordDecisionTrace(
         this.ctx.sessionId || "unknown",
@@ -188,7 +189,7 @@ export class SubAgentRuntime {
         JSON.stringify(args).slice(0, 200),
         0,
       );
-    } catch {}
+    } catch { logger.warn("empty catch block") }
 
     const toolStart = Date.now();
     try {
@@ -201,7 +202,7 @@ export class SubAgentRuntime {
           const pathCheck = policyValidator.validate({ type: "read_file", path: filePath, workdir: this.ctx.cwd });
           if (!pathCheck.allowed) return `Error: ${pathCheck.reason}`;
           const result = await this.storage.readFile(filePath);
-          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch {}
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "read", result.slice(0, 200)); } catch { logger.warn("empty catch block") }
           return result;
         }
         case "write": {
@@ -226,7 +227,7 @@ export class SubAgentRuntime {
           }
 
           await this.storage.writeFile(filePath, content);
-          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "create", content.slice(0, 200)); } catch {}
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "create", content.slice(0, 200)); } catch { logger.warn("empty catch block") }
           let resp = `Successfully wrote file: ${filePath}`;
           if (verify.warnings.length > 0) {
             resp += `\nWarnings:\n${verify.warnings.join("\n")}`;
@@ -262,7 +263,7 @@ export class SubAgentRuntime {
           }
 
           await this.storage.writeFile(filePath, newContent);
-          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "modify", replaceText.slice(0, 200)); } catch {}
+          try { recordWorkProduct(this.trackerId, this.config.name, this.tracker.task, filePath, "modify", replaceText.slice(0, 200)); } catch { logger.warn("empty catch block") }
           let resp = `Successfully edited file: ${filePath}`;
           if (verify.warnings.length > 0) {
             resp += `\nWarnings:\n${verify.warnings.join("\n")}`;
@@ -523,7 +524,7 @@ export class SubAgentRuntime {
         const inTokens = usage?.inputTokens || 0;
         const outTokens = usage?.outputTokens || 0;
         trackCost(this.trackerId, this.config.name, model.provider || "unknown", model.id || "unknown", inTokens, outTokens);
-      } catch {}
+      } catch { logger.warn("empty catch block") }
 
       messages.push({
         role: "assistant",
@@ -607,7 +608,7 @@ async function updateAgentTools(agentName: string, tools: string[]): Promise<voi
     const existingContent = await fs.promises.readFile(csPath, "utf8");
     const parsed = parseMarkdownAgent(existingContent);
     if (parsed) { csExisting = parsed.config; csBody = parsed.body; }
-  } catch {}
+  } catch { logger.warn("empty catch block") }
   const csMerged = [...new Set([...(csExisting.tools || []), ...tools])].filter(t => SUBAGENT_TOOLS[t as keyof typeof SUBAGENT_TOOLS]);
   const csFrontmatter = {
     name: csExisting.name || safeName,

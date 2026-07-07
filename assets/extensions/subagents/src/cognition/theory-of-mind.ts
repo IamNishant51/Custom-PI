@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import { bus, Topics } from "../event-bus/event-bus";
 
 export type ExpertiseLevel = "beginner" | "intermediate" | "advanced" | "expert";
@@ -312,7 +313,7 @@ export class TheoryOfMind {
         trustLevel: user.trustLevel,
         preferences: Object.fromEntries(user.preferences),
       }, { id: `user_model_${userId}` });
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 }
 

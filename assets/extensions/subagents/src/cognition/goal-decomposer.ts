@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getGraph } from "../state-graph/property-graph";
 import { getDaemon } from "../daemon/daemon";
@@ -576,7 +577,7 @@ export class GoalDecomposer {
           }
         }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   private sleep(ms: number): Promise<void> {

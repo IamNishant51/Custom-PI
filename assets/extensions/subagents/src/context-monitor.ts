@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 import { getAllHealth } from "./mcp-catalog";
 import { getCostSummary } from "./cost-tracker";
 import { stats } from "./memory-store";
@@ -86,7 +87,7 @@ export class ContextMonitor {
     }
     // Notify listeners
     for (const listener of this.listeners) {
-      try { listener(trace); } catch {}
+      try { listener(trace); } catch { logger.warn("empty catch block") }
     }
   }
 

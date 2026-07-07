@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -212,7 +213,7 @@ export class UniversalToolCreator {
   private persistTool(tool: CreatedTool): void {
     const indexPath = path.join(this.toolsDir, "index.json");
     let tools: CreatedTool[] = [];
-    try { tools = JSON.parse(fs.readFileSync(indexPath, "utf8")); } catch {}
+    try { tools = JSON.parse(fs.readFileSync(indexPath, "utf8")); } catch { logger.warn("empty catch block") }
     const existing = tools.findIndex(t => t.name === tool.name);
     if (existing >= 0) tools[existing] = tool;
     else tools.push(tool);
@@ -229,7 +230,7 @@ export class UniversalToolCreator {
       for (const tool of tools) {
         this.createdTools.set(tool.name, tool);
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 }
 

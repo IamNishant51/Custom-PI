@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -20,7 +21,7 @@ function loadVerbs(): string[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(String);
     }
-  } catch {}
+  } catch { logger.warn("empty catch") }
   return [
     "Cooking", "Brewing", "Baking", "Roasting", "Sautéing",
     "Thinking", "Dreaming", "Musing", "Pondering", "Ruminating",
@@ -57,7 +58,7 @@ export function startGlobalAnimation() {
       globalVerbIndex = (globalVerbIndex + 1) % STATUS_VERBS.length;
     }
     for (const invalidate of activeInvalidators.values()) {
-      try { invalidate(); } catch {}
+      try { invalidate(); } catch { logger.warn("empty catch") }
     }
   }, 80);
 }

@@ -1,3 +1,4 @@
+import { logger } from "../../logger";
 import chalk from "chalk";
 import os from "node:os";
 import { stripAnsi, truncateToWidth, elapsed } from "../render/format";
@@ -32,7 +33,7 @@ export class QuantumHUDWidget implements Component {
 
   constructor(private ctx: HudContext) {
     this.timer = setInterval(() => {
-      try { this.ctx.invalidate(); } catch {}
+      try { this.ctx.invalidate(); } catch { logger.warn("empty catch") }
     }, 2000);
   }
 

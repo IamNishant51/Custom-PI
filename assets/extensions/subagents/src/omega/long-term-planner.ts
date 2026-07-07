@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getGraph } from "../state-graph/property-graph";
 
@@ -233,7 +234,7 @@ export class LongTermPlanner {
         });
         graph.addEdge(nodeId, ms.id, "contains");
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 }
 

@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -136,7 +137,7 @@ export class EpisodicMemory {
           }
         }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
 
     return id;
   }
@@ -354,7 +355,7 @@ export class EpisodicMemory {
       const tmp = filePath + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(episode, null, 2));
       fs.renameSync(tmp, filePath);
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   private loadIndex(): void {
@@ -366,7 +367,7 @@ export class EpisodicMemory {
           this.episodes.set(ep.id, ep);
         }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   private async persistIndex(): Promise<void> {
@@ -379,7 +380,7 @@ export class EpisodicMemory {
       fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
       fs.renameSync(tmp, this.indexFile);
       this.dirty = false;
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   destroy(): void {

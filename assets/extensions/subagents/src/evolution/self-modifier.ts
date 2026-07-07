@@ -365,7 +365,7 @@ export const ${name}HookDef = {
           const importMatch = content.includes(`./${path.basename(filePath, ".ts")}`) ||
             content.includes(`./${path.basename(filePath)}`);
           if (importMatch) affected.push(fullPath);
-        } catch {}
+        } catch { logger.warn("empty catch block") }
       }
 
       const allFiles = this.getSourceFiles();
@@ -377,9 +377,9 @@ export const ${name}HookDef = {
           if (content.includes(`"${relativePath}"`) || content.includes(`'${relativePath}'`)) {
             affected.push(f);
           }
-        } catch {}
+        } catch { logger.warn("empty catch block") }
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
 
     return affected;
   }
@@ -417,7 +417,7 @@ export const ${name}HookDef = {
         return { compiles: false, error: err.message };
       }
     } finally {
-      try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch { logger.warn("empty catch block") }
     }
   }
 
@@ -561,7 +561,7 @@ export const ${name}HookDef = {
             suggestion: "Address outstanding TODOs or convert to issues",
           });
         }
-      } catch {}
+      } catch { logger.warn("empty catch block") }
     }
 
     return findings;

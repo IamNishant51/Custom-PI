@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import fs from "node:fs";
 import os from "node:os";
 import cp from "node:child_process";
@@ -147,7 +148,7 @@ export class EnvironmentSensor {
         bus.emit(Topics.FILE_CHANGED, change, { source: "environment-sensor" });
       });
       this.watchers.push(watcher);
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   unwatchDirectory(dirPath: string): void {
@@ -198,7 +199,7 @@ export class EnvironmentSensor {
         this.lastDiskCheck = now;
         return this.lastDiskUsage;
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
     return this.lastDiskUsage || { totalGb: 0, freeGb: 0, usedPercent: 0 };
   }
 
@@ -289,7 +290,7 @@ export class EnvironmentSensor {
           }
           return count;
         }
-      } catch {}
+      } catch { logger.warn("empty catch block") }
       try {
         return parseInt(cp.execSync("ps aux --no-headers | wc -l", { encoding: "utf8", timeout: 3000 }).trim());
       } catch {
@@ -389,11 +390,11 @@ export class EnvironmentSensor {
                 }
               }
             }
-          } catch {}
+          } catch { logger.warn("empty catch block") }
         }
         if (files.size > 0) activeFiles = Array.from(files);
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
 
     return { vscode, neovim, activeFiles };
   }
@@ -421,7 +422,7 @@ export class EnvironmentSensor {
 
   destroy(): void {
     for (const w of this.watchers) {
-      try { w.close(); } catch {}
+      try { w.close(); } catch { logger.warn("empty catch block") }
     }
     this.watchers = [];
     this.watchPaths = [];

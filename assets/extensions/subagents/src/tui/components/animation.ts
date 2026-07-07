@@ -1,3 +1,4 @@
+import { logger } from "../../logger";
 export class AnimationFrame {
   private frameCallbacks: Map<string, { callback: () => void; interval: number; lastTick: number }> = new Map();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -28,7 +29,7 @@ export class AnimationFrame {
     for (const [id, entry] of this.frameCallbacks) {
       if (now - entry.lastTick >= entry.interval) {
         entry.lastTick = now;
-        try { entry.callback(); } catch {}
+        try { entry.callback(); } catch { logger.warn("empty catch") }
       }
     }
     // Drift correction: schedule next tick based on actual elapsed time,

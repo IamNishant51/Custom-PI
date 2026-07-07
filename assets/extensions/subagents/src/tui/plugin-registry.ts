@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import type { Component } from "@earendil-works/pi-tui";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -114,7 +115,7 @@ export function emitEvent(event: string, ...args: any[]): void {
   const handlers = eventHookRegistry.get(event);
   if (handlers) {
     for (const handler of handlers) {
-      try { handler(...args); } catch {}
+      try { handler(...args); } catch { logger.warn("empty catch block") }
     }
   }
 }

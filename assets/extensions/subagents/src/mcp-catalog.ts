@@ -266,7 +266,7 @@ export function loadMcpServers(): McpServerConfig[] {
         }
       }
     }
-  } catch {}
+  } catch { logger.warn("empty catch") }
 
   const servers = Array.from(serverMap.values());
   cachedServers = servers;

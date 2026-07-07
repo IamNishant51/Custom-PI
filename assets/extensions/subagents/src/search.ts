@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 import type { MemoryEntry, SearchResult, MemoryType } from "./memory-types";
 import { embed, cosineSimilarity } from "./memory-embedding";
 import { loadEntries, saveAllEntries, withWriteLock, recalibrateNow, loadSync } from "./core-store";
@@ -173,7 +174,7 @@ function ensureTier3Index(): { path: string; content: string }[] {
         const content = fs.readFileSync(p, "utf8").slice(0, 5000);
         tier3Index.push({ path: rel, content });
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
   return tier3Index!;
 }

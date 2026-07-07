@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -34,7 +35,7 @@ function parsePackageJson(): { name: string; scripts: Record<string, string> } |
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       return { name: pkg.name || "unknown", scripts: pkg.scripts || {} };
     }
-  } catch {}
+  } catch { logger.warn("empty catch") }
   return null;
 }
 
@@ -47,7 +48,7 @@ function parseAgentMd(): string[] {
         .map(l => l.replace(/^[#\s-]*/, "").trim())
         .filter(l => l.length > 10);
     }
-  } catch {}
+  } catch { logger.warn("empty catch") }
   return [];
 }
 

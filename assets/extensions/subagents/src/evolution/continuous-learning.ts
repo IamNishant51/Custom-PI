@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
 import { getGraph } from "../state-graph/property-graph";
@@ -238,7 +239,7 @@ export class ContinuousLearning {
         exampleCount: this.examples.length,
         highConfidenceCount: Array.from(this.patterns.values()).filter(p => p.confidence > 0.7).length,
       }, { id: "learning_state" });
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 
   private loadState(): void {
@@ -249,7 +250,7 @@ export class ContinuousLearning {
         this.patterns.clear();
         this.examples.length = 0;
       }
-    } catch {}
+    } catch { logger.warn("empty catch block") }
   }
 }
 

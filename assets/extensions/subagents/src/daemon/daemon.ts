@@ -1,3 +1,4 @@
+import { logger } from "../logger";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -364,7 +365,7 @@ export class Daemon extends EventEmitter {
           const store = getSystemStore();
           store.kvSet("daemon", "_migrated", "1");
         } catch { /* non-critical migration */ }
-      } catch {}
+      } catch { logger.warn("empty catch block") }
     }
   }
 

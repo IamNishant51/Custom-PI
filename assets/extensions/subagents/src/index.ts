@@ -142,7 +142,7 @@ class McpCliConnection {
     }
     this.pendingRequests.clear();
     if (this.proc) {
-      try { this.proc.kill(); } catch {}
+      try { this.proc.kill(); } catch { logger.warn("MCP config init write failed"); }
       this.proc = null;
     }
   }
@@ -177,7 +177,7 @@ class McpCliConnection {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) { logger.warn("MCP message parse failed", { error: e }); }
   }
 
   async initializeHandshake() {
@@ -359,7 +359,7 @@ export default function (pi: ExtensionAPI) {
       try {
         fs.mkdirSync(path.dirname(MCP_CONFIG_FILE_GLOBAL), { recursive: true });
         fs.writeFileSync(MCP_CONFIG_FILE_GLOBAL, JSON.stringify(config, null, 2));
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
     } else {
       let changed = false;
       if (!seqThinking.enabled) {
@@ -1960,7 +1960,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           lines.push(`  Session cost: \$${costs.totalCostUsd?.toFixed(4) ?? "?"}`);
           lines.push(`  Daily total: \$${costs.dailyCostUsd?.toFixed(4) ?? "?"}`);
         }
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
 
       const loopWarnings = contextMonitor.getToolLoopWarnings();
       if (loopWarnings.length > 0) loopWarnings.forEach(w => lines.push(`  ⚠ ${w}`));
@@ -2249,7 +2249,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           invalidateAgentCache();
         }
       });
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
 
     // Initialize file-based memory and nudge system
     ensureSoulFile();
@@ -2260,13 +2260,13 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     try {
       const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN"];
       const imported = await vaultImportFromEnv(vaultKeys);
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
 
     // Ensure session record exists in SQLite for message persistence
     try {
       const sid = deriveSessionId(ctx);
       if (sid) ensureSession(sid);
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
 
     // Set playful geometric thinking indicator
     const megaFrames = ["◐", "◓", "◑", "◒"];
@@ -2347,7 +2347,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
         dispose() {},
       }), { placement: "aboveEditor" });
       ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
 
     // Install bundled skills (verification-loop, etc.)
     const skillsSrc = path.join(__dirname, "..", "skills");
@@ -2483,7 +2483,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           }
           blocks.push({ priority: 3, content: stackBlock, label: "stack" });
         }
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
     }
 
     // Tier 3: Persistent memory context
@@ -2507,7 +2507,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           }).join("\n");
           blocks.push({ priority: 4, content: `\n# 🧠 LEARNED SKILLS\n${skillLines}\n`, label: "skills" });
         }
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
     }
 
     // Tier 4: Past conversation archives (skip on small/medium context)
@@ -2533,7 +2533,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
             blocks.push({ priority: 4, content: `\n# 📜 PAST SESSIONS\n${summaries.join("\n")}\n`, label: "past-sessions" });
           }
         }
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
     }
 
     // ── Assemble within budget ────────────────────────────────────────────
@@ -2571,7 +2571,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     try {
       const sessionFile = ctx.sessionManager?.getSessionFile();
       if (sessionFile) return path.basename(sessionFile, ".jsonl");
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
     return ctx?.sessionId || null;
   }
 
@@ -2662,7 +2662,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           }
           resetMemoryNudge();
         } catch (e: any) {
-          try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Memory nudge error: ${e.message}\n`, "utf8"); } catch {}
+          try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Memory nudge error: ${e.message}\n`, "utf8"); } catch { logger.warn("MCP config init write failed"); }
         } finally {
           isProcessingBackground = false;
         }
@@ -2682,7 +2682,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           if (result.summary) logger.info("skill_nudge", { summary: result.summary });
           resetSkillNudge();
         } catch (e: any) {
-          try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Skill nudge error: ${e.message}\n`, "utf8"); } catch {}
+          try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Skill nudge error: ${e.message}\n`, "utf8"); } catch { logger.warn("MCP config init write failed"); }
         } finally {
           isProcessingBackground = false;
         }
@@ -2736,7 +2736,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       if (stateFile && fs.existsSync(stateFile)) {
         try {
           currentStateStr = fs.readFileSync(stateFile, "utf8");
-        } catch {}
+        } catch { logger.warn("MCP config init write failed"); }
       }
 
       const model = resolveFastModel(ctx);
@@ -2854,7 +2854,7 @@ If nothing to report, return: {}`;
       try {
         const debugLogPath = path.join(os.homedir(), ".pi", "agent", "memory-debug.log");
         fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] Background error: ${e.message}\n`, "utf8");
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
     } finally {
       isProcessingBackground = false;
     }
@@ -2952,11 +2952,11 @@ If nothing to report, return: {}`;
     try {
       const stored = await contextMonitor.flushAutoLearn();
       if (stored > 0) logger.info(`Auto-learn: stored ${stored} triplet(s) on shutdown`);
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
     // Flush any pending memory writes before shutdown
     try {
       await flushMemory();
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
     try {
       const result = await consolidateMemory();
       if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
@@ -2982,7 +2982,7 @@ If nothing to report, return: {}`;
         activeAgentName: null,
         lastToolResult: null,
       });
-    } catch {}
+    } catch { logger.warn("MCP config init write failed"); }
     // Save conversation archive to MD before shutdown (from SQLite, not in-memory branch)
     try {
       const sid = deriveSessionId(ctx) || "unknown";
@@ -3028,17 +3028,17 @@ If nothing to report, return: {}`;
               fs.unlinkSync(path.join(convDir, old.name));
             }
           }
-        } catch {}
+        } catch { logger.warn("MCP config init write failed"); }
       }
     } catch (e: any) {
-      try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Archive error: ${e.message}\n`, "utf8"); } catch {}
+      try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Archive error: ${e.message}\n`, "utf8"); } catch { logger.warn("MCP config init write failed"); }
     }
 
     // Clean up cloned repos
     for (const repoPath of clonedRepos) {
       try {
         fs.rmSync(repoPath, { recursive: true, force: true });
-      } catch {}
+      } catch { logger.warn("MCP config init write failed"); }
     }
     clonedRepos.clear();
 
@@ -3049,7 +3049,7 @@ If nothing to report, return: {}`;
     }
     // Stop background cron jobs
     stopCronJobs();
-    if (unsubTabHandler) { try { unsubTabHandler(); } catch {} unsubTabHandler = null; }
+    if (unsubTabHandler) { try { unsubTabHandler(); } catch { logger.warn("empty catch") } unsubTabHandler = null; }
     closeDb();
     activeTrackers.clear();
     activeInvalidators.clear();

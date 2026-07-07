@@ -1,3 +1,4 @@
+import { logger } from "../../logger";
 import chalk from "chalk";
 import fs from "node:fs";
 import path from "node:path";
@@ -36,7 +37,7 @@ const debugLog = process.env.PI_DEBUG
   ? (msg: string) => {
       try {
         fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "tui-click.log"), `[${new Date().toISOString()}] ${msg}\n`);
-      } catch {}
+      } catch { logger.warn("empty catch") }
     }
   : () => {};
 
@@ -51,7 +52,7 @@ export function locateTheme(): any {
         return require(themePath).theme;
       }
     }
-  } catch {}
+  } catch { logger.warn("empty catch") }
   try {
     for (const p of module.paths) {
       const themePath = path.join(p, "@earendil-works", "pi-coding-agent", "dist", "modes", "interactive", "theme", "theme.js");
@@ -59,7 +60,7 @@ export function locateTheme(): any {
         return require(themePath).theme;
       }
     }
-  } catch {}
+  } catch { logger.warn("empty catch") }
   return null;
 }
 

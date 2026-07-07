@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import { existsSync } from "node:fs";
@@ -60,7 +61,7 @@ export class LocalStorageDriver implements StorageDriver {
         try {
           const stat = await fs.stat(fullPath);
           size = stat.size;
-        } catch {}
+        } catch { logger.warn("empty catch block") }
       }
       results.push({
         name: ent.name,
