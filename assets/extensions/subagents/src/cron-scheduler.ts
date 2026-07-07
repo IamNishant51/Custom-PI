@@ -231,7 +231,9 @@ function withBackoff<T>(key: string, fn: () => Promise<T>): Promise<T | undefine
 
 // ── Log Rotation ────────────────────────────────────────────────────────────
 
-const LOG_DIR = path.join(os.homedir(), ".pi", "agent", "logs");
+import { PATHS } from "./config";
+
+const LOG_DIR = PATHS.LOGS;
 
 async function rotateLogFiles(): Promise<void> {
   await rotateIfNeeded(path.join(LOG_DIR, "session.log"));

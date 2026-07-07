@@ -2,9 +2,9 @@ import { logger } from "./logger";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
+import { PATHS } from "./config";
 
-const MEMORIES_DIR = path.join(os.homedir(), ".pi", "agent", "memories");
+const MEMORIES_DIR = PATHS.MEMORIES;
 const MEMORY_PATH = path.join(MEMORIES_DIR, "MEMORY.md");
 const USER_PATH = path.join(MEMORIES_DIR, "USER.md");
 

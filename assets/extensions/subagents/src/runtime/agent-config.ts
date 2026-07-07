@@ -3,7 +3,9 @@ import path from "node:path";
 import os from "node:os";
 import yaml from "yaml";
 
-export const AGENTS_DIR_GLOBAL = path.join(os.homedir(), ".pi/agent/agents");
+import { PATHS } from "../config";
+
+export const AGENTS_DIR_GLOBAL = PATHS.AGENTS;
 export const AGENTS_DIR_LOCAL = path.join(process.cwd(), ".pi/agents");
 
 const REQUIRED_AGENT_FIELDS = ["name"] as const;

@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { PATHS } from "../config";
 import os from "node:os";
 import { bus, Topics } from "../event-bus/event-bus";
 
@@ -43,7 +44,7 @@ export class DatabaseIntelligence {
   private migrationsDir: string;
 
   constructor() {
-    this.migrationsDir = path.join(os.homedir(), ".pi", "agent", "migrations");
+    this.migrationsDir = PATHS.MIGRATIONS;
     if (!fs.existsSync(this.migrationsDir)) fs.mkdirSync(this.migrationsDir, { recursive: true });
   }
 

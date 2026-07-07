@@ -5,7 +5,9 @@ import { spawnSync } from "node:child_process";
 import { logger } from "./logger";
 import type { McpServerConfig, McpToolDefinition } from "./acp-types";
 
-const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
+import { PATHS } from "./config";
+
+const CONFIG_DIR = PATHS.PI_DIR;
 const MCP_CONFIG_PATH = path.join(CONFIG_DIR, "mcp-servers.json");
 const HEALTH_CACHE_TTL = 300_000; // 5 min
 

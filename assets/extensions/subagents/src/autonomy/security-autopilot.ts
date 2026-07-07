@@ -7,7 +7,9 @@ import { getDaemon, Daemon } from "../daemon/daemon";
 import { writeAtomic } from "../storage-driver";
 import { logger } from "../logger";
 
-const SECURITY_STATE_FILE = path.join(os.homedir(), ".pi", "agent", "security-state.json");
+import { PATHS } from "../config";
+
+const SECURITY_STATE_FILE = PATHS.SECURITY_STATE;
 
 interface SecurityFinding {
   id: string;

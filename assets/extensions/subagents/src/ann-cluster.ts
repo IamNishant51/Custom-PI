@@ -6,7 +6,9 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-const MEMORY_DIR = path.join(os.homedir(), ".pi/agent/memory");
+import { PATHS } from "./config";
+
+const MEMORY_DIR = PATHS.MEMORY;
 const ANN_CLUSTERS_FILE = path.join(MEMORY_DIR, "ann-clusters.json");
 
 const ANN_CLUSTERS = 16;

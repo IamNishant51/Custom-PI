@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const LOG_DIR = path.join(os.homedir(), ".pi/agent/logs");
+import { PATHS } from "./config";
+
+const LOG_DIR = PATHS.LOGS;
 const LOG_FILE = path.join(LOG_DIR, `ext-${new Date().toISOString().slice(0, 10)}.log`);
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;

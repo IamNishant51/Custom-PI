@@ -7,7 +7,9 @@ import { spawnAgentSession, closeSession, discoverAgents, getAgentLabel } from "
 import { buildMcpContextForPrompt, getEnabledMcpServers } from "./mcp-catalog";
 import type { AgentMode, AcpSessionConfig, McpServerConfig } from "./acp-types";
 
-const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
+import { PATHS } from "./config";
+
+const CONFIG_DIR = PATHS.PI_DIR;
 const TEAMS_CONFIG_PATH = path.join(CONFIG_DIR, "teams.json");
 
 export type TeammateRole = "leader" | "teammate";

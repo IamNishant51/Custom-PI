@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { PATHS } from "../config";
 import os from "node:os";
 import vm from "node:vm";
 import { spawn } from "node:child_process";
@@ -44,7 +45,7 @@ export class PluginMarketplace {
   private plugins: Map<string, InstalledPlugin> = new Map();
 
   constructor() {
-    this.pluginsDir = path.join(os.homedir(), ".pi", "agent", "plugins");
+    this.pluginsDir = PATHS.PLUGINS;
     if (!fs.existsSync(this.pluginsDir)) fs.mkdirSync(this.pluginsDir, { recursive: true });
     this.loadInstalledPlugins();
   }

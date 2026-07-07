@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import Database from "better-sqlite3";
 import { writeAtomic, writeAtomicAsync } from "./storage-driver";
 import { logger } from "./logger";
+import { PATHS } from "./config";
 
-const DB_DIR = path.join(os.homedir(), ".pi", "agent");
-const DB_PATH = path.join(DB_DIR, "session-state.db");
-const CHECKPOINT_DIR = path.join(DB_DIR, "checkpoints");
+const DB_DIR = path.dirname(PATHS.SESSION_DB);
+const DB_PATH = PATHS.SESSION_DB;
+const CHECKPOINT_DIR = PATHS.CHECKPOINTS;
 
 export interface Checkpoint {
   taskId: string;

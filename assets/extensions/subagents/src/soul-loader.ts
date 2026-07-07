@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 
-const SOUL_PATH = path.join(os.homedir(), ".pi", "agent", "SOUL.md");
+import { PATHS } from "./config";
+const SOUL_PATH = PATHS.SOUL;
 
 const PROMPTS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../prompts/system/identity.json");
 function loadDefaultSoul(): string {

@@ -1,6 +1,7 @@
 import { logger } from "../logger";
 import fs from "node:fs";
 import path from "node:path";
+import { PATHS } from "../config";
 import os from "node:os";
 import { bus, Topics } from "../event-bus/event-bus";
 
@@ -34,7 +35,7 @@ export class UniversalToolCreator {
   private toolsDir: string;
 
   constructor() {
-    this.toolsDir = path.join(os.homedir(), ".pi", "agent", "custom-tools");
+    this.toolsDir = PATHS.CUSTOM_TOOLS;
     if (!fs.existsSync(this.toolsDir)) fs.mkdirSync(this.toolsDir, { recursive: true });
     this.loadTools();
   }

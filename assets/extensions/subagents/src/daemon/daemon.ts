@@ -1,3 +1,4 @@
+import { PATHS } from "../config";
 import { logger } from "../logger";
 import fs from "node:fs";
 import path from "node:path";
@@ -60,7 +61,7 @@ export class Daemon extends EventEmitter {
       tickInterval: 5000,
       idleThreshold: 120_000,
       maxConcurrentTasks: 3,
-      stateFile: path.join(os.homedir(), ".pi", "agent", "daemon-state.json"),
+      stateFile: PATHS.DAEMON_STATE,
       autoRecovery: true,
       ...config,
     };

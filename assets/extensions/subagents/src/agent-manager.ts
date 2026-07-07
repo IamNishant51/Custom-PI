@@ -16,7 +16,9 @@ import type {
   AcpCapabilities,
 } from "./acp-types";
 
-const CONFIG_DIR = path.join(os.homedir(), ".pi", "agent");
+import { PATHS } from "./config";
+
+const CONFIG_DIR = PATHS.PI_DIR;
 const AGENTS_CONFIG_PATH = path.join(CONFIG_DIR, "agents.json");
 const CUSTOM_AGENTS_CONFIG_PATH = path.join(CONFIG_DIR, "custom-agents.json");
 const DISCOVERY_CACHE_TTL = 60_000;

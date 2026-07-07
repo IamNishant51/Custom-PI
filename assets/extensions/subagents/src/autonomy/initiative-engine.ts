@@ -9,7 +9,9 @@ import { getGraph } from "../state-graph/property-graph";
 import { writeAtomic } from "../storage-driver";
 import { logger } from "../logger";
 
-const INITIATIVE_STATE_FILE = path.join(os.homedir(), ".pi", "agent", "initiative-state.json");
+import { PATHS } from "../config";
+
+const INITIATIVE_STATE_FILE = PATHS.INITIATIVE_STATE;
 
 interface Opportunity {
   id: string;

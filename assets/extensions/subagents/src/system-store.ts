@@ -5,7 +5,9 @@ import Database from "better-sqlite3";
 // better-sqlite3 types use namespace merging; use any for the instance type to avoid version conflicts
 type DbHandle = any;
 
-const DB_PATH = path.join(os.homedir(), ".pi", "agent", "system.db");
+import { PATHS } from "./config";
+
+const DB_PATH = PATHS.SYSTEM_DB;
 
 export interface GateGuardEntry {
   path: string;

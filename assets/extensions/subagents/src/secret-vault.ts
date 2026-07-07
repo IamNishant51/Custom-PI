@@ -3,7 +3,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 
-const VAULT_DIR = path.join(os.homedir(), ".pi", "agent", ".vault");
+import { PATHS } from "./config";
+
+const VAULT_DIR = PATHS.VAULT;
 const KEY_FILE = path.join(VAULT_DIR, "master.key");
 const VAULT_FILE = path.join(VAULT_DIR, "vault.json");
 const ALGORITHM = "aes-256-gcm";

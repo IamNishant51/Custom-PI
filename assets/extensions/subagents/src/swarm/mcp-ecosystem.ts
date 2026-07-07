@@ -1,3 +1,4 @@
+import { PATHS } from "../config";
 import { logger } from "../logger";
 import { spawn, ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -40,7 +41,7 @@ export class MCPEcosystem {
   private configPath: string;
 
   constructor() {
-    this.configPath = path.join(os.homedir(), ".pi", "agent", "mcp-servers.json");
+    this.configPath = PATHS.MCP_SERVERS;
     this.loadConfig();
     this.registerBuiltInServers();
   }

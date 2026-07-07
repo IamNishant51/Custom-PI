@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { PATHS } from "./config";
 import { getAllHealth } from "./mcp-catalog";
 import { getCostSummary } from "./cost-tracker";
 import { stats } from "./memory-store";
@@ -197,7 +198,7 @@ export class ContextMonitor {
 
   writeTelemetrySnapshot(): void {
     try {
-      const dir = path.join(os.homedir(), ".pi", "agent");
+      const dir = PATHS.PI_DIR;
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const snapshot = this.getTelemetrySnapshot();
       snapshot.recentTraces = this.getRecentDecisionTraces(5);
