@@ -49,6 +49,7 @@ function openDb(): any {
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
+  db.pragma("busy_timeout = 5000");
   db.pragma("cache_size = -64000");
   db.pragma("mmap_size = 268435456");
   initializeSchema();

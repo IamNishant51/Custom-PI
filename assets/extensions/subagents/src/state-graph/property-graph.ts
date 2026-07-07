@@ -72,6 +72,7 @@ export class PropertyGraph {
     this.db = new Database(resolvedPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("cache_size = -16000");
     this.db.pragma("mmap_size = 268435456");
     this.initializeSchema();
