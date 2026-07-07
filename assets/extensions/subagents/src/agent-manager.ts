@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { NotFoundError, ConfigurationError } from "./errors";
 import readline from "node:readline";
 import { logger } from "./logger";
 import type {
@@ -218,8 +219,8 @@ export async function spawnAgentSession(
 ): Promise<AcpSessionInfo> {
   const agents = discoverAgents();
   const agent = agents.find(a => a.id === agentId);
-  if (!agent) throw new Error(`Agent '${agentId}' not found`);
-  if (!agent.available) throw new Error(`Agent '${agentId}' is not available on this system`);
+  if (!agent) throw new NotFoundError("Agent", agentId);
+  if (!agent.available) throw new ConfigurationError(`Agent '${agentId}' is not available on this system`);
 
   const sessionId = generateSessionId();
   const cmd = agent.command!;

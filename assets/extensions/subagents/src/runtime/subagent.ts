@@ -19,6 +19,7 @@ import { resolveModel, resolveFastModel, SUBAGENT_TOOLS } from "./tool-registry"
 import { secureSpawn } from "../secure-exec";
 import { logger } from "../logger";
 import { queryTriplets } from "../state-db";
+import { ValidationError, NetworkError, ToolExecutionError, ConfigurationError } from "../errors";
 
 interface SubAgentProgress {
   id: string;
@@ -96,7 +97,7 @@ export class SubAgentRuntime {
     const resolved = path.resolve(this.ctx.cwd, p || ".");
     const relative = path.relative(this.ctx.cwd, resolved);
     if (relative.startsWith("..") || path.isAbsolute(relative)) {
-      throw new Error(`Path traversal denied: ${p} resolves outside working directory`);
+      throw new ValidationError(`Path traversal denied: ${p} resolves outside working directory`);
     }
     return resolved;
   }
@@ -339,7 +340,7 @@ export class SubAgentRuntime {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ api_key: tavilyKey, query, search_depth: "basic", max_results: 5 })
           }).then(async (r) => {
-            if (!r.ok) throw new Error(`Tavily returned ${r.status}`);
+            if (!r.ok) throw new NetworkError(`Tavily returned ${r.status}`);
             const data: any = await r.json();
             return data.results.map((r: any) => `**Title**: ${r.title}\n**URL**: ${r.url}\n**Snippet**: ${r.content}\n`).join("\n---\n");
           });
@@ -349,7 +350,7 @@ export class SubAgentRuntime {
             headers: { "X-API-KEY": serperKey, "Content-Type": "application/json" },
             body: JSON.stringify({ q: query, num: 5 })
           }).then(async (r) => {
-            if (!r.ok) throw new Error(`Serper returned ${r.status}`);
+            if (!r.ok) throw new NetworkError(`Serper returned ${r.status}`);
             const data: any = await r.json();
             return data.organic.map((r: any) => `**Title**: ${r.title}\n**URL**: ${r.link}\n**Snippet**: ${r.snippet}\n`).join("\n---\n");
           });
@@ -458,7 +459,7 @@ export class SubAgentRuntime {
   private async callWithRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
     let lastError: Error | null = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (this.signal?.aborted) throw new Error("Aborted by user.");
+      if (this.signal?.aborted) throw new ToolExecutionError("Aborted by user.");
       try {
         return await fn();
       } catch (e: any) {
@@ -485,7 +486,7 @@ export class SubAgentRuntime {
       this.tracker.error = auth.error;
       this.tracker.endTime = Date.now();
       this.onProgress?.call(null, `Error: ${auth.error}`);
-      throw new Error(this.tracker.error);
+      throw new ConfigurationError(this.tracker.error || "Auth failed");
     }
 
     const messages: any[] = [{ role: "user", content: task }];
@@ -506,7 +507,7 @@ export class SubAgentRuntime {
       this.onProgress?.call(null, `${chalk.hex(C.lavender)(getSpinner())} ${this.config.name} \u2014 turn ${turnCount}/${MAX_TURNS}`);
 
       const response = await this.callWithRetry(() => {
-        if (this.signal?.aborted) throw new Error("Aborted by user.");
+      if (this.signal?.aborted) throw new ToolExecutionError("Aborted by user.");
         return completeSimple(model, {
           systemPrompt: this.systemPrompt,
           messages,

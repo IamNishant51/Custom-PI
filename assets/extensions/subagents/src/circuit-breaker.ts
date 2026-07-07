@@ -1,6 +1,8 @@
-export class CircuitBreakerOpenError extends Error {
-  constructor(public readonly name: string) {
-    super(`Circuit breaker '${name}' is open`);
+import { AppError } from "./errors";
+
+export class CircuitBreakerOpenError extends AppError {
+  constructor(public readonly breakerName: string) {
+    super(`Circuit breaker '${breakerName}' is open`, "CIRCUIT_BREAKER_OPEN");
     this.name = "CircuitBreakerOpenError";
   }
 }

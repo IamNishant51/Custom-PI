@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getSystemStore, type GateGuardEntry } from "./system-store";
+import { SecurityError } from "./errors";
 
 // ── GateGuard (first-edit investigation) with SQLite persistence ─────────────
 
@@ -129,7 +130,7 @@ export interface PolicyResult {
   violation?: "filesystem" | "command" | "network" | "unknown";
 }
 
-export class PolicyViolationError extends Error {
+export class PolicyViolationError extends SecurityError {
   constructor(
     public readonly violation: string,
     public readonly action: ActionRequest,

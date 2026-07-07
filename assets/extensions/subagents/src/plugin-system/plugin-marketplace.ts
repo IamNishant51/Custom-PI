@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ValidationError, NotFoundError, SecurityError } from "../errors";
 import { PATHS } from "../config";
 import os from "node:os";
 import vm from "node:vm";
@@ -144,18 +145,18 @@ export class PluginMarketplace {
 
     if (type === "npm") {
       if (!NPM_PACKAGE_RE.test(source)) {
-        throw new Error(`Invalid npm package name: ${source}`);
+        throw new ValidationError(`Invalid npm package name: ${source}`);
       }
       await this.execSpawn("npm", ["install", source, "--prefix", this.pluginsDir, "--no-audit", "--no-fund"]);
     } else if (type === "git") {
       if (!GIT_URL_RE.test(source)) {
-        throw new Error(`Invalid git URL: ${source}`);
+        throw new ValidationError(`Invalid git URL: ${source}`);
       }
       await this.execSpawn("git", ["clone", source, pluginDir]);
     } else if (type === "local") {
       const resolved = path.resolve(source);
       if (!resolved.startsWith(this.pluginsDir) && !resolved.startsWith(os.homedir())) {
-        throw new Error(`Local plugin path must be within home directory: ${source}`);
+        throw new SecurityError(`Local plugin path must be within home directory: ${source}`);
       }
       if (fs.existsSync(source)) {
         fs.cpSync(source, pluginDir, { recursive: true });
@@ -164,7 +165,7 @@ export class PluginMarketplace {
 
     const manifestPath = path.join(pluginDir, "plugin.json");
     if (!fs.existsSync(manifestPath)) {
-      throw new Error(`Plugin ${source} has no plugin.json manifest`);
+      throw new NotFoundError("Plugin", `${source} has no plugin.json manifest`);
     }
 
     const manifest: PluginManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));

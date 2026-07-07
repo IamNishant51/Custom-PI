@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { ConfigurationError } from "../errors";
 
 export const SUBAGENT_TOOLS = {
   read: {
@@ -85,7 +86,7 @@ export function resolveModel(ctx: any, modelNameOrId?: string): any {
   const targetId = modelNameOrId || (ctx.model ? ctx.model.id : "");
   if (!targetId) {
     if (allModels.length > 0) return allModels[0];
-    throw new Error("No models available in model registry.");
+    throw new ConfigurationError("No models available in model registry.");
   }
   if (targetId.includes("/")) {
     const [provider, id] = targetId.split("/");

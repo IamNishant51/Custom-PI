@@ -3,6 +3,7 @@ import { logger } from "../logger";
 import { spawn, ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { NotFoundError } from "../errors";
 import os from "node:os";
 import { bus, Topics } from "../event-bus/event-bus";
 
@@ -138,7 +139,7 @@ export class MCPEcosystem {
 
   async startServer(name: string): Promise<boolean> {
     const server = this.servers.get(name);
-    if (!server) throw new Error(`Server ${name} not found`);
+    if (!server) throw new NotFoundError("Server", name);
     if (server.status === "running") return true;
 
     if (server.command === "npx" && (server.name === "sequential-thinking" || server.args?.includes("@modelcontextprotocol/server-sequential-thinking"))) {

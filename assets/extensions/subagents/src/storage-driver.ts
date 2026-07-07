@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { ValidationError } from "./errors";
 
 export interface StorageDriver {
   readFile(filePath: string): Promise<string>;
@@ -30,7 +31,7 @@ export class LocalStorageDriver implements StorageDriver {
     const resolved = path.resolve(this.workingDir, p);
     const relative = path.relative(this.workingDir, resolved);
     if (relative.startsWith("..") || path.isAbsolute(relative)) {
-      throw new Error(`Path traversal denied: ${p} resolves outside working directory`);
+      throw new ValidationError(`Path traversal denied: ${p} resolves outside working directory`);
     }
     return resolved;
   }

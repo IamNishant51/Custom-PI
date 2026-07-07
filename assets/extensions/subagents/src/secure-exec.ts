@@ -1,5 +1,6 @@
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { getCircuitBreaker } from "./circuit-breaker";
+import { SecurityError, TimeoutError } from "./errors";
 
 const ALLOWLIST = new Set([
 	"bash",
@@ -57,14 +58,14 @@ export const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_TIMEOUT = 30_000;
 export const MAX_TIMEOUT = 300_000;
 
-export class CommandNotAllowedError extends Error {
+export class CommandNotAllowedError extends SecurityError {
 	constructor(command: string) {
 		super(`Command not in allowlist: ${command}`);
 		this.name = "CommandNotAllowedError";
 	}
 }
 
-export class CommandTimeoutError extends Error {
+export class CommandTimeoutError extends TimeoutError {
 	constructor(command: string, timeout: number) {
 		super(`Command '${command}' timed out after ${timeout}ms`);
 		this.name = "CommandTimeoutError";

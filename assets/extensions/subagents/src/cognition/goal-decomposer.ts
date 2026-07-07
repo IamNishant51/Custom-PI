@@ -2,6 +2,7 @@ import { logger } from "../logger";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getGraph } from "../state-graph/property-graph";
 import { getDaemon } from "../daemon/daemon";
+import { NotFoundError } from "../errors";
 
 export type TaskStatus = "pending" | "in_progress" | "completed" | "failed" | "blocked" | "skipped";
 export type TaskPriority = "critical" | "high" | "normal" | "low";
@@ -126,7 +127,7 @@ export class GoalDecomposer {
 
   async executePlan(planId: string): Promise<void> {
     const plan = this.activePlans.get(planId);
-    if (!plan) throw new Error(`Plan ${planId} not found`);
+    if (!plan) throw new NotFoundError("Plan", planId);
     plan.status = "executing";
     plan.updatedAt = Date.now();
     bus.emit(Topics.PLAN_UPDATED, { planId, status: "executing" }, { source: "goal-decomposer" });

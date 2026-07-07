@@ -3,6 +3,7 @@ import { closeDb, pruneTriplets } from "./state-db";
 import { memoryConsolidate as fileConsolidate } from "./memory-file-store";
 import { loadMcpServers, probeMcpServer, probeProvider } from "./mcp-catalog";
 import { contextMonitor } from "./context-monitor";
+import { ValidationError } from "./errors";
 import { rotateIfNeeded, totalLogSize } from "./log-rotation";
 import { logger } from "./logger";
 import path from "node:path";
@@ -343,7 +344,7 @@ function scheduleCustomJob(job: CronJob): void {
 
 export function registerJob(name: string, expression: string, action: () => Promise<void>): void {
   const err = validateCron(expression);
-  if (err) throw new Error(`Cron job "${name}": ${err}`);
+  if (err) throw new ValidationError(`Cron job "${name}": ${err}`);
   const job: CronJob = { name, expression, action, enabled: true };
   registeredJobs.push(job);
   if (isRunning) scheduleCustomJob(job);

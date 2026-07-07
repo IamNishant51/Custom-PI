@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseError } from "../errors";
 import { PATHS } from "../config";
 import os from "node:os";
 import { bus, Topics } from "../event-bus/event-bus";
@@ -49,7 +50,7 @@ export class DatabaseIntelligence {
   }
 
   analyzeSQLite(dbPath: string): { tables: TableInfo[]; suggestions: IndexSuggestion[] } {
-    if (!fs.existsSync(dbPath)) throw new Error(`Database not found: ${dbPath}`);
+    if (!fs.existsSync(dbPath)) throw new DatabaseError(`Database not found: ${dbPath}`);
 
     const tables: TableInfo[] = [];
     const suggestions: IndexSuggestion[] = [];
@@ -122,7 +123,7 @@ export class DatabaseIntelligence {
       this.persistMigration(migration);
       return true;
     } catch (err: any) {
-      throw new Error(`Migration failed: ${err.message}`);
+      throw new DatabaseError(`Migration failed: ${err.message}`, { cause: err });
     }
   }
 
@@ -136,7 +137,7 @@ export class DatabaseIntelligence {
       this.persistMigration(migration);
       return true;
     } catch (err: any) {
-      throw new Error(`Rollback failed: ${err.message}`);
+      throw new DatabaseError(`Rollback failed: ${err.message}`, { cause: err });
     }
   }
 

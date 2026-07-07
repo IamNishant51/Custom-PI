@@ -1,6 +1,7 @@
 import { bus, Topics } from "../event-bus/event-bus";
 import { getGraph } from "../state-graph/property-graph";
 import { logger } from "../logger";
+import { NotFoundError, ValidationError, TimeoutError } from "../errors";
 
 export type AgentRole = "architect" | "backend-dev" | "frontend-dev" | "devops" | "security-reviewer" | "tester" | "researcher" | "writer" | "reviewer" | "planner" | "builder";
 
@@ -150,7 +151,7 @@ export class HiveMind {
 
   proposeConsensus(teamId: string, title: string, description: string, options: string[]): ConsensusProposal {
     const team = this.teams.get(teamId);
-    if (!team) throw new Error(`Team ${teamId} not found`);
+    if (!team) throw new NotFoundError("Team", teamId);
 
     const proposal: ConsensusProposal = {
       id: `prop_${Date.now()}`,
@@ -178,11 +179,11 @@ export class HiveMind {
 
   vote(proposalId: string, agentId: string, vote: string): void {
     const proposal = this.proposals.get(proposalId);
-    if (!proposal) throw new Error(`Proposal ${proposalId} not found`);
-    if (proposal.status !== "voting") throw new Error("Voting is closed");
+    if (!proposal) throw new NotFoundError("Proposal", proposalId);
+    if (proposal.status !== "voting") throw new ValidationError("Voting is closed");
     if (Date.now() > proposal.deadline) {
       proposal.status = this.resolveVotes(proposal);
-      throw new Error("Voting deadline passed");
+      throw new TimeoutError("Voting deadline passed");
     }
     proposal.votes.set(agentId, vote);
   }
