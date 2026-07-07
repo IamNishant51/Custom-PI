@@ -2,6 +2,7 @@ import { bus, Topics } from "./event-bus/event-bus";
 import { getGraph } from "./state-graph/property-graph";
 import { HybridSearch } from "./state-graph/hybrid-search";
 import { getDaemon, Daemon, startDaemon } from "./daemon/daemon";
+import os from "node:os";
 
 import { goalDecomposer } from "./cognition/goal-decomposer";
 import { episodicMemory } from "./cognition/episodic-memory";
@@ -153,7 +154,7 @@ export function initializeAscension(config: AscensionConfig = {}): void {
   }
 
   environmentSensor.watchDirectory(process.cwd(), false);
-  const agentDir = require("os").homedir() + "/.pi/agent";
+  const agentDir = os.homedir() + "/.pi/agent";
   environmentSensor.watchDirectory(agentDir, false);
 
   bus.on(Topics.MESSAGE_RECEIVED, (event) => {

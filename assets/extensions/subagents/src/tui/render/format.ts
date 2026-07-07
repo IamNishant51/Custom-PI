@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { C } from "../../tui-colors";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 export function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]|\x1B\].*?\x07|\x1B\[.*?m/g, "");
@@ -91,7 +92,6 @@ export function progressBar(current: number, total: number, width: number, color
 }
 
 export function truncateLines(lines: string[], maxWidth: number): string[] {
-  const { visibleWidth } = require("@earendil-works/pi-tui");
   return lines.map(line => {
     const vw = visibleWidth(line);
     if (vw > maxWidth) return truncateToWidth(line, maxWidth);

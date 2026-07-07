@@ -18,6 +18,7 @@ import { AGENTS_DIR_GLOBAL, loadAgents, parseMarkdownAgent } from "./agent-confi
 import { resolveModel, resolveFastModel, SUBAGENT_TOOLS } from "./tool-registry";
 import { secureSpawn } from "../secure-exec";
 import { logger } from "../logger";
+import { queryTriplets } from "../state-db";
 
 interface SubAgentProgress {
   id: string;
@@ -70,7 +71,6 @@ export class SubAgentRuntime {
 
     let tripletContext = "";
     try {
-      const { queryTriplets } = require("../state-db");
       const knowledge = queryTriplets({ minConfidence: 0.6 });
       if (knowledge.length > 0) {
         const lines = knowledge.slice(0, 10).map((t: { confidenceScore: number; subjectLabel: string; predicateLabel: string; objectLabel: string }) =>

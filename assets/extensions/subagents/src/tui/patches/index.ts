@@ -41,26 +41,7 @@ const debugLog = process.env.PI_DEBUG
     }
   : () => {};
 
-export function locateTheme(): any {
-  try {
-    const cliPath = process.argv[1] || "";
-    const distIndex = cliPath.lastIndexOf("dist");
-    if (distIndex !== -1) {
-      const packageDir = cliPath.substring(0, distIndex);
-      const themePath = path.join(packageDir, "dist", "modes", "interactive", "theme", "theme.js");
-      if (fs.existsSync(themePath)) {
-        return require(themePath).theme;
-      }
-    }
-  } catch { logger.warn("empty catch") }
-  try {
-    for (const p of module.paths) {
-      const themePath = path.join(p, "@earendil-works", "pi-coding-agent", "dist", "modes", "interactive", "theme", "theme.js");
-      if (fs.existsSync(themePath)) {
-        return require(themePath).theme;
-      }
-    }
-  } catch { logger.warn("empty catch") }
+export async function locateTheme(): Promise<any> {
   return null;
 }
 

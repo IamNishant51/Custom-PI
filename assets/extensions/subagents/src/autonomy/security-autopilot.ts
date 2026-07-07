@@ -221,7 +221,7 @@ export class SecurityAutopilot {
   }
 
   async scanVaultForKeyExposure(): Promise<SecurityFinding[]> {
-    const vaultDir = path.join(require("os").homedir(), ".pi", "agent", ".vault");
+    const vaultDir = path.join(os.homedir(), ".pi", "agent", ".vault");
     const vaultFindings: SecurityFinding[] = [];
 
     try {
@@ -267,7 +267,7 @@ export class SecurityAutopilot {
 
   private async scheduledScan(): Promise<void> {
     try {
-      const homeDir = require("os").homedir();
+      const homeDir = os.homedir();
       const configDir = path.join(homeDir, ".pi", "agent");
       if (fs.existsSync(configDir)) {
         this.scanDirectory(configDir);
