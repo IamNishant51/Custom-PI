@@ -53,7 +53,6 @@ export function parseMarkdownAgent(content: string): { config: AgentConfig; body
   }
 }
 
-let agentsCache: { data: Map<string, AgentConfig>; timestamp: number } | null = null;
 const AGENTS_CACHE_TTL = 24 * 3600 * 1000; // 24 hours cache
 
 export function loadAgents(): Map<string, AgentConfig> {
