@@ -7,5 +7,6 @@ dist/
 .DS_Store
 *.tmp.*
 PLAN.md
+IMPROVEMENT_PLAN.md
 __pycache__/
 *.pyc

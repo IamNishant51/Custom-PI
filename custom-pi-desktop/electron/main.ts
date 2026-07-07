@@ -1,14 +1,14 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
 import * as fs from "fs";
-import { ChildProcess, spawn, spawnSync } from "child_process";
+import { spawnSync } from "child_process";
 import { createTray } from "./tray";
 
 const DEV_SERVER_URL = "http://localhost:4321";
 const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
-let apiServer: ChildProcess | null = null;
+let closeApiServer: (() => void) | null = null;
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -67,25 +67,27 @@ async function startApiServer(): Promise<void> {
     }
   }
 
-  apiServer = spawn("node", [serverPath], {
-    env: {
-      ...process.env,
-      WEB_PORT: "4321",
-      ELECTRON_MODE: "true",
-      CLIENT_DIST: clientDist,
-    },
-    stdio: ["ignore", "inherit", "inherit"],
-    shell: process.platform === "win32",
-  });
+  try {
+    process.env.WEB_PORT = "4321";
+    process.env.ELECTRON_MODE = "true";
+    process.env.CLIENT_DIST = clientDist;
 
-  apiServer.on("exit", (code) => {
-    if (code !== 0 && code !== null) {
-      console.error(`[Desktop] API server exited with code ${code}`);
-    }
-  });
+    const serverModule = await import(serverPath) as {
+      main?: () => Promise<void>;
+      closeAllDbConnections?: () => void;
+    };
 
-  await waitForServer(`${DEV_SERVER_URL}/api/health`);
-  console.log("[Desktop] API server ready");
+    await serverModule.main?.();
+    closeApiServer = () => {
+      serverModule.closeAllDbConnections?.();
+    };
+
+    await waitForServer(`${DEV_SERVER_URL}/api/health`);
+    console.log("[Desktop] API server ready");
+  } catch (e) {
+    console.error("[Desktop] Failed to start API server:", e);
+    throw e;
+  }
 }
 
 function createMainWindow(): void {
@@ -145,10 +147,10 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  if (apiServer) {
-    apiServer.kill("SIGTERM");
-    apiServer = null;
+app.on("will-quit", () => {
+  if (closeApiServer) {
+    closeApiServer();
+    closeApiServer = null;
   }
 });
 

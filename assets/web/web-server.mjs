@@ -68,14 +68,7 @@ const WS_PING_INTERVAL = 30_000; // 30s heartbeat
 
 // ── AsyncLocalStorage for per-request context ──────────────────────────────
 import { AsyncLocalStorage } from "node:async_hooks";
-let asyncLocalStorage;
-try {
-  const { AsyncLocalStorage } = await import("node:async_hooks");
-  asyncLocalStorage = new AsyncLocalStorage();
-} catch {
-  // Fallback: no-op
-  asyncLocalStorage = { getStore: () => null, run: (s, fn) => fn() };
-}
+let asyncLocalStorage = new AsyncLocalStorage();
 
 function getRequestContext() {
   return asyncLocalStorage.getStore() || {};
@@ -4544,6 +4537,7 @@ async function main() {
   }
 }
 
-if (!process.env.VITEST) {
+if (!process.env.VITEST && !process.env.ELECTRON_MODE) {
   main();
 }
+export { main, closeAllDbConnections };

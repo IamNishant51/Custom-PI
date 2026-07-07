@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import chalk from "chalk";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
@@ -16,6 +16,7 @@ import { TuiManager } from "../tui";
 import { localGrep } from "../tools/grep";
 import { AGENTS_DIR_GLOBAL, loadAgents, parseMarkdownAgent } from "./agent-config";
 import { resolveModel, resolveFastModel, SUBAGENT_TOOLS } from "./tool-registry";
+import { secureSpawn } from "../secure-exec";
 
 interface SubAgentProgress {
   id: string;
@@ -114,6 +115,33 @@ export class SubAgentRuntime {
     /\bsu\b/,
     /\bmv\s+\/[^\s]+\s+\/[^\s]+\b/,
   ];
+
+  private static readonly SHELL_OPERATORS = /[;&|`$()]|&&|\|\|/;
+
+  private parseShellCommand(input: string): { binary: string; args: string[] } | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    if (SubAgentRuntime.SHELL_OPERATORS.test(trimmed)) {
+      return null;
+    }
+    const tokens: string[] = [];
+    let current = "";
+    let inSingle = false;
+    let inDouble = false;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+      if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+      if (ch === " " && !inSingle && !inDouble) {
+        if (current) { tokens.push(current); current = ""; }
+        continue;
+      }
+      current += ch;
+    }
+    if (current) tokens.push(current);
+    if (tokens.length === 0) return null;
+    return { binary: tokens[0], args: tokens.slice(1) };
+  }
 
   static readonly SECRET_PATTERNS = [
     /(?:api[_-]?key|secret|password|passwd|token|auth)[\s]*[:=][\s]*['"][a-zA-Z0-9_\-]{16,}['"]/i,
@@ -262,30 +290,24 @@ export class SubAgentRuntime {
           }
           const policyResult = policyValidator.validate({ type: "run_command", command, workdir: this.ctx.cwd });
           if (!policyResult.allowed) return `Error: ${policyResult.reason}`;
-          const result = await new Promise<string>((resolve, reject) => {
-            const child = spawn("sh", ["-c", command], {
+          const parsed = this.parseShellCommand(command);
+          if (!parsed) {
+            return `Error: Command rejected — shell operators (;, &, |, \`, $(), ||) are not allowed for security. Use simple commands without shell syntax.`;
+          }
+          try {
+            const result = await secureSpawn(parsed.binary, parsed.args, {
               cwd: this.ctx.cwd,
-              stdio: ["pipe", "pipe", "pipe"],
+              timeout: 45000,
+              maxOutput: MAX_OUT,
             });
-            let stdout = "";
-            let stderr = "";
-            const timer = setTimeout(() => {
-              child.kill("SIGTERM");
-              resolve(`Error: Command timed out after 45s:\n${stdout.slice(-2000)}`);
-            }, 45000);
-            child.stdout?.on("data", (data: Buffer) => { stdout += data.toString(); });
-            child.stderr?.on("data", (data: Buffer) => { stderr += data.toString(); });
-            child.on("close", (code) => {
-              clearTimeout(timer);
-              if (code === 0) resolve(stdout);
-              else resolve(`Exit code ${code}:\n${stderr || stdout}`);
-            });
-            child.on("error", (err) => {
-              clearTimeout(timer);
-              reject(err);
-            });
-          });
-          return result.length > MAX_OUT ? result.slice(0, MAX_OUT) + `\n...[Output truncated to ${Math.round(MAX_OUT / 1000)}KB]` : result;
+            if (result.exitCode === 0) {
+              return result.stdout || "(no output)";
+            }
+            const errOutput = result.stderr || result.stdout || "(no output)";
+            return `Exit code ${result.exitCode}:\n${errOutput}`;
+          } catch (e: any) {
+            return `Error executing command: ${e.message}`;
+          }
         }
         case "grep": {
           const pattern = args.pattern;

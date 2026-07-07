@@ -18,10 +18,14 @@
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.1.0",
+    "esbuild": "^0.28.1",
     "typescript": "^5.8.0"
   },
   "author": "Nishant Unavane <iamnishantunavane@gmail.com>",
   "license": "MIT",
   "homepage": "https://github.com/IamNishant51/Custom-PI",
-  "repository": { "type": "git", "url": "https://github.com/IamNishant51/Custom-PI.git" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IamNishant51/Custom-PI.git"
+  }
 }

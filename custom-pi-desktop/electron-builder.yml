@@ -21,6 +21,14 @@ extraResources:
       - "**/*"
       - "!client/src/**"
       - "!client/node_modules/**"
+  - from: ../node_modules
+    to: node_modules
+    filter:
+      - "**/*"
+      - "!.cache"
+      - "!typescript"
+      - "!vitest"
+      - "!@rolldown"
 
 win:
   target:
