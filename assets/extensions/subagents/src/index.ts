@@ -61,6 +61,7 @@ import { applyLivePatches } from "./tui/patches";
 import { AGENTS_DIR_GLOBAL, AGENTS_DIR_LOCAL, loadAgents, invalidateAgentCache } from "./runtime/agent-config";
 import { resolveModel, resolveFastModel } from "./runtime/tool-registry";
 import { SubAgentRuntime } from "./runtime/subagent";
+import { serializeMessageContent, extractToolName, extractToolArgs, hasToolCalls, countToolCalls, getConversationText } from "./utils/serialize-message";
 
 const CHECKPOINT_STALE_MS = 3600_000;
 const MAX_BACKGROUND_TOOL_CALLS = 3;
@@ -2575,35 +2576,6 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
     return ctx?.sessionId || null;
   }
 
-  function serializeMessageContent(msg: any): string {
-    if (typeof msg.content === "string") return msg.content;
-    if (Array.isArray(msg.content)) {
-      return msg.content.map((c: any) => {
-        if (typeof c === "string") return c;
-        if (c.type === "text") return c.text || "";
-        if (c.type === "toolCall") return `[Tool Call: ${c.name}(${JSON.stringify(c.arguments)})]`;
-        if (c.type === "toolResult") {
-          const text = c.content?.[0]?.text || "";
-          return `[Tool Result: ${text.slice(0, 1000)}]`;
-        }
-        return "";
-      }).join("\n");
-    }
-    return "";
-  }
-
-  function extractToolName(msg: any): string | null {
-    if (!Array.isArray(msg.content)) return null;
-    const tc = msg.content.find((c: any) => c.type === "toolCall");
-    return tc?.name || null;
-  }
-
-  function extractToolArgs(msg: any): string | null {
-    if (!Array.isArray(msg.content)) return null;
-    const tc = msg.content.find((c: any) => c.type === "toolCall");
-    return tc?.arguments ? JSON.stringify(tc.arguments) : null;
-  }
-
   // ─────────────────────────────────────────────────────────────────────────
 
   let backgroundTaskCounter = 0;
@@ -2632,8 +2604,8 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
   // Nudge-driven background processing: replaces 3 separate LLM calls with 1
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return;
-    const hasToolCalls = event.message.content.some((c: any) => c.type === "toolCall");
-    if (hasToolCalls) return;
+    const msgHasToolCalls = event.message.content.some((c: any) => c.type === "toolCall");
+    if (msgHasToolCalls) return;
     if (isProcessingBackground) return;
 
     incrementTurn();
@@ -2651,11 +2623,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           const branch = ctx.sessionManager.getBranch();
           if (!branch) { isProcessingBackground = false; return; }
           const messages = branch.filter((e: any) => e.type === "message").map((e: any) => e.message);
-          const conversation = messages.slice(-10).map((m: any) => {
-            let s = typeof m.content === "string" ? m.content : "";
-            if (Array.isArray(m.content)) s = m.content.map((c: any) => typeof c === "string" ? c : c.type === "text" ? c.text : "").join("\n");
-            return `${m.role.toUpperCase()}: ${s.slice(0, 500)}`;
-          }).join("\n\n");
+          const conversation = getConversationText(messages.slice(-10));
           const result = await runMemoryReview(nudgeModel, { apiKey: nudgeAuth.apiKey, headers: nudgeAuth.headers }, conversation);
           if (result.memoryAdded.length > 0 || result.userAdded.length > 0) {
             logger.info("memory_nudge", { summary: result.summary });
@@ -2673,11 +2641,7 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
           const branch = ctx.sessionManager.getBranch();
           if (!branch) { isProcessingBackground = false; return; }
           const messages = branch.filter((e: any) => e.type === "message").map((e: any) => e.message);
-          const conversation = messages.slice(-10).map((m: any) => {
-            let s = typeof m.content === "string" ? m.content : "";
-            if (Array.isArray(m.content)) s = m.content.map((c: any) => typeof c === "string" ? c : c.type === "text" ? c.text : "").join("\n");
-            return `${m.role.toUpperCase()}: ${s.slice(0, 500)}`;
-          }).join("\n\n");
+          const conversation = getConversationText(messages.slice(-10));
           const result = await runSkillReview(nudgeModel, { apiKey: nudgeAuth.apiKey, headers: nudgeAuth.headers }, conversation);
           if (result.summary) logger.info("skill_nudge", { summary: result.summary });
           resetSkillNudge();
@@ -2704,32 +2668,10 @@ ${state.pending_subtasks?.map((t: string) => `  * [ ] ${t}`).join("\n") || "  (N
       const stateFile = sessionFile ? sessionFile.replace(".jsonl", "-task-state.json") : null;
       const project = path.basename(ctx.cwd || process.cwd()) || "global";
 
-      const recentMessages = messages.slice(-10).map((m: any) => {
-        let contentStr = "";
-        if (typeof m.content === "string") {
-          contentStr = m.content;
-        } else if (Array.isArray(m.content)) {
-          contentStr = m.content
-            .map((c: any) => {
-              if (typeof c === "string") return c;
-              if (c && typeof c === "object") {
-                if (c.type === "text") return c.text || "";
-                if (c.type === "toolCall") return `[Call Tool: ${c.name} with ${JSON.stringify(c.arguments)}]`;
-                if (c.type === "toolResult") return `[Tool Result: ${c.content?.[0]?.text || ""}]`;
-              }
-              return "";
-            })
-            .join("\n");
-        }
-        return `${m.role.toUpperCase()}: ${contentStr.slice(0, 1000)}`;
-      }).join("\n\n");
+      const recentMessages = getConversationText(messages.slice(-10), 1000);
 
-      const allToolCalls = messages.filter((m: any) =>
-        m.role === "assistant" && Array.isArray(m.content) &&
-        m.content.some((c: any) => c.type === "toolCall")
-      );
-      const totalToolCalls = allToolCalls.reduce((sum: number, m: any) => {
-        return sum + m.content.filter((c: any) => c.type === "toolCall").length;
+      const totalToolCalls = messages.reduce((sum: number, m: any) => {
+        return sum + (m.role === "assistant" ? countToolCalls(m) : 0);
       }, 0);
 
       let currentStateStr = "{}";
@@ -2816,11 +2758,7 @@ If nothing to report, return: {}`;
       // Pre-compression flush: save important facts before context gets summarized
       if (totalToolCalls > MAX_BACKGROUND_TOOL_CALLS) {
         try {
-          const flushMessages = messages.slice(-5).map((m: any) => {
-            let s = typeof m.content === "string" ? m.content : "";
-            if (Array.isArray(m.content)) s = m.content.map((c: any) => typeof c === "string" ? c : c.type === "text" ? c.text : "").join("\n");
-            return `${m.role.toUpperCase()}: ${s.slice(0, 500)}`;
-          }).join("\n\n");
+          const flushMessages = getConversationText(messages.slice(-5), 500);
           await runPreCompressionFlush(model, { apiKey: auth.apiKey, headers: auth.headers }, flushMessages);
         } catch (err: any) { logger.warn(`Pre-compression flush failed: ${err.message}`); }
       }
