@@ -1,6 +1,6 @@
 {
-  "defaultModel": "deepseek-ai/deepseek-v4-flash",
-  "defaultProvider": "nvidia",
+  "defaultModel": "llama3:8b-instruct-q4_K_M",
+  "defaultProvider": "ollama",
   "defaultThinkingLevel": "high",
   "quietStartup": true,
   "editorPaddingX": 6,

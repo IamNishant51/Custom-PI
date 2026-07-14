@@ -1,60 +1,17 @@
 {
   "providers": {
-    "nvidia": {
-      "api": "openai-completions",
-      "apiKey": "set-via-env-var",
-      "baseUrl": "https://integrate.api.nvidia.com/v1",
-      "models": [
-{
-      "contextWindow": 131072,
-      "id": "deepseek-ai/deepseek-v4-flash",
-      "maxTokens": 32768,
-      "name": "DeepSeek V4 Flash",
-      "reasoning": true
-    },
-    {
-      "contextWindow": 131072,
-      "id": "meta/llama-3.3-70b-instruct",
-      "maxTokens": 16384,
-      "name": "Llama 3.3 70B",
-      "reasoning": false
-    }
-      ]
-    },
-    "lmstudio": {
-      "api": "openai-completions",
-      "apiKey": "not-needed",
-      "baseUrl": "http://127.0.0.1:1234/v1",
-      "models": [
-        {
-          "api": "openai-completions",
-          "contextWindow": 131072,
-          "id": "google/gemma-4-e4b",
-          "maxTokens": 32768,
-          "name": "Gemma 4 E4B",
-          "input": ["text", "image"],
-          "reasoning": false
-        }
-      ]
-    },
     "ollama": {
       "api": "openai-completions",
       "apiKey": "ollama",
       "baseUrl": "http://127.0.0.1:11434/v1",
       "models": [
         {
-          "_launch": true,
-          "contextWindow": 202752,
-          "id": "glm-5.1:cloud",
+          "contextWindow": 8192,
+          "id": "llama3:8b-instruct-q4_K_M",
+          "maxTokens": 4096,
+          "name": "Llama 3 8B (Local)",
           "input": ["text"],
-          "reasoning": true
-        },
-        {
-          "_launch": true,
-          "contextWindow": 262144,
-          "id": "gemma4:31b-cloud",
-          "input": ["text", "image"],
-          "reasoning": true
+          "reasoning": false
         },
         {
           "_launch": true,
@@ -77,16 +34,45 @@
         },
         {
           "_launch": true,
-          "contextWindow": 262144,
-          "id": "kimi-k2.6:cloud",
-          "input": ["text", "image"],
-          "reasoning": true
-        },
-        {
-          "_launch": true,
           "contextWindow": 131072,
           "id": "llama3.2:1b",
           "input": ["text"]
+        }
+      ]
+    },
+    "nvidia": {
+      "api": "openai-completions",
+      "apiKey": "set-via-env-var",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "models": [
+        {
+          "contextWindow": 131072,
+          "id": "deepseek-ai/deepseek-v4-flash",
+          "maxTokens": 32768,
+          "name": "DeepSeek V4 Flash",
+          "reasoning": true
+        },
+        {
+          "contextWindow": 131072,
+          "id": "meta/llama-3.3-70b-instruct",
+          "maxTokens": 16384,
+          "name": "Llama 3.3 70B",
+          "reasoning": false
+        }
+      ]
+    },
+    "lmstudio": {
+      "api": "openai-completions",
+      "apiKey": "not-needed",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "models": [
+        {
+          "contextWindow": 131072,
+          "id": "google/gemma-4-e4b",
+          "maxTokens": 32768,
+          "name": "Gemma 4 E4B",
+          "input": ["text", "image"],
+          "reasoning": false
         }
       ]
     }
