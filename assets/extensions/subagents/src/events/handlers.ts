@@ -35,7 +35,7 @@ import {
 // (soul/memory/agents/stack-detection/past-sessions) runs once per session turn
 // window instead of on every single agent turn — doing it synchronously per turn
 // blocks the event loop and freezes the TUI while the agent "thinks".
-const CONTEXT_CACHE_TTL_MS = 60_000;
+const CONTEXT_CACHE_TTL_MS = 300_000;
 const contextCache = new Map<string, { prompt: string; ts: number }>();
 
 let globalAnimTimer: ReturnType<typeof setInterval> | null = null;
