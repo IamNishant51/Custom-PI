@@ -475,7 +475,7 @@ function patchCustomEditor(proto: any) {
     const CURSOR_MARKER = adapter2.cursorMarker();
     const vw = adapter2.visibleWidth;
 
-    const isEmpty = !this.value || this.value.length === 0;
+    const isEmpty = this.isEditorEmpty();
 
     for (let i = 0; i < visibleLines.length; i++) {
       const layoutLine = visibleLines[i];
