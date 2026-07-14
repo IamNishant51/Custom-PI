@@ -10,7 +10,7 @@ import { hexToRgb } from "../utils/color";
 import { stripAnsi, truncateToWidth, truncateLines, measureWidth } from "../render/format";
 import { render as renderMarkdown } from "../markdown/render";
 import { setReRenderCallback } from "../markdown/highlight";
-import { getGlobalFrame } from "../../animations";
+import { getGlobalFrame, getSpinner, STATUS_VERBS, getGlobalVerbIndex } from "../../animations";
 import { getHostAdapter } from "../../host-adapter";
 import { appMode } from "../../runtime/agent-state";
 import * as piCodingAgentTyped from "@earendil-works/pi-coding-agent";
@@ -277,11 +277,8 @@ function patchAssistantMessage(proto: any) {
       if (this.isStreaming) {
         const lastIdx = result.length - 1;
         if (lastIdx >= 0) {
-          const frame = getGlobalFrame();
-          const pulse = Math.sin(frame * 0.15) * 0.5 + 0.5;
-          const brightness = Math.round(160 + pulse * 95);
-          const cursor = `\x1b[38;2;${brightness};${brightness};${brightness}m\u2588\x1b[0m`;
-          result[lastIdx] = result[lastIdx] + cursor;
+          const spinner = getSpinner();
+          result[lastIdx] = result[lastIdx] + ` \x1b[2m${spinner}\x1b[0m`;
         }
       }
 
@@ -354,8 +351,8 @@ function patchToolExecution(proto: any) {
     let finalLines: string[] = [];
 
     if (isRunning) {
-      const dot = `\x1b[32m●\x1b[0m`;
-      finalLines = [`${dot} \x1b[1m${displayName}\x1b[0m${argsStr}`];
+      const spinner = getSpinner();
+      finalLines = [`\x1b[36m${spinner}\x1b[0m \x1b[1m${displayName}\x1b[0m${argsStr}`];
     } else if (isError) {
       const dot = `\x1b[31m●\x1b[0m`;
       const errorMsg = this.result?.details?.message || this.result?.details || "failed";
@@ -584,14 +581,17 @@ function patchFooterComponent(proto: any) {
 
     let left = "";
     if (isRunning) {
-      const symbol = `\x1b[33m✳\x1b[0m`;
-      const action = runningTool ? `${getDisplayToolName(runningTool.toolName)}...` : "Thinking...";
+      const spinner = getSpinner();
+      const verb = STATUS_VERBS[getGlobalVerbIndex() % STATUS_VERBS.length];
+      const charsToShow = Math.min((getGlobalFrame() % 10) + 1, verb.length);
+      const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "…" : "");
+      const action = runningTool ? `${getDisplayToolName(runningTool.toolName)}…` : displayVerb;
       let elapsedStr = "";
       if (runningTool && runningTool.startTime) {
         const secs = Math.floor((Date.now() - runningTool.startTime) / 1000);
         elapsedStr = `${secs}s · `;
       }
-      left = `${symbol} \x1b[1m${action}\x1b[0m \x1b[2m(${elapsedStr}✳ ${totalTokens.toLocaleString()} tokens · esc to interrupt)\x1b[0m`;
+      left = `\x1b[36m${spinner}\x1b[0m \x1b[1m${action}\x1b[0m \x1b[2m(${elapsedStr}↓ ${totalTokens.toLocaleString()} tok · esc to interrupt)\x1b[0m`;
     } else {
       const symbol = `\x1b[32m●\x1b[0m`;
       left = `${symbol} \x1b[2m${modelName} · ${totalTokens.toLocaleString()} tok · $${totalCost.toFixed(3)}\x1b[0m`;
