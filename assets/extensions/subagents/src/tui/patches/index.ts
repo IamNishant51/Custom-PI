@@ -239,6 +239,7 @@ function patchAssistantMessage(proto: any) {
     try {
       const contentWidth = Math.max(20, width - 4);
       let lines: string[] = [];
+      this._thinkingToggleLineIndices = [];
 
       if (this.lastMessage && Array.isArray(this.lastMessage.content)) {
         for (const c of this.lastMessage.content) {
@@ -250,11 +251,11 @@ function patchAssistantMessage(proto: any) {
             const isCollapsed = this.hideThinkingBlock !== false;
             if (lines.length > 0) lines.push("");
 
+            this._thinkingToggleLineIndices.push(lines.length);
             if (isCollapsed) {
               lines.push(`\x1b[2m▶ Reasoning  (click to expand)\x1b[0m`);
             } else {
               lines.push(`\x1b[2m▼ Reasoning\x1b[0m`);
-              // Minimal format: just indent the lines by 2 spaces and dim/italic them, no box
               const thinkingLines = renderMarkdown(c.thinking.trim(), { width: contentWidth - 2, streaming: !!this.isStreaming });
               for (const line of thinkingLines) {
                 lines.push(`\x1b[2m${line}\x1b[0m`);
@@ -701,15 +702,9 @@ export function applyContainerPatch(containerProto: any): void {
         const endLine = startLine + childLines.length;
 
         if (currentType === "UserMessageComponent" || currentType === "AssistantMessageComponent") {
-          const reasoningToggleLines: number[] = [];
-          if (currentType === "AssistantMessageComponent") {
-            for (let i = 0; i < childLines.length; i++) {
-              const plain = stripAnsi(childLines[i]).trim();
-              if (plain.startsWith("▶ Reasoning") || plain.startsWith("▼ Reasoning")) {
-                reasoningToggleLines.push(i);
-              }
-            }
-          }
+          const reasoningToggleLines = (child._thinkingToggleLineIndices && Array.isArray(child._thinkingToggleLineIndices))
+            ? [...child._thinkingToggleLineIndices]
+            : [];
           renderedComponents.push({ component: child, startLine, endLine, reasoningToggleLines });
         }
 
