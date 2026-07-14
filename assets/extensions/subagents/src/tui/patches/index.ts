@@ -619,9 +619,8 @@ function handleTerminalMouseClick(col: number, row: number) {
     return;
   }
 
-  const viewportTop = activeTuiInstance.previousViewportTop || 0;
-  const lineIndex = viewportTop + row - 1;
-  log(`viewportTop=${viewportTop}, lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
+  const lineIndex = row - 1;
+  log(`lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
   log(`Rendered components: ${JSON.stringify(renderedComponents.map(rc => ({ name: rc.component.constructor?.name, start: rc.startLine, end: rc.endLine })))}`);
 
   const clicked = renderedComponents.find(rc => {
@@ -768,65 +767,7 @@ function patchTui(proto: any) {
   proto.start = function (this: any) {
     activeTuiInstance = this;
     originalTuiStart.call(this);
-
-    // Enable SGR mouse tracking explicitly
-    process.stdout.write("\x1b[?1000h\x1b[?1006h");
-
-    let originalEmit: typeof process.stdin.emit | null = null;
-
-    if (!(process.stdin as any)._customPiPatched) {
-      originalEmit = process.stdin.emit;
-      (process.stdin as any)._originalEmit = originalEmit;
-      (process.stdin as any)._customPiPatched = true;
-
-      process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
-        if (event === "data") {
-          const raw = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
-
-          if (showHelpOverlay) {
-            showHelpOverlay = false;
-            if (activeTuiInstance) activeTuiInstance.requestRender();
-            return true;
-          }
-
-          if (raw === "\x12") {
-            const lastAssistant = [...renderedComponents]
-              .reverse()
-              .find(rc => rc.component.constructor?.name === "AssistantMessageComponent");
-            if (lastAssistant) {
-              const assistant = lastAssistant.component;
-              assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
-              if (activeTuiInstance) activeTuiInstance.requestRender();
-            }
-            return true;
-          }
-
-          if (raw === "?") {
-            const editor = activeTuiInstance?.children?.find((c: any) => c && c.constructor?.name === "CustomEditor");
-            if (editor && (!editor.value || editor.value.trim() === "")) {
-              showHelpOverlay = true;
-              if (activeTuiInstance) activeTuiInstance.requestRender();
-              return true;
-            }
-          }
-
-          const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-          if (mouseMatch) {
-            const button = parseInt(mouseMatch[1], 10);
-            const col = parseInt(mouseMatch[2], 10);
-            const row = parseInt(mouseMatch[3], 10);
-            const isRelease = mouseMatch[4] === "m";
-            if (!isRelease && button === 0 && col >= 0 && row >= 0) {
-              handleTerminalMouseClick(col, row);
-            }
-            return true;
-          }
-        }
-        const emit = (process.stdin as any)._originalEmit;
-        if (emit) return emit.call(this, event, data, ...args);
-        return EventEmitter.prototype.emit.call(this, event, data, ...args);
-      };
-    }
+    // SGR mouse + stdin patching is handled by enableMouseTracking() at startup
   };
 
   const originalTuiStop = proto.stop;
@@ -841,6 +782,64 @@ function patchTui(proto: any) {
     }
     activeTuiInstance = null;
     originalTuiStop.call(this);
+  };
+}
+
+function enableMouseTracking() {
+  if ((process.stdin as any)._customPiPatched) return;
+
+  process.stdout.write("\x1b[?1000h\x1b[?1006h");
+
+  const originalEmit = process.stdin.emit;
+  (process.stdin as any)._originalEmit = originalEmit;
+  (process.stdin as any)._customPiPatched = true;
+
+  process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
+    if (event === "data") {
+      const raw = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+
+      if (showHelpOverlay) {
+        showHelpOverlay = false;
+        if (activeTuiInstance) activeTuiInstance.requestRender();
+        return true;
+      }
+
+      if (raw === "\x12") {
+        const lastAssistant = [...renderedComponents]
+          .reverse()
+          .find(rc => rc.component.constructor?.name === "AssistantMessageComponent");
+        if (lastAssistant) {
+          const assistant = lastAssistant.component;
+          assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+          if (activeTuiInstance) activeTuiInstance.requestRender();
+        }
+        return true;
+      }
+
+      if (raw === "?") {
+        const editor = activeTuiInstance?.children?.find((c: any) => c && c.constructor?.name === "CustomEditor");
+        if (editor && (!editor.value || editor.value.trim() === "")) {
+          showHelpOverlay = true;
+          if (activeTuiInstance) activeTuiInstance.requestRender();
+          return true;
+        }
+      }
+
+      const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+      if (mouseMatch) {
+        const button = parseInt(mouseMatch[1], 10);
+        const col = parseInt(mouseMatch[2], 10);
+        const row = parseInt(mouseMatch[3], 10);
+        const isRelease = mouseMatch[4] === "m";
+        if (!isRelease && button === 0 && col >= 0 && row >= 0) {
+          handleTerminalMouseClick(col, row);
+        }
+        return true;
+      }
+    }
+    const emit = (process.stdin as any)._originalEmit;
+    if (emit) return emit.call(this, event, data, ...args);
+    return EventEmitter.prototype.emit.call(this, event, data, ...args);
   };
 }
 
@@ -880,6 +879,10 @@ setImmediate(() => {
     patchFooterComponent(FooterComponent.prototype);
     patchDynamicBorder(DynamicBorder.prototype);
     patchTui(TUI.prototype);
+
+    // Enable mouse tracking NOW (TUI.prototype.start may have already been called)
+    enableMouseTracking();
+
     logger.info("[TUI] All prototype patches applied successfully");
   } catch (e: any) {
     logger.warn(`Failed to apply static TUI patches: ${e.message}`);
