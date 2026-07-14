@@ -7,16 +7,16 @@
       "models": [
         {
           "contextWindow": 131072,
-          "id": "llama-3.3-70b-versatile",
-          "maxTokens": 32768,
-          "name": "Llama 3.3 70B (Groq)",
+          "id": "llama-3.1-8b-instant",
+          "maxTokens": 16384,
+          "name": "Llama 3.1 8B Instant (Groq)",
           "reasoning": false
         },
         {
           "contextWindow": 131072,
-          "id": "llama-3.1-8b-instant",
-          "maxTokens": 16384,
-          "name": "Llama 3.1 8B Instant (Groq)",
+          "id": "llama-3.3-70b-versatile",
+          "maxTokens": 32768,
+          "name": "Llama 3.3 70B (Groq)",
           "reasoning": false
         },
         {

@@ -1,5 +1,5 @@
 {
-  "defaultModel": "llama-3.3-70b-versatile",
+  "defaultModel": "llama-3.1-8b-instant",
   "defaultProvider": "groq",
   "defaultThinkingLevel": "high",
   "quietStartup": true,
