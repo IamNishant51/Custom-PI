@@ -103,11 +103,11 @@ export class CellBuffer {
   }
 
   clearRect(x: number, y: number, width: number, height: number, style: number): void {
-    for (let y = 0; y < height; y++) {
-      const row = y + y;
+    for (let dy = 0; dy < height; dy++) {
+      const row = y + dy;
       if (row >= this.height) break;
-      for (let x = 0; x < width; x++) {
-        const col = x + x;
+      for (let dx = 0; dx < width; dx++) {
+        const col = x + dx;
         if (col >= this.width) break;
         this.setCell(col, row, " ", style);
       }
@@ -264,5 +264,9 @@ export class TerminalScreen {
 
   getHeight(): number {
     return this.rows;
+  }
+
+  clear(style: number = this.defaultStyle): void {
+    this.buffer.clearRect(0, 0, this.cols, this.rows, style);
   }
 }
