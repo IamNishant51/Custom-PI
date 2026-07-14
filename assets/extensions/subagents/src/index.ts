@@ -74,6 +74,8 @@ import {
   appMode, unsubTabHandler,
 } from "./runtime/agent-state";
 
+// TUI v2 — new architecture
+
 function applyRuntimePatches() {
   const req = createRequire(import.meta.url);
 
@@ -152,11 +154,15 @@ export default function (pi: ExtensionAPI) {
     return;
   }
 
+  const loadT0 = Date.now();
+  const loadMark = (label: string) => logger.info(`[LoadTiming] ${label}: +${Date.now() - loadT0}ms`);
+
   try {
     applyRuntimePatches();
   } catch (err: any) {
     logger.error(`Failed to apply runtime patches: ${err.message}`);
   }
+  loadMark("after applyRuntimePatches");
 
   // ── MCP Server Client Integration ─────────────────────────────────────────
   const PI_DIR_GLOBAL = path.join(os.homedir(), ".pi", "agent");
@@ -214,35 +220,43 @@ export default function (pi: ExtensionAPI) {
   const activeCliMcpServers = new Map<string, any>();
 
   const servers = loadMcpConfigGlobal();
-  for (const s of servers) {
-    if (s.enabled) {
-      const conn = new McpCliConnection(s);
-      activeCliMcpServers.set(s.name, conn);
-      conn.start().then(() => {
-        for (const t of conn.tools) {
-          pi.registerTool({
-            name: t.name,
-            label: t.name.split(/[-_]/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
-            description: t.description || `MCP Tool ${t.name}`,
-            parameters: t.inputSchema || Type.Object({}),
-            async execute(id, params, signal, update, context) {
-              const res = await conn.callTool(t.name, params);
-              if (!res || !res.content) {
-                return { content: [{ type: "text", text: "Empty output" }] };
+  loadMark("after loadMcpConfigGlobal");
+
+  // Defer MCP server spawning off the extension-load / first-message critical
+  // path. npx-based servers (e.g. sequential-thinking) can take seconds to
+  // download/start on first launch; doing it in a setImmediate keeps the TUI
+  // responsive and prevents it from blocking the first agent turn.
+  setImmediate(() => {
+    for (const s of servers) {
+      if (s.enabled) {
+        const conn = new McpCliConnection(s);
+        activeCliMcpServers.set(s.name, conn);
+        conn.start().then(() => {
+          for (const t of conn.tools) {
+            pi.registerTool({
+              name: t.name,
+              label: t.name.split(/[-_]/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+              description: t.description || `MCP Tool ${t.name}`,
+              parameters: t.inputSchema || Type.Object({}),
+              async execute(id, params, signal, update, context) {
+                const res = await conn.callTool(t.name, params);
+                if (!res || !res.content) {
+                  return { content: [{ type: "text", text: "Empty output" }] };
+                }
+                const content = res.content.map((c: any) => {
+                  if (c.type === "text") return { type: "text", text: c.text };
+                  return { type: "text", text: JSON.stringify(c) };
+                });
+                return { content };
               }
-              const content = res.content.map((c: any) => {
-                if (c.type === "text") return { type: "text", text: c.text };
-                return { type: "text", text: JSON.stringify(c) };
-              });
-              return { content };
-            }
-          });
-        }
-      }).catch(err => {
-        logger.error(`[MCP-CLI] Failed to load server ${s.name}: ${err.message}`);
-      });
+            });
+          }
+        }).catch(err => {
+          logger.error(`[MCP-CLI] Failed to load server ${s.name}: ${err.message}`);
+        });
+      }
     }
-  }
+  });
 
   process.on("exit", () => {
     for (const conn of activeCliMcpServers.values()) {
@@ -250,17 +264,52 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ── Initialize Ascension Subsystems (Phase 0–8) ──────────────────────────
-  try {
-    initializeAscension({
-      daemonEnabled: true,
-      autoDiscoverMcp: false,
-      healthCheckInterval: 300000,
-    }).catch((e: any) => logger.error(`[Ascension] Initialization failed: ${e.message}`));
-  } catch (e: any) {
-    logger.error(`[Ascension] Initialization failed: ${e.message}`);
-  }
+  loadMark("after mcp setup");
 
+  // ── Initialize v2 TUI (if enabled) ──────────────────────────────────────────
+  if (process.env.CUSTOM_PI_TUI_V2 === "1") {
+    setImmediate(async () => {
+      try {
+        const { TuiAppV2 } = await import("./tui/v2/TuiAppV2");
+        const v2App = new TuiAppV2({
+          theme: { 
+            mode: "auto", 
+            truecolor: process.env.CUSTOM_PI_TRUECOLOR === "1",
+            reducedMotion: process.env.CUSTOM_PI_REDUCED_MOTION === "1",
+            highContrast: process.env.CUSTOM_PI_HIGH_CONTRAST === "1",
+          },
+        });
+        
+        // Store v2 app reference for event handlers
+        (globalThis as any).__customPiTuiV2 = v2App;
+        
+        // Initialize session info
+        const model = (pi as any).model?.name || "unknown";
+        const sessionId = "session-" + Date.now();
+        v2App.setSessionInfo(model, sessionId);
+        
+        v2App.start();
+        loadMark("after tui v2 start");
+      } catch (e: any) {
+        logger.error(`[TUI v2] Failed to initialize: ${e.message}`);
+      }
+    });
+  } else {
+    // Legacy TUI initialization path
+    // Initialize Ascension Subsystems (Phase 0–8)
+    setImmediate(() => {
+      try {
+        initializeAscension({
+          daemonEnabled: true,
+          autoDiscoverMcp: false,
+          healthCheckInterval: 300000,
+        }).catch((e: any) => logger.error(`[Ascension] Initialization failed: ${e.message}`));
+      } catch (e: any) {
+        logger.error(`[Ascension] Initialization failed: ${e.message}`);
+      }
+      loadMark("after initializeAscension");
+    });
+  }
   // ── Register extracted tool definitions ───────────────────────────────────
   pi.registerTool(toolListSubagents);
   pi.registerTool(toolCreateSubagent);
@@ -336,10 +385,12 @@ export default function (pi: ExtensionAPI) {
 
   // ── Register extracted event handlers ─────────────────────────────────────
   registerEventHandlers(pi);
+  loadMark("after registerEventHandlers");
 
   // ── Register core TUI plugin ──────────────────────────────────────────────
   registerPlugin({
     name: "pi-subagent-core",
     version: "1.5.0",
   });
+  loadMark("extension load complete");
 }

@@ -190,7 +190,14 @@ export function registerEventHandlers(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    try { ctx.ui.setStatus("subagents", "Processing..."); } catch { /* not critical */ }
+    try {
+      ctx.ui.setStatus("subagents", "Processing…");
+      ctx.ui.setWorkingMessage("Contacting AI provider…");
+      ctx.ui.setWorkingIndicator({
+        frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+        intervalMs: 100,
+      });
+    } catch { /* not critical */ }
     const t0 = Date.now();
     const modelContextWindow = (ctx as any).model?.contextWindow
       ?? (ctx as any).sessionManager?.model?.contextWindow
@@ -211,6 +218,9 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
   async function assembleContextPrompt(event: any, ctx: any, modelContextWindow: number): Promise<string> {
     const yieldToLoop = () => new Promise<void>(resolve => setImmediate(resolve));
+    const t0 = Date.now();
+    const timings: Record<string, number> = {};
+    const mark = (label: string) => { timings[label] = Date.now() - t0; };
     const MAX_INJECTION_RATIO = 0.15;
     const budgetChars = Math.max(800, Math.floor(modelContextWindow * 4 * MAX_INJECTION_RATIO));
     const isSmallContext = modelContextWindow < 16384;
@@ -219,6 +229,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     const blocks: { priority: number; content: string; label: string }[] = [];
 
     const soul = await loadSoul();
+    mark("loadSoul");
     const soulBlock = isSmallContext
       ? `\n\n# IDENTITY\n${soul.split("\n").slice(0, 4).join("\n")}\n`
       : `\n\n# 🧬 IDENTITY & CORE PRINCIPLES\n${soul}\n`;
@@ -237,6 +248,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
     const memSnapshot = loadMemorySnapshot();
     await yieldToLoop();
+    mark("memorySnapshot");
     if (memSnapshot.memory) {
       const memContent = isSmallContext ? memSnapshot.memory.slice(0, 500) : memSnapshot.memory;
       blocks.push({ priority: 2, content: `\n# 🧠 PROJECT MEMORY\n${memContent}\n`, label: "memory-snapshot" });
@@ -248,6 +260,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
     const currentAgents = loadAgents();
     await yieldToLoop();
+    mark("loadAgents");
     if (currentAgents.size > 0) {
       const agentList = Array.from(currentAgents.values()).map((a: any) =>
         `- ${a.name}: ${a.description}`
@@ -270,11 +283,13 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         }
       }
     }
+    mark("taskState");
 
     if (!isSmallContext) {
       try {
         const stacks = detectStack(ctx.cwd || process.cwd());
         await yieldToLoop();
+        mark("detectStack");
         if (stacks.length > 0) {
           const primary = stacks[0];
           let stackBlock = `\n# 📦 PROJECT STACK\nDetected: ${primary.name} (${primary.language || "generic"})\n`;
@@ -294,6 +309,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       const projectDir = path.basename(ctx.cwd || process.cwd()) || "global";
       const memBlock = buildMemoryContextBlock(projectDir);
       await yieldToLoop();
+      mark("memoryContext");
       if (memBlock) {
         blocks.push({ priority: 3, content: memBlock, label: "memory-context" });
       }
@@ -303,6 +319,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       try {
         const skills = getSkills(3);
         await yieldToLoop();
+        mark("getSkills");
         if (skills.length > 0) {
           const skillLines = skills.map((s: any, i: number) => {
             const steps = s.skillMeta?.keySteps?.slice(0, 3).join(" → ") || "";
@@ -319,11 +336,13 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         await yieldToLoop();
         const convDir = path.join(os.homedir(), ".pi", "agent", "conversations");
         if (fs.existsSync(convDir)) {
+          const convT0 = Date.now();
           const archives = fs.readdirSync(convDir)
             .filter((f: string) => f.endsWith(".md"))
             .map((f: string) => ({ name: f, mtime: fs.statSync(path.join(convDir, f)).mtimeMs }))
             .sort((a: any, b: any) => b.mtime - a.mtime)
             .slice(0, 3);
+          timings["conversationsList"] = Date.now() - convT0;
           if (archives.length > 0) {
             const summaries: string[] = [];
             for (const arch of archives) {
@@ -338,6 +357,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
             blocks.push({ priority: 4, content: `\n# 📜 PAST SESSIONS\n${summaries.join("\n")}\n`, label: "past-sessions" });
           }
         }
+        mark("conversations");
       } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     }
 
@@ -363,6 +383,9 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       logger.info(`[ContextBudget] Skipped ${skipped.join(", ")} (budget: ${budgetChars} chars, model: ${modelContextWindow} tokens)`);
     }
 
+    const total = Date.now() - t0;
+    logger.info(`[Timing] assembleContextPrompt breakdown: total=${total}ms ` + Object.entries(timings).map(([k, v]) => `${k}=${v}ms`).join(" "));
+
     return extraPrompt;
   }
 
@@ -379,6 +402,12 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       insertMessage(sid, msg.role, text, toolName || undefined, toolArgs || undefined);
     } catch {
       // persistence must never crash the message flow
+    } finally {
+      try {
+        ctx.ui.setStatus("subagents", undefined);
+        ctx.ui.setWorkingMessage();
+        ctx.ui.setWorkingIndicator({ frames: [] });
+      } catch { /* not critical */ }
     }
   });
 

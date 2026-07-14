@@ -95,18 +95,10 @@ if (fs.existsSync(path.join(extDir, 'package.json')) && !fs.existsSync(path.join
   }
 }
 
-// Rebuild extension bundle if src/ exists (suppresses Jiti TS compilation freeze)
-const extSrcMissing = !fs.existsSync(path.join(extDir, 'dist', 'index.js'));
-const extSrcNewer = fs.existsSync(path.join(extDir, 'dist', 'index.js')) &&
-  fs.statSync(path.join(extDir, 'src', 'index.ts')).mtimeMs > fs.statSync(path.join(extDir, 'dist', 'index.js')).mtimeMs;
-if (fs.existsSync(path.join(extDir, 'src')) && (extSrcMissing || extSrcNewer)) {
-  console.log('\x1b[33m⚡ Building extension bundle (suppresses Jiti TS compile)...\x1b[0m');
-  try {
-    execSync('npm run build', { cwd: extDir, stdio: 'inherit' });
-  } catch (e) {
-    console.error('Failed to build extension:', e.message);
-  }
-}
+// NOTE: The extension bundle (dist/index.js) is pre-built and synced to
+// ~/.pi/agent/extensions/subagents/dist/index.js. Do NOT auto-build here —
+// `npm run build` adds 3-4s of npm startup overhead and froze the TUI at
+// launch. Rebuild manually with: npm run build && cp dist/index.js ~/.pi/agent/extensions/subagents/dist/index.js
 
 
 
