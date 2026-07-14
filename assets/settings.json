@@ -1,6 +1,6 @@
 {
-  "defaultModel": "llama3:8b-instruct-q4_K_M",
-  "defaultProvider": "ollama",
+  "defaultModel": "llama-3.3-70b-versatile",
+  "defaultProvider": "groq",
   "defaultThinkingLevel": "high",
   "quietStartup": true,
   "editorPaddingX": 6,

@@ -1,5 +1,33 @@
 {
   "providers": {
+    "groq": {
+      "api": "openai-completions",
+      "apiKey": "set-via-env-var",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "models": [
+        {
+          "contextWindow": 131072,
+          "id": "llama-3.3-70b-versatile",
+          "maxTokens": 32768,
+          "name": "Llama 3.3 70B (Groq)",
+          "reasoning": false
+        },
+        {
+          "contextWindow": 131072,
+          "id": "llama-3.1-8b-instant",
+          "maxTokens": 16384,
+          "name": "Llama 3.1 8B Instant (Groq)",
+          "reasoning": false
+        },
+        {
+          "contextWindow": 131072,
+          "id": "qwen/qwen3-32b",
+          "maxTokens": 16384,
+          "name": "Qwen3 32B (Groq)",
+          "reasoning": true
+        }
+      ]
+    },
     "ollama": {
       "api": "openai-completions",
       "apiKey": "ollama",
@@ -12,31 +40,6 @@
           "name": "Llama 3 8B (Local)",
           "input": ["text"],
           "reasoning": false
-        },
-        {
-          "_launch": true,
-          "contextWindow": 8192,
-          "id": "qwen3.5:9b",
-          "input": ["text", "image"],
-          "reasoning": true
-        },
-        {
-          "_launch": true,
-          "contextWindow": 32768,
-          "id": "qwen2.5-coder:14b",
-          "input": ["text"]
-        },
-        {
-          "_launch": true,
-          "contextWindow": 16384,
-          "id": "codellama:13b",
-          "input": ["text"]
-        },
-        {
-          "_launch": true,
-          "contextWindow": 131072,
-          "id": "llama3.2:1b",
-          "input": ["text"]
         }
       ]
     },
@@ -51,28 +54,6 @@
           "maxTokens": 32768,
           "name": "DeepSeek V4 Flash",
           "reasoning": true
-        },
-        {
-          "contextWindow": 131072,
-          "id": "meta/llama-3.3-70b-instruct",
-          "maxTokens": 16384,
-          "name": "Llama 3.3 70B",
-          "reasoning": false
-        }
-      ]
-    },
-    "lmstudio": {
-      "api": "openai-completions",
-      "apiKey": "not-needed",
-      "baseUrl": "http://127.0.0.1:1234/v1",
-      "models": [
-        {
-          "contextWindow": 131072,
-          "id": "google/gemma-4-e4b",
-          "maxTokens": 32768,
-          "name": "Gemma 4 E4B",
-          "input": ["text", "image"],
-          "reasoning": false
         }
       ]
     }
