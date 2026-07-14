@@ -6,6 +6,7 @@ import os from "node:os";
 import { THEME } from "../theme/theme";
 import { fg, fgBold, bgFg, dim } from "../theme/colorize";
 import { stripAnsi, truncateToWidth, truncateLines, measureWidth } from "../render/format";
+import { render as renderMarkdown } from "../markdown/render";
 import { getGlobalFrame, getDotPulse, getPulseColor, getSpinner, activeTrackers, globalPulse, startGlobalAnimation, stopGlobalAnimation } from "../../animations";
 import { QuantumHUDWidget } from "../components/quantum-hud";
 import { getHostAdapter } from "../../host-adapter";
@@ -55,19 +56,21 @@ function patchUserMessage(proto: any) {
     if (!markdownComponent) return [];
 
     const contentWidth = Math.max(20, width - 8);
-    const mdLines = markdownComponent.render(contentWidth);
+    const rawText = markdownComponent.content || markdownComponent.text || "";
+    const mdLines = rawText
+      ? renderMarkdown(rawText, { width: contentWidth })
+      : markdownComponent.render(contentWidth);
 
     const pointerColor = (s: string) => fg(THEME.accent, s);
     const dimFn = (s: string) => fg(THEME.muted, s);
-    const textFn = (s: string) => s;
 
     const lines: string[] = [];
     const pointer = "\u276f ";
     if (mdLines.length > 0) {
-      lines.push(pointerColor(pointer) + dimFn("You") + "  " + textFn(mdLines[0]));
+      lines.push(pointerColor(pointer) + dimFn("You") + "  " + (mdLines[0] || ""));
     }
     for (let i = 1; i < mdLines.length; i++) {
-      lines.push("  " + textFn(mdLines[i]));
+      lines.push("  " + (mdLines[i] || ""));
     }
     lines[0] = OSC133_ZONE_START + lines[0];
     lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
@@ -192,7 +195,16 @@ function patchAssistantMessage(proto: any) {
 
   const originalRender = proto.render;
   proto.render = function (this: any, width: number) {
-    const lines = originalRender.call(this, width - 4);
+    const contentWidth = Math.max(20, width - 8);
+    const rawText = this.content || this.text || "";
+
+    let lines: string[];
+    if (rawText) {
+      lines = renderMarkdown(rawText, { width: contentWidth, streaming: !!this.isStreaming });
+    } else {
+      lines = originalRender.call(this, contentWidth);
+    }
+
     if (lines.length === 0) return lines;
 
     const accentColor = (s: string) => fg(THEME.accent, s);
