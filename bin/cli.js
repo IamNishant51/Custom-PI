@@ -97,6 +97,25 @@ if (fs.existsSync(path.join(extDir, 'package.json')) && !fs.existsSync(path.join
 
 
 
+// Load environment variables from ~/.pi/agent/.env
+const envPath = path.join(PI_DIR, '.env');
+if (fs.existsSync(envPath)) {
+  try {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const k = trimmed.slice(0, eqIdx).trim();
+          const v = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+          if (k && !process.env[k]) process.env[k] = v;
+        }
+      }
+    }
+  } catch (e) {}
+}
+
 // Launch custom-pi as a dedicated `pi` process. Spawning (rather than calling
 // main() in-process) keeps stdin/stdout, the render loop and signal handlers in
 // a separate process from the CLI — this prevents the TUI from freezing when the

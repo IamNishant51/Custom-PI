@@ -1,6 +1,6 @@
 {
-  "defaultModel": "google/gemma-4-e4b",
-  "defaultProvider": "lmstudio",
+  "defaultModel": "deepseek-ai/deepseek-v4-flash",
+  "defaultProvider": "nvidia",
   "defaultThinkingLevel": "high",
   "quietStartup": true,
   "editorPaddingX": 6,
