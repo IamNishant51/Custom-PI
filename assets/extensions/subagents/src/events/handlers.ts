@@ -64,17 +64,6 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     } catch (err: any) { logger.warn(`Compaction config failed: ${err.message}`); }
 
     try {
-      setUnsubTabHandler(ctx.ui.onTerminalInput((data: string) => {
-        if (data === "\t") {
-          setAppMode(appMode === "agent" ? "plan" : "agent");
-          ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-          ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
-          return { consume: true };
-        }
-      }));
-    } catch (err: any) { logger.warn(`Tab listener setup failed: ${err.message}`); }
-
-    try {
       bus.on(Topics.FILE_CHANGED, (event) => {
         const change = event.data;
         if (change.path.endsWith(".md") && (change.path.includes("/agents/") || change.path.includes("/.pi/agents/"))) {
@@ -168,21 +157,26 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
     } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
-    const skillsSrc = path.join(__dirname, "..", "skills");
-    if (fs.existsSync(skillsSrc)) {
-      const skillDirs = fs.readdirSync(skillsSrc, { withFileTypes: true }).filter(d => d.isDirectory());
-      for (const dir of skillDirs) {
-        const skillFile = path.join(skillsSrc, dir.name, "SKILL.md");
-        if (fs.existsSync(skillFile)) {
-          const targetDir = path.join(os.homedir(), ".pi", "skills", "agent", dir.name);
-          const targetFile = path.join(targetDir, "SKILL.md");
-          try {
-            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-            fs.copyFileSync(skillFile, targetFile);
-          } catch (err: any) { logger.warn(`Skill install failed: ${err.message}`); }
+    // Defer skill sync to avoid blocking TUI startup
+    setTimeout(() => {
+      try {
+        const skillsSrc = path.join(__dirname, "..", "skills");
+        if (fs.existsSync(skillsSrc)) {
+          const skillDirs = fs.readdirSync(skillsSrc, { withFileTypes: true }).filter(d => d.isDirectory());
+          for (const dir of skillDirs) {
+            const skillFile = path.join(skillsSrc, dir.name, "SKILL.md");
+            if (fs.existsSync(skillFile)) {
+              const targetDir = path.join(os.homedir(), ".pi", "skills", "agent", dir.name);
+              const targetFile = path.join(targetDir, "SKILL.md");
+              try {
+                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+                fs.copyFileSync(skillFile, targetFile);
+              } catch (err: any) { logger.warn(`Skill install failed: ${err.message}`); }
+            }
+          }
         }
-      }
-    }
+      } catch (e: any) { logger.warn(`Skill sync failed: ${e.message}`); }
+    }, 3000).unref();
 
     setTimeout(() => {
       consolidateMemory().catch((e: any) => logger.warn(`Consolidation failed: ${e.message}`));
@@ -211,6 +205,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
   });
 
   async function assembleContextPrompt(event: any, ctx: any, modelContextWindow: number): Promise<string> {
+    const yieldToLoop = () => new Promise<void>(resolve => setImmediate(resolve));
     const MAX_INJECTION_RATIO = 0.15;
     const budgetChars = Math.max(800, Math.floor(modelContextWindow * 4 * MAX_INJECTION_RATIO));
     const isSmallContext = modelContextWindow < 16384;
@@ -236,6 +231,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     blocks.push({ priority: 1, content: alignmentBlock, label: "alignment" });
 
     const memSnapshot = loadMemorySnapshot();
+    await yieldToLoop();
     if (memSnapshot.memory) {
       const memContent = isSmallContext ? memSnapshot.memory.slice(0, 500) : memSnapshot.memory;
       blocks.push({ priority: 2, content: `\n# 🧠 PROJECT MEMORY\n${memContent}\n`, label: "memory-snapshot" });
@@ -246,6 +242,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     }
 
     const currentAgents = loadAgents();
+    await yieldToLoop();
     if (currentAgents.size > 0) {
       const agentList = Array.from(currentAgents.values()).map((a: any) =>
         `- ${a.name}: ${a.description}`
@@ -272,6 +269,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     if (!isSmallContext) {
       try {
         const stacks = detectStack(ctx.cwd || process.cwd());
+        await yieldToLoop();
         if (stacks.length > 0) {
           const primary = stacks[0];
           let stackBlock = `\n# 📦 PROJECT STACK\nDetected: ${primary.name} (${primary.language || "generic"})\n`;
@@ -290,6 +288,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     if (!isSmallContext) {
       const projectDir = path.basename(ctx.cwd || process.cwd()) || "global";
       const memBlock = buildMemoryContextBlock(projectDir);
+      await yieldToLoop();
       if (memBlock) {
         blocks.push({ priority: 3, content: memBlock, label: "memory-context" });
       }
@@ -298,6 +297,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     if (!isMediumContext) {
       try {
         const skills = getSkills(3);
+        await yieldToLoop();
         if (skills.length > 0) {
           const skillLines = skills.map((s: any, i: number) => {
             const steps = s.skillMeta?.keySteps?.slice(0, 3).join(" → ") || "";
@@ -311,6 +311,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
     if (!isMediumContext) {
       try {
+        await yieldToLoop();
         const convDir = path.join(os.homedir(), ".pi", "agent", "conversations");
         if (fs.existsSync(convDir)) {
           const archives = fs.readdirSync(convDir)
@@ -321,6 +322,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
           if (archives.length > 0) {
             const summaries: string[] = [];
             for (const arch of archives) {
+              await yieldToLoop();
               const fullPath = path.join(convDir, arch.name);
               const content = fs.readFileSync(fullPath, "utf8");
               const lines = content.split("\n");
