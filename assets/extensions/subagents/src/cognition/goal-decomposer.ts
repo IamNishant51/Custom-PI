@@ -578,7 +578,7 @@ export class GoalDecomposer {
           }
         }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   private sleep(ms: number): Promise<void> {

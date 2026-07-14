@@ -137,7 +137,7 @@ export class EpisodicMemory {
           }
         }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
 
     return id;
   }
@@ -355,7 +355,7 @@ export class EpisodicMemory {
       const tmp = filePath + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(episode, null, 2));
       fs.renameSync(tmp, filePath);
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   private loadIndex(): void {
@@ -367,7 +367,7 @@ export class EpisodicMemory {
           this.episodes.set(ep.id, ep);
         }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   private async persistIndex(): Promise<void> {
@@ -380,7 +380,7 @@ export class EpisodicMemory {
       fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
       fs.renameSync(tmp, this.indexFile);
       this.dirty = false;
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   destroy(): void {

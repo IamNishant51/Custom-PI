@@ -318,13 +318,22 @@ export class VimInputHandler {
   }
 
   handleData(data: string, text: string, cursor: number): { text: string; cursor: number; action?: VimAction; handled: boolean } {
-    const char = data;
+    // Arrow keys (SS3 or CSI sequences)
+    if (data === "\x1b[A" || data === "\x1bOA") return { text, cursor: Math.max(0, cursor - 20), action: "moveUp", handled: true };
+    if (data === "\x1b[B" || data === "\x1bOB") return { text, cursor: Math.min(text.length, cursor + 20), action: "moveDown", handled: true };
+    if (data === "\x1b[C" || data === "\x1bOC") return { text, cursor: Math.min(text.length, cursor + 1), action: "moveRight", handled: true };
+    if (data === "\x1b[D" || data === "\x1bOD") return { text, cursor: Math.max(0, cursor - 1), action: "moveLeft", handled: true };
 
-    // Arrow keys
-    if (data === "\x1b[A") return { text, cursor: Math.max(0, cursor - 20), action: "moveUp", handled: true };
-    if (data === "\x1b[B") return { text, cursor: Math.min(text.length, cursor + 20), action: "moveDown", handled: true };
-    if (data === "\x1b[C") return { text, cursor: Math.min(text.length, cursor + 1), action: "moveRight", handled: true };
-    if (data === "\x1b[D") return { text, cursor: Math.max(0, cursor - 1), action: "moveLeft", handled: true };
+    // Home / End
+    if (data === "\x1b[H" || data === "\x1b[1~" || data === "\x1bOH") return { text, cursor: 0, action: "home", handled: true };
+    if (data === "\x1b[F" || data === "\x1b[4~" || data === "\x1bOF") return { text, cursor: text.length, action: "end", handled: true };
+
+    // Page Up / Page Down
+    if (data === "\x1b[5~") return { text, cursor, action: "pageUp", handled: true };
+    if (data === "\x1b[6~") return { text, cursor, action: "pageDown", handled: true };
+
+    // Delete
+    if (data === "\x1b[3~") return { ...this.handleKey("Delete", text, cursor), handled: true };
 
     if (data === "\r" || data === "\n") {
       return { ...this.handleKey("Enter", text, cursor), handled: true };

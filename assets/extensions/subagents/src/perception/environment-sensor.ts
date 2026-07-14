@@ -148,7 +148,7 @@ export class EnvironmentSensor {
         bus.emit(Topics.FILE_CHANGED, change, { source: "environment-sensor" });
       });
       this.watchers.push(watcher);
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   unwatchDirectory(dirPath: string): void {
@@ -199,7 +199,7 @@ export class EnvironmentSensor {
         this.lastDiskCheck = now;
         return this.lastDiskUsage;
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     return this.lastDiskUsage || { totalGb: 0, freeGb: 0, usedPercent: 0 };
   }
 
@@ -290,7 +290,7 @@ export class EnvironmentSensor {
           }
           return count;
         }
-      } catch { logger.warn("empty catch block") }
+      } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
       try {
         return parseInt(cp.execSync("ps aux --no-headers | wc -l", { encoding: "utf8", timeout: 3000 }).trim());
       } catch {
@@ -390,11 +390,11 @@ export class EnvironmentSensor {
                 }
               }
             }
-          } catch { logger.warn("empty catch block") }
+          } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
         }
         if (files.size > 0) activeFiles = Array.from(files);
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
 
     return { vscode, neovim, activeFiles };
   }
@@ -422,7 +422,7 @@ export class EnvironmentSensor {
 
   destroy(): void {
     for (const w of this.watchers) {
-      try { w.close(); } catch { logger.warn("empty catch block") }
+      try { w.close(); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
     this.watchers = [];
     this.watchPaths = [];

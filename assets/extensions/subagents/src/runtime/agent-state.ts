@@ -70,7 +70,7 @@ export function deriveSessionId(ctx: any): string | null {
   try {
     const sessionFile = ctx.sessionManager?.getSessionFile();
     if (sessionFile) return path.basename(sessionFile, ".jsonl");
-  } catch { logger.warn("MCP config init write failed"); }
+  } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
   return ctx?.sessionId || null;
 }
 
@@ -137,7 +137,7 @@ export async function runBackgroundProcessing(ctx: any): Promise<void> {
       if (stateFile && fs.existsSync(stateFile)) {
         try {
           currentStateStr = fs.readFileSync(stateFile, "utf8");
-        } catch { logger.warn("MCP config init write failed"); }
+        } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
       }
 
       const prompt = `Analyze the recent conversation and return a JSON object.
@@ -261,7 +261,7 @@ If nothing to report, return: {}`;
     try {
       const debugLogPath = path.join(os.homedir(), ".pi", "agent", "memory-debug.log");
       fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] Background error: ${e.message}\n`, "utf8");
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
   } finally {
     setIsProcessingBackground(false);
   }

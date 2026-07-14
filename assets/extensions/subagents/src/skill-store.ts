@@ -82,7 +82,7 @@ export async function listSkills(author?: SkillAuthor): Promise<SkillFile[]> {
         const content = await fs.readFile(filePath, "utf8");
         const parsed = parseSkillFile(content, filePath);
         if (parsed) results.push(parsed);
-      } catch { logger.warn("Failed to parse skill file", { file: filePath }); }
+      } catch (e: any) { logger.warn("Failed to parse skill file", { file: filePath, error: e?.message || String(e) }); }
     }
   }
   return results;

@@ -234,7 +234,7 @@ export class LongTermPlanner {
         });
         graph.addEdge(nodeId, ms.id, "contains");
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 }
 

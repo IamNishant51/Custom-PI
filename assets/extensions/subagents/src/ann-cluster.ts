@@ -35,7 +35,7 @@ export function loadClusters(): ClusterIndex {
   if (fs.existsSync(ANN_CLUSTERS_FILE)) {
     try {
       return JSON.parse(fs.readFileSync(ANN_CLUSTERS_FILE, "utf8"));
-    } catch { logger.warn("Failed to load cluster index"); }
+    } catch (e: any) { logger.warn("Failed to load cluster index", e?.message || String(e)); }
   }
   return { centroids: [], assignments: {} };
 }

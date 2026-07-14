@@ -1,5 +1,5 @@
 import { ScreenRenderer } from "./screen-renderer";
-import { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
+import { RenderScheduler, SpinnerController, ShimmerBorderController } from "./components/animation";
 import { ToastManager } from "./components/toast";
 import type { Toast, ToastType } from "./components/toast";
 import { QuestionModalManager } from "./components/question-modal";
@@ -7,6 +7,7 @@ import type { QuestionModalConfig } from "./components/question-modal";
 import { VimInputHandler } from "./input/vim-input";
 import { THEME, SPACING, type PulseConfig, type ConversationHeader, type ScrollIndicator } from "./types";
 import { PulseController } from "./app/pulse-controller";
+import { tickGlobalAnimation } from "../animations";
 
 export interface TuiManagerOptions {
   useAltScreen?: boolean;
@@ -15,7 +16,7 @@ export interface TuiManagerOptions {
 
 export class TuiManager {
   renderer: ScreenRenderer;
-  animFrame: AnimationFrame;
+  scheduler: RenderScheduler;
   vimInput: VimInputHandler;
   toasts: ToastManager;
   questions: QuestionModalManager;
@@ -23,37 +24,34 @@ export class TuiManager {
   shimmerBorders: Map<string, ShimmerBorderController> = new Map();
   private options: TuiManagerOptions;
   private _isActive = false;
-  private frameRequested = false;
 
   constructor(opts: TuiManagerOptions = {}) {
     this.options = opts;
     this.renderer = new ScreenRenderer();
-    this.animFrame = new AnimationFrame();
+    this.scheduler = new RenderScheduler();
     this.vimInput = new VimInputHandler();
     this.toasts = new ToastManager();
     this.questions = new QuestionModalManager();
   }
 
-  start(): void {
+  start(standalone = true): void {
     if (this._isActive) return;
     this._isActive = true;
     this.renderer.start(this.options.useAltScreen !== false);
-    this.animFrame.start();
+    this.scheduler.start(60);
 
-    this.animFrame.add("tui:render", () => {
-      if (!this.frameRequested) {
-        this.frameRequested = true;
-        setImmediate(() => {
-          this.frameRequested = false;
-          this.renderer.render();
-        });
-      }
-    }, 16);
+    if (standalone) {
+      this.scheduler.add("tui:render", () => {
+        this.renderer.render();
+      }, 33);
+    }
+
+    this.scheduler.add("animations:global", tickGlobalAnimation, 80);
   }
 
   stop(): void {
     this._isActive = false;
-    this.animFrame.stop();
+    this.scheduler.stop();
     this.renderer.stop();
   }
 
@@ -64,7 +62,7 @@ export class TuiManager {
   // Spinner management
   getSpinner(id: string, frames: string[], interval: number): SpinnerController {
     if (!this.spinners.has(id)) {
-      this.spinners.set(id, new SpinnerController(id, frames, interval, this.animFrame));
+      this.spinners.set(id, new SpinnerController(id, frames, interval, this.scheduler));
     }
     return this.spinners.get(id)!;
   }
@@ -82,7 +80,7 @@ export class TuiManager {
   // Shimmer border management
   getShimmer(id: string): ShimmerBorderController {
     if (!this.shimmerBorders.has(id)) {
-      this.shimmerBorders.set(id, new ShimmerBorderController(id, this.animFrame));
+      this.shimmerBorders.set(id, new ShimmerBorderController(id, this.scheduler));
     }
     return this.shimmerBorders.get(id)!;
   }
@@ -96,13 +94,7 @@ export class TuiManager {
   }
 
   requestFrame(): void {
-    if (!this.frameRequested) {
-      this.frameRequested = true;
-      setImmediate(() => {
-        this.frameRequested = false;
-        this.renderer.render();
-      });
-    }
+    this.renderer.render();
   }
 
   // ── Layout system ────────────────────────────────────────────────────────

@@ -11,6 +11,11 @@ const LOW_ACCESS_THRESHOLD = 2;
 const CROSS_CLUSTER_EARLY_BREAK = 500;
 let lastConsolidationTime = 0;
 const CONSOLIDATION_COOLDOWN_MS = 120_000;
+const YIELD_INTERVAL = 100;
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
 
 export async function consolidate(): Promise<{ merged: number; pruned: number; refreshed: number }> {
   const now = Date.now();
@@ -28,6 +33,7 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
 
     const clusters = loadClusters();
     const compared = new Set<string>();
+    let comparisonCount = 0;
     for (let i = 0; i < active.length; i++) {
       if (compared.size >= MAX_COMPARISONS) break;
       const ei = active[i];
@@ -37,6 +43,8 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
         const key = `${Math.min(i, j)}-${Math.max(i, j)}`;
         if (compared.has(key)) continue;
         compared.add(key);
+        comparisonCount++;
+        if (comparisonCount % YIELD_INTERVAL === 0) await yieldToEventLoop();
         const ej = active[j];
         const cj = clusters.centroids.length > 0 ? nearestCentroid(ej.embedding, clusters.centroids) : 0;
         if (ci !== cj && compared.size > CROSS_CLUSTER_EARLY_BREAK) continue;
@@ -67,6 +75,8 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
       }
     }
 
+    await yieldToEventLoop();
+
     for (const entry of entries) {
       if (entry.deprecated) continue;
       const ttlTime = new Date(entry.ttl).getTime();
@@ -82,6 +92,8 @@ export async function consolidate(): Promise<{ merged: number; pruned: number; r
         }
       }
     }
+
+    await yieldToEventLoop();
 
     await reclusterCentroids(entries);
     if (merged > 0 || pruned > 0 || refreshed > 0) {

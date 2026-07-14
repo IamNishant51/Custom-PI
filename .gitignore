@@ -8,5 +8,7 @@ dist/
 *.tmp.*
 PLAN.md
 IMPROVEMENT_PLAN.md
+_PLAN*.md
+*TUI_UPGRADE*.md
 __pycache__/
 *.pyc

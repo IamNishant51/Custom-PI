@@ -313,7 +313,7 @@ export class TheoryOfMind {
         trustLevel: user.trustLevel,
         preferences: Object.fromEntries(user.preferences),
       }, { id: `user_model_${userId}` });
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 }
 

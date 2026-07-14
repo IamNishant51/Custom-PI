@@ -142,6 +142,16 @@ function applyRuntimePatches() {
 }
 
 export default function (pi: ExtensionAPI) {
+  // ── Isolation ──────────────────────────────────────────────────────────────
+  // This extension lives in the SHARED ~/.pi/agent/extensions directory, which
+  // the stock `pi` binary also loads. custom-pi sets CUSTOM_PI_ACTIVE="1" in its
+  // launcher (bin/cli.js) before spawning `pi`, so we only activate custom-pi's
+  // TUI/tools when that flag is present. When `pi` is launched directly the
+  // extension stays completely inert and stock `pi` is untouched.
+  if (!process.env.CUSTOM_PI_ACTIVE) {
+    return;
+  }
+
   try {
     applyRuntimePatches();
   } catch (err: any) {
@@ -180,7 +190,7 @@ export default function (pi: ExtensionAPI) {
       try {
         fs.mkdirSync(path.dirname(MCP_CONFIG_FILE_GLOBAL), { recursive: true });
         fs.writeFileSync(MCP_CONFIG_FILE_GLOBAL, JSON.stringify(config, null, 2));
-      } catch { logger.warn("MCP config init write failed"); }
+      } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     } else {
       let changed = false;
       if (!seqThinking.enabled) {

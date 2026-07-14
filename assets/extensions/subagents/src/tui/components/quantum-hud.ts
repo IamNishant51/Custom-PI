@@ -1,4 +1,3 @@
-import { logger } from "../../logger";
 import chalk from "chalk";
 import os from "node:os";
 import { stripAnsi, truncateToWidth, elapsed } from "../render/format";
@@ -12,11 +11,6 @@ interface ThemeAccessor {
   bold(text: string): string;
 }
 
-interface HudContext {
-  invalidate(): void;
-  [key: string]: unknown;
-}
-
 interface SubAgentTracker {
   id: string;
   name: string;
@@ -28,20 +22,25 @@ interface SubAgentTracker {
 }
 
 export class QuantumHUDWidget implements Component {
-  private timer: ReturnType<typeof setInterval> | null = null;
   private theme: ThemeAccessor | null = null;
 
-  constructor(private ctx: HudContext) {
-    this.timer = setInterval(() => {
-      try { this.ctx.invalidate(); } catch { logger.warn("empty catch") }
-    }, 2000);
+  private cachedMem: { totalEntries: number } | null = null;
+  private cachedMemTs = 0;
+  private getMemStats(): { totalEntries: number } {
+    const now = Date.now();
+    if (this.cachedMem && now - this.cachedMemTs < 5000) return this.cachedMem;
+    try {
+      this.cachedMem = memoryStats();
+    } catch {
+      this.cachedMem = { totalEntries: 0 };
+    }
+    this.cachedMemTs = now;
+    return this.cachedMem;
   }
 
   setTheme(t: ThemeAccessor) { this.theme = t; }
 
-  dispose() {
-    if (this.timer) { clearInterval(this.timer); this.timer = null; }
-  }
+  dispose() {}
 
   invalidate() {}
 
@@ -68,7 +67,7 @@ export class QuantumHUDWidget implements Component {
     const running = trackers.filter(
       t => t.status === "running" || t.status === "calling_tool" || t.status === "spawning"
     );
-    const memStats = memoryStats();
+    const memStats = this.getMemStats();
 
     const pulseColor = getPulseColor();
 

@@ -16,6 +16,27 @@ interface StyleDef {
 
 const TRUE_NONE = "";
 
+const MAX_CACHE_ENTRIES = 256;
+const MAX_TRANSITION_ENTRIES = 256;
+
+function lruTouch<K, V>(map: Map<K, V>, key: K): V | undefined {
+  const val = map.get(key);
+  if (val !== undefined) {
+    map.delete(key);
+    map.set(key, val);
+  }
+  return val;
+}
+
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > max) {
+    const first = map.keys().next();
+    if (!first.done) map.delete(first.value);
+  }
+}
+
 export class StylePool {
   private styles: StyleDef[] = [];
   private cache = new Map<string, number>();
@@ -50,11 +71,11 @@ export class StylePool {
       strikethrough: def.strikethrough ?? false,
     };
     const key = this.serialize(full);
-    const existing = this.cache.get(key);
+    const existing = lruTouch(this.cache, key);
     if (existing !== undefined) return existing;
     const id = this.styles.length;
     this.styles.push(full);
-    this.cache.set(key, id);
+    lruSet(this.cache, key, id, MAX_CACHE_ENTRIES);
     return id;
   }
 
@@ -89,10 +110,10 @@ export class StylePool {
   transition(from: number, to: number): string {
     if (from === to) return "";
     const key = `${from}->${to}`;
-    const cached = this.transitionCache.get(key);
+    const cached = lruTouch(this.transitionCache, key);
     if (cached !== undefined) return cached;
     const result = this.toAnsi(to);
-    this.transitionCache.set(key, result);
+    lruSet(this.transitionCache, key, result, MAX_TRANSITION_ENTRIES);
     return result;
   }
 

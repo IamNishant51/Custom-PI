@@ -101,7 +101,7 @@ function detectExternalDrift(target: "memory" | "user"): boolean {
     const bakPath = filePath + ".bak." + Date.now();
     try {
       fs.copyFileSync(filePath, bakPath);
-    } catch { logger.warn("empty catch") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     return true;
   }
   for (const entry of entries) {

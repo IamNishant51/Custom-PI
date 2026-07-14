@@ -239,7 +239,7 @@ export class ContinuousLearning {
         exampleCount: this.examples.length,
         highConfidenceCount: Array.from(this.patterns.values()).filter(p => p.confidence > 0.7).length,
       }, { id: "learning_state" });
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   private loadState(): void {
@@ -250,7 +250,7 @@ export class ContinuousLearning {
         this.patterns.clear();
         this.examples.length = 0;
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 }
 

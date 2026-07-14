@@ -116,7 +116,7 @@ export class MCPEcosystem {
           });
         }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   private saveConfig(): void {
@@ -134,7 +134,7 @@ export class MCPEcosystem {
       const tmp = this.configPath + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
       fs.renameSync(tmp, this.configPath);
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   async startServer(name: string): Promise<boolean> {
@@ -150,7 +150,7 @@ export class MCPEcosystem {
           server.command = globalMcpPath;
           server.args = [];
         }
-      } catch { logger.warn("empty catch block") }
+      } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
 
     server.status = "starting";
@@ -211,9 +211,9 @@ export class MCPEcosystem {
     try {
       server.process.kill("SIGTERM");
       setTimeout(() => {
-        try { server.process?.kill("SIGKILL"); } catch { logger.warn("empty catch block") }
+        try { server.process?.kill("SIGKILL"); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
       }, 3000);
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     server.status = "stopped";
     server.process = undefined;
   }
@@ -302,7 +302,7 @@ export class MCPEcosystem {
           discovered++;
         }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     return discovered;
   }
 
@@ -336,7 +336,7 @@ export class MCPEcosystem {
           }
         }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 }
 

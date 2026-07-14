@@ -326,7 +326,7 @@ function scheduleCustomJob(job: CronJob): void {
     const now = new Date();
     const tick = nextCronTick(parsed, new Date(now.getTime() - 60000));
     if (tick && Math.abs(tick.getTime() - now.getTime()) < 120000) {
-      try { await job.action(); } catch { logger.warn("Custom cron job failed", { name: job.name }); }
+      try { await job.action(); } catch (e: any) { logger.warn("Custom cron job failed", { name: job.name, error: e?.message || String(e) }); }
     }
   }, 60_000);
   timers.push(timer as any);

@@ -366,7 +366,7 @@ export class Daemon extends EventEmitter {
           const store = getSystemStore();
           store.kvSet("daemon", "_migrated", "1");
         } catch { /* non-critical migration */ }
-      } catch { logger.warn("empty catch block") }
+      } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
   }
 

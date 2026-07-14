@@ -174,7 +174,7 @@ function ensureTier3Index(): { path: string; content: string }[] {
         const content = fs.readFileSync(p, "utf8").slice(0, 5000);
         tier3Index.push({ path: rel, content });
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
   return tier3Index!;
 }

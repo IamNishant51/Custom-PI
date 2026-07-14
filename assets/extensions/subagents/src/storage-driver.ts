@@ -62,7 +62,7 @@ export class LocalStorageDriver implements StorageDriver {
         try {
           const stat = await fs.stat(fullPath);
           size = stat.size;
-        } catch { logger.warn("empty catch block") }
+        } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
       }
       results.push({
         name: ent.name,

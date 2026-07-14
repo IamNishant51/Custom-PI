@@ -401,7 +401,7 @@ export const ${name}HookDef = {
           const importMatch = content.includes(`./${path.basename(filePath, ".ts")}`) ||
             content.includes(`./${path.basename(filePath)}`);
           if (importMatch) affected.push(fullPath);
-        } catch { logger.warn("empty catch block") }
+        } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
       }
 
       const allFiles = this.getSourceFiles();
@@ -413,9 +413,9 @@ export const ${name}HookDef = {
           if (content.includes(`"${relativePath}"`) || content.includes(`'${relativePath}'`)) {
             affected.push(f);
           }
-        } catch { logger.warn("empty catch block") }
+        } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
 
     return affected;
   }
@@ -453,7 +453,7 @@ export const ${name}HookDef = {
         return { compiles: false, error: err.message };
       }
     } finally {
-      try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch { logger.warn("empty catch block") }
+      try { fs.rmSync(sandboxDir, { recursive: true, force: true }); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
   }
 
@@ -597,7 +597,7 @@ export const ${name}HookDef = {
             suggestion: "Address outstanding TODOs or convert to issues",
           });
         }
-      } catch { logger.warn("empty catch block") }
+      } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
 
     return findings;

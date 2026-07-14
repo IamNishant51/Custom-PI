@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { logger } from "../../logger";
 import chalk from "chalk";
 import fs from "node:fs";
@@ -37,7 +38,7 @@ const debugLog = process.env.PI_DEBUG
   ? (msg: string) => {
       try {
         fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "tui-click.log"), `[${new Date().toISOString()}] ${msg}\n`);
-      } catch { logger.warn("empty catch") }
+      } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
   : () => {};
 
@@ -449,35 +450,42 @@ export function applyLivePatches(tui: any, themeInstance: any) {
   TuiPrototype.start = function (this: any) {
     activeTuiInstance = this;
     originalTuiStart.call(this);
-    process.stdout.write("\x1b[?1000h\x1b[?1006h");
 
-    const originalEmit = process.stdin.emit;
-    (process.stdin as any)._originalEmit = originalEmit;
-    process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
-      if (event === "data" && Buffer.isBuffer(data)) {
-        const str = data.toString("utf8");
-        const mouseMatch = str.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-        if (mouseMatch) {
-          const button = parseInt(mouseMatch[1], 10);
-          const col = parseInt(mouseMatch[2], 10);
-          const row = parseInt(mouseMatch[3], 10);
-          const isRelease = mouseMatch[4] === "m";
-          if (!isRelease && button === 0) {
-            handleTerminalMouseClick(col, row);
+    let originalEmit: typeof process.stdin.emit | null = null;
+
+    if (!(process.stdin as any)._customPiPatched) {
+      originalEmit = process.stdin.emit;
+      (process.stdin as any)._originalEmit = originalEmit;
+      (process.stdin as any)._customPiPatched = true;
+
+      process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
+        if (event === "data") {
+          const raw = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+          const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+          if (mouseMatch) {
+            const button = parseInt(mouseMatch[1], 10);
+            const col = parseInt(mouseMatch[2], 10);
+            const row = parseInt(mouseMatch[3], 10);
+            const isRelease = mouseMatch[4] === "m";
+            if (!isRelease && button === 0 && col >= 0 && row >= 0) {
+              handleTerminalMouseClick(col, row);
+            }
+            return true;
           }
-          return true;
         }
-      }
-      return originalEmit.call(this, event, data, ...args);
-    };
+        const emit = (process.stdin as any)._originalEmit;
+        if (emit) return emit.call(this, event, data, ...args);
+        return EventEmitter.prototype.emit.call(this, event, data, ...args);
+      };
+    }
   };
 
   const originalTuiStop = TuiPrototype.stop;
   TuiPrototype.stop = function (this: any) {
-    process.stdout.write("\x1b[?1000l\x1b[?1006l");
     if ((process.stdin as any)._originalEmit) {
       process.stdin.emit = (process.stdin as any)._originalEmit;
       delete (process.stdin as any)._originalEmit;
+      delete (process.stdin as any)._customPiPatched;
     }
     activeTuiInstance = null;
     originalTuiStop.call(this);

@@ -115,7 +115,7 @@ export function emitEvent(event: string, ...args: any[]): void {
   const handlers = eventHookRegistry.get(event);
   if (handlers) {
     for (const handler of handlers) {
-      try { handler(...args); } catch { logger.warn("empty catch block") }
+      try { handler(...args); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
   }
 }

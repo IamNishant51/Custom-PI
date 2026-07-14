@@ -80,9 +80,9 @@ export class TelemetryPipeline {
       for (const ev of batch) {
         try {
           store.kvSet("telemetry", ev.id, JSON.stringify(ev));
-        } catch { logger.warn("empty catch") }
+        } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
       }
-    } catch { logger.warn("empty catch") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 
   getBufferSize(): number {

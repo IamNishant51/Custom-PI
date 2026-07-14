@@ -88,7 +88,7 @@ export class ContextMonitor {
     }
     // Notify listeners
     for (const listener of this.listeners) {
-      try { listener(trace); } catch { logger.warn("empty catch block") }
+      try { listener(trace); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     }
   }
 

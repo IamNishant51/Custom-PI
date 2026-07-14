@@ -317,7 +317,7 @@ export function stats(): MemoryStats {
   const EPISODES_DIR = path.join(MEMORY_DIR, "episodes");
   let epCount = 0;
   if (fs.existsSync(EPISODES_DIR)) {
-    try { epCount = fs.readdirSync(EPISODES_DIR).filter(f => f.endsWith(".md")).length; } catch { logger.warn("Failed to read episodes dir"); }
+    try { epCount = fs.readdirSync(EPISODES_DIR).filter(f => f.endsWith(".md")).length; } catch (e: any) { logger.warn("Failed to read episodes dir", e?.message || String(e)); }
   }
 
   return {

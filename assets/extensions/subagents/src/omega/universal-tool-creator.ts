@@ -214,7 +214,7 @@ export class UniversalToolCreator {
   private persistTool(tool: CreatedTool): void {
     const indexPath = path.join(this.toolsDir, "index.json");
     let tools: CreatedTool[] = [];
-    try { tools = JSON.parse(fs.readFileSync(indexPath, "utf8")); } catch { logger.warn("empty catch block") }
+    try { tools = JSON.parse(fs.readFileSync(indexPath, "utf8")); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
     const existing = tools.findIndex(t => t.name === tool.name);
     if (existing >= 0) tools[existing] = tool;
     else tools.push(tool);
@@ -231,7 +231,7 @@ export class UniversalToolCreator {
       for (const tool of tools) {
         this.createdTools.set(tool.name, tool);
       }
-    } catch { logger.warn("empty catch block") }
+    } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   }
 }
 

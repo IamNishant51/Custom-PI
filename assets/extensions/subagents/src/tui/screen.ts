@@ -61,6 +61,17 @@ export class TerminalScreen {
 
   getRows(): number { return this.rows; }
 
+  private markDamage(x: number, y: number): void {
+    if (x < this.damageLeft) this.damageLeft = x;
+    if (x > this.damageRight) this.damageRight = x;
+    if (y < this.damageTop) this.damageTop = y;
+    if (y > this.damageBottom) this.damageBottom = y;
+    if (this.damageLeft < 0) this.damageLeft = 0;
+    if (this.damageTop < 0) this.damageTop = 0;
+    if (this.damageRight >= this.cols) this.damageRight = this.cols - 1;
+    if (this.damageBottom >= this.rows) this.damageBottom = this.rows - 1;
+  }
+
   write(x: number, y: number, char: number, style: number, width = 1): void {
     if (x < 0 || x >= this.cols || y < 0 || y >= this.rows) return;
     const i = (y * this.cols + x) * CELL_WORDS;
@@ -73,10 +84,7 @@ export class TerminalScreen {
       this.back[j + WORD_STYLE] = style;
       this.back[j + WORD_FLAGS] = (this.back[j + WORD_FLAGS] & ~FLAG_WIDE) | FLAG_DIRTY;
     }
-    if (x < this.damageLeft) this.damageLeft = x;
-    if (x > this.damageRight) this.damageRight = x;
-    if (y < this.damageTop) this.damageTop = y;
-    if (y > this.damageBottom) this.damageBottom = y;
+    this.markDamage(x, y);
   }
 
   writeString(x: number, y: number, text: string, style: number): void {
@@ -90,16 +98,16 @@ export class TerminalScreen {
   }
 
   clearLine(y: number, style: number): void {
+    if (y < 0 || y >= this.rows) return;
+    const row = y * this.cols;
     for (let x = 0; x < this.cols; x++) {
-      const i = (y * this.cols + x) * CELL_WORDS;
+      const i = (row + x) * CELL_WORDS;
       this.back[i + WORD_CHAR] = 32;
       this.back[i + WORD_STYLE] = style;
       this.back[i + WORD_FLAGS] |= FLAG_DIRTY;
     }
     if (y < this.damageTop) this.damageTop = y;
     if (y > this.damageBottom) this.damageBottom = y;
-    this.damageLeft = 0;
-    this.damageRight = this.cols - 1;
   }
 
   clear(style: number): void {
@@ -148,25 +156,24 @@ export class TerminalScreen {
     let lastY = -1;
     let lastX = -1;
 
+    const cols = this.cols;
     const yStart = Math.max(0, this.damageTop);
     const yEnd = Math.min(this.rows - 1, this.damageBottom);
-    const xStart = Math.max(0, this.damageLeft);
-    const xEnd = Math.min(this.cols - 1, this.damageRight);
+    if (yStart > yEnd) return "";
 
     for (let y = yStart; y <= yEnd; y++) {
-      let rowHasDamage = false;
-      for (let x = xStart; x <= xEnd; x++) {
-        const fi = (y * this.cols + x) * CELL_WORDS;
-        const bi = (y * this.cols + x) * CELL_WORDS;
-        if (this.back[bi + WORD_FLAGS] & FLAG_DIRTY) {
-          rowHasDamage = true;
-          break;
+      const rowBase = y * cols;
+
+      // Find dirty range for this row
+      let rowStart = -1;
+      let rowEnd = -1;
+      for (let x = 0; x < cols; x++) {
+        if (this.back[(rowBase + x) * CELL_WORDS + WORD_FLAGS] & FLAG_DIRTY) {
+          if (rowStart === -1) rowStart = x;
+          rowEnd = x;
         }
       }
-      if (!rowHasDamage) {
-        this.back[(y * this.cols + xStart) * CELL_WORDS + WORD_FLAGS] &= ~FLAG_DIRTY;
-        continue;
-      }
+      if (rowStart === -1) continue;
 
       if (y !== lastY) {
         parts.push(`\x1b[${y + 1};1H`);
@@ -175,20 +182,16 @@ export class TerminalScreen {
         lastStyle = -1;
       }
 
-      for (let x = xStart; x <= xEnd; x++) {
-        const fi = (y * this.cols + x) * CELL_WORDS;
-        const bi = (y * this.cols + x) * CELL_WORDS;
+      for (let x = rowStart; x <= rowEnd; x++) {
+        const bi = (rowBase + x) * CELL_WORDS;
+        const flags = this.back[bi + WORD_FLAGS];
+        if (!(flags & FLAG_DIRTY)) continue;
+        this.back[bi + WORD_FLAGS] = flags & ~FLAG_DIRTY;
 
-        const frontChar = this.front[fi + WORD_CHAR];
-        const frontStyle = this.front[fi + WORD_STYLE];
-        const frontFlags = this.front[fi + WORD_FLAGS];
+        const fi = (rowBase + x) * CELL_WORDS;
         const backChar = this.back[bi + WORD_CHAR];
         const backStyle = this.back[bi + WORD_STYLE];
-        const backFlags = this.back[bi + WORD_FLAGS];
-
-        if (!(backFlags & FLAG_DIRTY) && frontChar === backChar && frontStyle === backStyle) {
-          continue;
-        }
+        if (backChar === this.front[fi + WORD_CHAR] && backStyle === this.front[fi + WORD_STYLE]) continue;
 
         if (x !== lastX) {
           parts.push(`\x1b[${y + 1};${x + 1}H`);
@@ -206,14 +209,12 @@ export class TerminalScreen {
         }
 
         lastX = x + 1;
-        const bw = (backFlags & FLAG_WIDE) ? 2 : 1;
-        if (bw > 1) x++;
-        this.back[bi + WORD_FLAGS] &= ~FLAG_DIRTY;
+        if (flags & FLAG_WIDE) x++;
       }
     }
 
     if (parts.length === 0) return "";
-    return `\x1b[?2026h${parts.join("")}${reset}\x1b[?2026l`;
+    return `${parts.join("")}${reset}`;
   }
 
   renderLines(lines: string[][], startY: number, style: number): void {

@@ -7,6 +7,7 @@ import {
   type ConversationHeader, type ScrollIndicator, type SurfaceLevel,
 } from "./types";
 import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
+import { hexToRgb, rgbToHex } from "./utils/color";
 import { PulseController } from "./app/pulse-controller";
 
 const GUTTER = SPACING.gutter;
@@ -20,8 +21,6 @@ export class ScreenRenderer {
   writer: AnsiWriter;
   theme: ThemeColors;
   pulse: PulseController;
-  private frameTimer: ReturnType<typeof setTimeout> | null = null;
-  private frameCallbacks: Array<() => void> = [];
   private running = false;
   private useTruecolor: boolean;
 
@@ -32,6 +31,17 @@ export class ScreenRenderer {
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
   styleCache = new Map<string, number>();
+  private maxStyleCache = 128;
+
+  private cacheStyle(key: string, id: number): number {
+    this.styleCache.delete(key);
+    this.styleCache.set(key, id);
+    if (this.styleCache.size > this.maxStyleCache) {
+      const first = this.styleCache.keys().next();
+      if (!first.done) this.styleCache.delete(first.value);
+    }
+    return id;
+  }
 
   constructor() {
     this.pool = new StylePool(true);
@@ -69,16 +79,23 @@ export class ScreenRenderer {
 
   ansi(hex: string): number {
     const cached = this.styleCache.get(hex);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.styleCache.delete(hex);
+      this.styleCache.set(hex, cached);
+      return cached;
+    }
     const id = this.pool.fromHex(hex);
-    this.styleCache.set(hex, id);
-    return id;
+    return this.cacheStyle(hex, id);
   }
 
   style(def: { fg?: string; bg?: string; bold?: boolean; dim?: boolean; italic?: boolean }): number {
     const key = JSON.stringify(def);
     const cached = this.styleCache.get(key);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.styleCache.delete(key);
+      this.styleCache.set(key, cached);
+      return cached;
+    }
     const id = this.pool.getOrCreate({
       fg: def.fg ? hexToAnsi(def.fg) : undefined,
       bg: def.bg ? hexToAnsi(def.bg) : undefined,
@@ -86,17 +103,19 @@ export class ScreenRenderer {
       dim: def.dim,
       italic: def.italic,
     });
-    this.styleCache.set(key, id);
-    return id;
+    return this.cacheStyle(key, id);
   }
 
   truecolorStyle(fg: string, bg?: string, opts?: { bold?: boolean; dim?: boolean }): number {
     const key = `tc:${fg}:${bg ?? ""}:${opts?.bold ?? false}:${opts?.dim ?? false}`;
     const cached = this.styleCache.get(key);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.styleCache.delete(key);
+      this.styleCache.set(key, cached);
+      return cached;
+    }
     const id = this.pool.getTruecolorStyle(fg, bg, opts);
-    this.styleCache.set(key, id);
-    return id;
+    return this.cacheStyle(key, id);
   }
 
   surfaceStyle(level: SurfaceLevel): number {
@@ -120,10 +139,6 @@ export class ScreenRenderer {
 
   stop(): void {
     this.running = false;
-    if (this.frameTimer) {
-      clearTimeout(this.frameTimer);
-      this.frameTimer = null;
-    }
     const out: string[] = [];
     out.push("\x1b[?2026l");
     out.push("\x1b[?2004l");
@@ -150,24 +165,6 @@ export class ScreenRenderer {
       process.stdout.write(output);
     }
     this.writer.flush();
-  }
-
-  requestFrame(callback: () => void): void {
-    this.frameCallbacks.push(callback);
-    if (!this.frameTimer) {
-      this.frameTimer = setTimeout(() => this.tick(), 16);
-    }
-  }
-
-  private tick(): void {
-    this.frameTimer = null;
-    const cbs = this.frameCallbacks;
-    this.frameCallbacks = [];
-    for (const cb of cbs) cb();
-    this.render();
-    if (this.frameCallbacks.length > 0 && !this.frameTimer) {
-      this.frameTimer = setTimeout(() => this.tick(), 16);
-    }
   }
 
   // ── New Layout Methods ──────────────────────────────────────────────────
@@ -314,7 +311,7 @@ export class ScreenRenderer {
 
   /** Streaming dot animation frame — cycles 0-3 */
   private streamDot(frame: number): string {
-    const dots = ["\u25cc", "\u25cd", "\u25ce", "\u25cd"];
+    const dots = ["\u25d0", "\u25d1", "\u25d2", "\u25d3"];
     return dots[frame % dots.length];
   }
 
@@ -439,13 +436,17 @@ export class ScreenRenderer {
     const headerStyle = this.style({ fg: this.theme.muted, dim: true });
     const contentStyle = this.style({ fg: this.theme.muted, italic: true });
 
-    // Shimmer animated accent color
+    // Shimmer animated accent color — pulse between accent and warning
     const frame = opts?.animFrame ?? 0;
-    const shimmerPhase = Math.sin(frame * 0.08) * 0.3 + 0.7;
-    const accentR = Math.round(0xff * shimmerPhase);
-    const accentG = Math.round(0x7a * shimmerPhase);
-    const accentB = Math.round(0x17 * shimmerPhase);
-    const accentHex = `#${accentR.toString(16).padStart(2, "0")}${accentG.toString(16).padStart(2, "0")}${accentB.toString(16).padStart(2, "0")}`;
+    const shimmerT = Math.sin(frame * 0.08) * 0.5 + 0.5;
+    const baseRgb = hexToRgb(this.theme.accent);
+    const warnRgb = hexToRgb(this.theme.warning);
+    const mixRgb: [number, number, number] = [
+      Math.round(baseRgb[0] + (warnRgb[0] - baseRgb[0]) * shimmerT),
+      Math.round(baseRgb[1] + (warnRgb[1] - baseRgb[1]) * shimmerT),
+      Math.round(baseRgb[2] + (warnRgb[2] - baseRgb[2]) * shimmerT),
+    ];
+    const accentHex = rgbToHex(...mixRgb);
     let accentStyle: number;
     if (this.useTruecolor) {
       accentStyle = this.pool.getTruecolorStyle(accentHex);
@@ -646,6 +647,7 @@ export class ScreenRenderer {
     outputLines?: string[];
     duration?: string;
     animate?: boolean;
+    animFrame?: number;
   }): number {
     const cx = this.contentLeft;
     const cw = this.contentWidth;
@@ -653,7 +655,18 @@ export class ScreenRenderer {
     const isRunning = status === "running" || status === "calling_tool";
     const isSuccess = status === "success" || status === "complete";
     const isError = status === "error";
-    const borderColor = isError ? this.theme.error : isSuccess ? this.theme.success : isRunning ? this.theme.agentRunning : this.theme.agentWaiting;
+    let borderColor = isError ? this.theme.error : isSuccess ? this.theme.success : isRunning ? this.theme.agentRunning : this.theme.agentWaiting;
+    if (isRunning && opts?.animate && opts?.animFrame !== undefined) {
+      const t = Math.sin(opts.animFrame * 0.06) * 0.5 + 0.5;
+      const base = hexToRgb(this.theme.agentRunning);
+      const bright = hexToRgb(this.theme.warning);
+      const mix: [number, number, number] = [
+        Math.round(base[0] + (bright[0] - base[0]) * t),
+        Math.round(base[1] + (bright[1] - base[1]) * t),
+        Math.round(base[2] + (bright[2] - base[2]) * t),
+      ];
+      borderColor = rgbToHex(...mix);
+    }
     const bStyle = this.style({ fg: borderColor });
     const cardBgStyle = this.style({ bg: this.theme.card });
     const nameStyle = this.style({ fg: this.theme.ink, bold: true });
@@ -794,10 +807,7 @@ export class ScreenRenderer {
   drawPulseSymbol(x: number, y: number, elapsed?: number): number {
     const state = this.pulse.getState(elapsed);
     const symbol = this.pulse.getSymbol();
-    const canvasStyle = this.style({ bg: this.theme.canvas });
-
     if (y >= this.screen.getRows()) return y;
-
     if (this.useTruecolor) {
       const tcStyle = this.pool.getTruecolorStyle(state.color);
       this.screen.writeString(x, y, symbol, tcStyle);

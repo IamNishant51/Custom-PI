@@ -35,7 +35,7 @@ function parsePackageJson(): { name: string; scripts: Record<string, string> } |
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       return { name: pkg.name || "unknown", scripts: pkg.scripts || {} };
     }
-  } catch { logger.warn("empty catch") }
+  } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   return null;
 }
 
@@ -48,7 +48,7 @@ function parseAgentMd(): string[] {
         .map(l => l.replace(/^[#\s-]*/, "").trim())
         .filter(l => l.length > 10);
     }
-  } catch { logger.warn("empty catch") }
+  } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   return [];
 }
 

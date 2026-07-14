@@ -9,7 +9,7 @@ let activeTuiInstance: any = null;
 export function setupWidget(ctx: ExtensionContext) {
   if (widgetInstance) return;
 
-  widgetInstance = new QuantumHUDWidget(ctx as never);
+  widgetInstance = new QuantumHUDWidget();
 
   const key = "subagent-dashboard-widget";
   const invalidator = () => {

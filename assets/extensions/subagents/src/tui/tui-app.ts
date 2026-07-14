@@ -38,8 +38,21 @@ export class TuiApp {
   private messageLimit = 100;
   private scrollOffset = 0;
   private frameCounter = 0;
-  /** Tracks the bottom-most row rendered in the previous frame for stale-region clearing */
   private lastRenderMaxY = 0;
+  private lastInputTime = Date.now();
+  private lastRenderTime = 0;
+  private idleFps = 10;
+
+  private _rendering = false;
+  private _messageLogVersion = 0;
+  private _lastMessageCount = -1;
+
+  private hasActiveAnimations(): boolean {
+    if (this.trackers.size > 0) return true;
+    if (this.tui.spinners.size > 0) return true;
+    if (this.tui.shimmerBorders.size > 0) return true;
+    return false;
+  }
 
   constructor(ctx?: any, pi?: any) {
     this.ctx = ctx;
@@ -48,7 +61,11 @@ export class TuiApp {
 
     if (this.pi) {
       this.onSubmit = (text) => {
-        this.pi.sendMessage({ role: "user", content: [{ type: "text", text }] });
+        try {
+          this.pi.sendMessage({ role: "user", content: [{ type: "text", text }] });
+        } catch (e: any) {
+          process.stderr.write(`\x1b[31m[TuiApp] Send error: ${e.message}\x1b[0m\n`);
+        }
       };
     }
   }
@@ -65,7 +82,7 @@ export class TuiApp {
     if (this.active) return;
     this.active = true;
 
-    this.tui.start();
+    this.tui.start(false);
     this.tui.renderer.updateLayout();
 
     if (pulseConfig) {
@@ -73,30 +90,21 @@ export class TuiApp {
     }
     this.tui.startPulse();
 
-    const pulseAnimId = "tui:pulse-tick";
-    this.tui.animFrame.add(pulseAnimId, () => {
-      this.tui.renderer.pulse.getState();
-    }, 16);
-
-    // Enable SGR Mouse tracking (1002h for drag, 1006h for SGR coordinates)
-    process.stdout.write("\x1b[?1002h\x1b[?1006h");
-
     this.stdinHandler = (data: Buffer) => this.handleInput(data.toString());
     process.stdin.on("data", this.stdinHandler);
 
-    this.tui.animFrame.add("tui:render-loop", () => this.renderFrame(), 16);
+    this.tui.scheduler.add("tui:render-loop", () => this.renderFrame(), 33);
   }
 
   stop(): void {
     if (!this.active) return;
     this.active = false;
-    this.tui.animFrame.clear();
+    this._rendering = false;
+    this.tui.scheduler.clear();
     if (this.stdinHandler) {
       process.stdin.off("data", this.stdinHandler);
       this.stdinHandler = null;
     }
-    // Disable mouse tracking
-    process.stdout.write("\x1b[?1002l\x1b[?1006l");
     this.tui.stop();
   }
 
@@ -132,13 +140,16 @@ export class TuiApp {
 
   private syncMessages(): void {
     if (!this.ctx?.sessionManager) return;
+    const branch = this.ctx.sessionManager.getBranch();
+    if (!branch) return;
+    const messages = branch
+      .filter((e: any) => e.type === "message")
+      .map((e: any) => e.message);
+
+    if (messages.length === this._lastMessageCount) return;
+    this._lastMessageCount = messages.length;
+
     try {
-      const branch = this.ctx.sessionManager.getBranch();
-      if (!branch) return;
-      const messages = branch
-        .filter((e: any) => e.type === "message")
-        .map((e: any) => e.message);
-      
       const newLogs: Array<{ role: string; content: string; timestamp: number }> = [];
       for (const m of messages) {
         let contentStr = "";
@@ -155,7 +166,7 @@ export class TuiApp {
             })
             .join("\n");
         }
-        
+
         let thinkingContent = "";
         let textContent = contentStr;
         if (Array.isArray(m.content)) {
@@ -168,9 +179,9 @@ export class TuiApp {
             textContent = textBlock.text || "";
           }
         }
-        
+
         const timestamp = m.timestamp || Date.now();
-        
+
         if (m.role === "assistant" && thinkingContent) {
           newLogs.push({ role: "thinking", content: thinkingContent, timestamp });
           newLogs.push({ role: "assistant", content: textContent, timestamp });
@@ -178,15 +189,42 @@ export class TuiApp {
           newLogs.push({ role: m.role, content: textContent, timestamp });
         }
       }
-      
+
       this.messageLog = newLogs;
-    } catch (e) {
-      // ignore
+      this._messageLogVersion++;
+    } catch {
+      // ignore parse failures
     }
   }
 
   private renderFrame(): void {
     if (!this.active) return;
+    if (this._rendering) return;
+    this._rendering = true;
+
+    try {
+      this._doRender();
+    } catch (err: any) {
+      try {
+        const msg = `[TuiApp] Render error: ${err.message}`;
+        const style = "\x1b[31m";
+        process.stderr.write(`${style}${msg}\x1b[0m\n`);
+      } catch {
+        // last resort
+      }
+    } finally {
+      this._rendering = false;
+    }
+  }
+
+  private _doRender(): void {
+    const idleTime = Date.now() - this.lastInputTime;
+    if (idleTime > 5000 && !this.hasActiveAnimations()) {
+      const now = Date.now();
+      if (now - this.lastRenderTime < 1000 / this.idleFps) return;
+      this.lastRenderTime = now;
+    }
+
     this.frameCounter++;
     this.syncMessages();
 
@@ -195,10 +233,8 @@ export class TuiApp {
     const rows = renderer.screen.getRows();
     if (cols < SPACING.minScreenCols || rows < SPACING.minScreenRows) return;
 
-    // Ensure layout is up-to-date
     renderer.updateLayout();
 
-    // Sync from global activeTrackers
     for (const [id, tracker] of globalTrackers) {
       this.trackers.set(id, tracker as any);
     }
@@ -208,43 +244,20 @@ export class TuiApp {
     ).length;
 
     const defaultStyle = renderer.style({ bg: renderer.theme.canvas });
-
-    // ── Stale-row clearing ────────────────────────────────────────────
-    // Instead of clearing the entire screen (which marks every cell dirty on
-    // every frame), track the bottom-most row rendered last frame. If this
-    // frame renders fewer rows, clear the stale rows that are no longer used.
-    const damageRegions = renderer.screen.getDamageRegions();
     let currentMaxY = 0;
 
-    // ── Layout Regions ─────────────────────────────────────────────────
-    // 1. Top: pulse banner line (if active)
-    // 2. Banner (logo)
-    // 3. Conversation header
-    // 4. Scroll indicator (if scrolled)
-    // 5. Messages (scrollable middle area)
-    // 6. Agent cards
-    // 7. Input area (fixed at bottom)
-    // 8. Status bar (very bottom)
-    //
-    // We layout bottom-up for the fixed elements, then fill the rest.
-
-    // Reserve bottom rows for input + status bar
     const statusBarY = rows - 1;
     const inputAreaY = statusBarY - SPACING.inputAreaLines;
     const maxContentBottom = inputAreaY - 1;
 
     let y = 0;
 
-    // ── 1. Pulse banner line (thin ∞ shimmer at top) ──
     if (runningCount > 0) {
-      y = renderer.drawPulseBannerLine(0);
       y = 1;
     }
 
-    // ── 2. Banner ──
     y = renderer.drawBanner(y);
 
-    // ── 3. Conversation Header ──
     const header: ConversationHeader = {
       modelName: this.sessionModel,
       sessionId: this.sessionId,
@@ -253,13 +266,11 @@ export class TuiApp {
     };
     y = renderer.drawConversationHeader(y, header);
 
-    // ── 4. Scroll indicator ──
     const totalVisible = this.messageLog.length;
     const olderCount = Math.max(0, totalVisible - 10 - this.scrollOffset);
     const scroll: ScrollIndicator = { visible: olderCount > 0, olderCount, newerCount: this.scrollOffset };
     y = renderer.drawScrollIndicator(y, scroll);
 
-    // ── 5. Messages ──
     const maxMessages = Math.max(1, maxContentBottom - y - 2);
     const visibleMessages = this.messageLog.slice(-maxMessages);
     this.renderedElements = [];
@@ -294,7 +305,6 @@ export class TuiApp {
       if (y >= maxContentBottom) break;
     }
 
-    // ── 6. Agent cards ──
     for (const [id, tracker] of this.trackers) {
       if (y >= maxContentBottom) break;
       const running = tracker.status === "running" || tracker.status === "calling_tool";
@@ -331,12 +341,10 @@ export class TuiApp {
       y += SPACING.paddingSm;
     }
 
-    // ── 7. Input area (fixed at bottom region) ──
     if (inputAreaY < statusBarY) {
       renderer.drawInputArea(inputAreaY, renderer.contentWidth, this.inputText, this.cursorPos, this.tui.vimInput.state.mode);
     }
 
-    // ── 8. Status bar with pulse ──
     if (statusBarY < rows) {
       if (runningCount > 0) {
         renderer.drawPulseInStatusBar(statusBarY, `agents: ${runningCount}`);
@@ -352,7 +360,6 @@ export class TuiApp {
 
     currentMaxY = y;
 
-    // Clear stale rows from the previous frame that are no longer used
     if (this.lastRenderMaxY > currentMaxY) {
       for (let ry = currentMaxY; ry < this.lastRenderMaxY && ry < rows; ry++) {
         renderer.screen.clearLine(ry, defaultStyle);
@@ -390,6 +397,7 @@ export class TuiApp {
 
   private handleInput(data: string): void {
     if (!this.active) return;
+    this.lastInputTime = Date.now();
 
     // Check for SGR Mouse Event
     const mouseMatch = data.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);

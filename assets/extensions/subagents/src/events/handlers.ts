@@ -16,7 +16,7 @@ import { contextMonitor } from "../context-monitor";
 import { coalesceMessages } from "../swarm-router";
 import { stopGlobalAnimation, activeTrackers, activeInvalidators } from "../animations";
 import { stopCronJobs } from "../cron-scheduler";
-import { setupWidget, teardownWidget } from "../tui/setup-widget";
+import { teardownWidget } from "../tui/setup-widget";
 import { serializeMessageContent, extractToolName, extractToolArgs } from "../utils/serialize-message";
 import { shutdownAscension } from "../ascension-bootstrap";
 import { bus, Topics } from "../event-bus/event-bus";
@@ -30,6 +30,15 @@ import {
   checkAndStartCron, checkAndSuggestWorkflows,
   COMPACT_RESERVE_RATIO, COMPACT_KEEP_RATIO, CHECKPOINT_STALE_MS,
 } from "../runtime/agent-state";
+
+// Cache the assembled extra-prompt so the heavy synchronous context gathering
+// (soul/memory/agents/stack-detection/past-sessions) runs once per session turn
+// window instead of on every single agent turn — doing it synchronously per turn
+// blocks the event loop and freezes the TUI while the agent "thinks".
+const CONTEXT_CACHE_TTL_MS = 60_000;
+const contextCache = new Map<string, { prompt: string; ts: number }>();
+
+let globalAnimTimer: ReturnType<typeof setInterval> | null = null;
 
 export function registerEventHandlers(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
@@ -71,21 +80,24 @@ export function registerEventHandlers(pi: ExtensionAPI) {
           invalidateAgentCache();
         }
       });
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
     await ensureSoulFile();
     ensureMemoryFiles();
     initNudgeState();
 
     try {
-      const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN"];
+      const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN", "NVIDIA_API_KEY"];
+      if (process.env.NVIDIA_API_KEY) {
+        process.env.NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+      }
       await vaultImportFromEnv(vaultKeys);
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
     try {
       const sid = deriveSessionId(ctx);
       if (sid) ensureSession(sid);
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
     const megaFrames = ["◐", "◓", "◑", "◒"];
     ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });
@@ -130,10 +142,8 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         const showLen = Math.min(charIdx, verb.length);
         const partial = verb.slice(0, showLen) + (showLen < verb.length ? "…" : "");
         ctx.ui.setWorkingMessage(partial + "...");
-      }, 200));
+      }, 500));
     }
-
-    setupWidget(ctx);
 
     try {
       ctx.ui.setWidget("app-mode-indicator", (_tui: any, _theme: any) => ({
@@ -149,7 +159,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         dispose() {},
       }), { placement: "aboveEditor" });
       ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
     const skillsSrc = path.join(__dirname, "..", "skills");
     if (fs.existsSync(skillsSrc)) {
@@ -167,20 +177,34 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       }
     }
 
-    try {
-      await consolidateMemory();
-    } catch (e: any) {
-      logger.warn(`Consolidation failed on startup: ${e.message}`);
-    }
+    setTimeout(() => {
+      consolidateMemory().catch((e: any) => logger.warn(`Consolidation failed: ${e.message}`));
+    }, 5000);
 
     await checkAndStartCron(ctx, pi);
     ctx.ui.notify("Subagent extensions active. All TUI enhancements applied to default UI.", "info");
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    // Cache the expensive assembly per (project, model window) so we don't
+    // re-run synchronous disk/process I/O on every turn. Doing it per turn
+    // blocks the event loop and freezes the TUI while the agent "thinks".
     const modelContextWindow = (ctx as any).model?.contextWindow
       ?? (ctx as any).sessionManager?.model?.contextWindow
       ?? 32768;
+    const cacheKey = `${ctx.cwd || process.cwd()}:${modelContextWindow}`;
+    const now = Date.now();
+    const cached = contextCache.get(cacheKey);
+    if (cached && now - cached.ts < CONTEXT_CACHE_TTL_MS) {
+      return { systemPrompt: event.systemPrompt + cached.prompt };
+    }
+
+    const assembled = await assembleContextPrompt(event, ctx, modelContextWindow);
+    contextCache.set(cacheKey, { prompt: assembled, ts: now });
+    return { systemPrompt: event.systemPrompt + assembled };
+  });
+
+  async function assembleContextPrompt(event: any, ctx: any, modelContextWindow: number): Promise<string> {
     const MAX_INJECTION_RATIO = 0.15;
     const budgetChars = Math.max(800, Math.floor(modelContextWindow * 4 * MAX_INJECTION_RATIO));
     const isSmallContext = modelContextWindow < 16384;
@@ -201,7 +225,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 2. **Built-in Tools:** \`Bash\` (shell), \`Read\`, \`Write\`, \`Edit\`, \`Grep\`, \`Glob\`, \`WebSearch\`, \`WebFetch\`. Use \`Bash ls\` not \`ls\` directly.
 3. **Sub-Agent Tools:** \`list_subagents\`, \`create_subagent\`, \`delete_subagent\`. Always call \`list_subagents\` first — don't guess names.
 4. **Delegate only when:** user explicitly asks, task benefits from parallelism, or needs a specialized persona.
-5. **No Autonomous Actions:** Only do what the user asks. Say "I don't know" rather than fabricating.
+5. **No Autonomous Actions:** Only do what you ask. Say "I don't know" rather than fabricating.
 `;
     blocks.push({ priority: 1, content: alignmentBlock, label: "alignment" });
 
@@ -254,7 +278,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
           }
           blocks.push({ priority: 3, content: stackBlock, label: "stack" });
         }
-      } catch { logger.warn("MCP config init write failed"); }
+      } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     }
 
     if (!isSmallContext) {
@@ -276,7 +300,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
           }).join("\n");
           blocks.push({ priority: 4, content: `\n# 🧠 LEARNED SKILLS\n${skillLines}\n`, label: "skills" });
         }
-      } catch { logger.warn("MCP config init write failed"); }
+      } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     }
 
     if (!isMediumContext) {
@@ -301,7 +325,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
             blocks.push({ priority: 4, content: `\n# 📜 PAST SESSIONS\n${summaries.join("\n")}\n`, label: "past-sessions" });
           }
         }
-      } catch { logger.warn("MCP config init write failed"); }
+      } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     }
 
     blocks.sort((a, b) => a.priority - b.priority);
@@ -326,10 +350,8 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       logger.info(`[ContextBudget] Skipped ${skipped.join(", ")} (budget: ${budgetChars} chars, model: ${modelContextWindow} tokens)`);
     }
 
-    return {
-      systemPrompt: event.systemPrompt + extraPrompt
-    };
-  });
+    return extraPrompt;
+  }
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -433,10 +455,10 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     try {
       const stored = await contextMonitor.flushAutoLearn();
       if (stored > 0) logger.info(`Auto-learn: stored ${stored} triplet(s) on shutdown`);
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     try {
       await flushMemory();
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     try {
       const result = await consolidateMemory();
       if (result.merged > 0 || result.pruned > 0 || result.refreshed > 0) {
@@ -461,7 +483,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         activeAgentName: null,
         lastToolResult: null,
       });
-    } catch { logger.warn("MCP config init write failed"); }
+    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     try {
       const sid = deriveSessionId(ctx) || "unknown";
       const totalMsgs = getMessageCount(sid);
@@ -505,16 +527,16 @@ export function registerEventHandlers(pi: ExtensionAPI) {
               fs.unlinkSync(path.join(convDir, old.name));
             }
           }
-        } catch { logger.warn("MCP config init write failed"); }
+        } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
       }
     } catch (e: any) {
-      try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Archive error: ${e.message}\n`, "utf8"); } catch { logger.warn("MCP config init write failed"); }
+      try { fs.appendFileSync(path.join(os.homedir(), ".pi", "agent", "memory-debug.log"), `[${new Date().toISOString()}] Archive error: ${e.message}\n`, "utf8"); } catch (e2: any) { logger.warn("MCP config init write failed", e2?.message || String(e2)); }
     }
 
     for (const repoPath of clonedRepos) {
       try {
         fs.rmSync(repoPath, { recursive: true, force: true });
-      } catch { logger.warn("MCP config init write failed"); }
+      } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
     }
     clonedRepos.clear();
 
@@ -524,7 +546,9 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       setGlobalVerbCycler(null);
     }
     stopCronJobs();
-    if (unsubTabHandler) { try { unsubTabHandler(); } catch { logger.warn("empty catch") } setUnsubTabHandler(null); }
+    if (unsubTabHandler) { try { unsubTabHandler(); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) } setUnsubTabHandler(null); }
+    if (globalAnimTimer) { clearInterval(globalAnimTimer); globalAnimTimer = null; }
+    contextCache.clear();
     closeDb();
     activeTrackers.clear();
     activeInvalidators.clear();

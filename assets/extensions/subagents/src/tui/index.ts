@@ -9,7 +9,7 @@ export { ToastManager } from "./components/toast";
 export type { Toast, ToastType } from "./components/toast";
 export { QuestionModalManager } from "./components/question-modal";
 export type { QuestionModalConfig, QuestionOption, QuestionModalState } from "./components/question-modal";
-export { AnimationFrame, SpinnerController, ShimmerBorderController } from "./components/animation";
+export { RenderScheduler, SpinnerController, ShimmerBorderController } from "./components/animation";
 export { AnimTimeline, AnimClip, Easing, lerpColor, lerpNumber, createShimmerBorder, createPulse, createTypewriter, createFadeIn } from "./components/anim-engine";
 export type { EasingFn, AnimClipConfig, AnimTarget, ShimmerBorderConfig, PulseConfig as AnimPulseConfig, TypewriterConfig, FadeInConfig } from "./components/anim-engine";
 export { measureWidth, truncateToWidth, wordWrap, stripAnsi } from "./utils/measure-text";

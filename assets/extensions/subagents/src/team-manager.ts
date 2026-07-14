@@ -52,7 +52,7 @@ function loadTeamsStore(): TeamStore {
     if (fs.existsSync(TEAMS_CONFIG_PATH)) {
       return JSON.parse(fs.readFileSync(TEAMS_CONFIG_PATH, "utf8"));
     }
-  } catch { logger.warn("Failed to load teams config"); }
+  } catch (e: any) { logger.warn("Failed to load teams config", e?.message || String(e)); }
   return { teams: [] };
 }
 

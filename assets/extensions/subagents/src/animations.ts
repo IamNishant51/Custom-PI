@@ -21,7 +21,7 @@ function loadVerbs(): string[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(String);
     }
-  } catch { logger.warn("empty catch") }
+  } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   return [
     "Cooking", "Brewing", "Baking", "Roasting", "Sautéing",
     "Thinking", "Dreaming", "Musing", "Pondering", "Ruminating",
@@ -43,31 +43,30 @@ export const STATUS_VERBS = loadVerbs();
 
 let globalFrame = 0;
 let globalVerbIndex = 0;
-let globalAnimTimer: ReturnType<typeof setInterval> | null = null;
+let globalAnimActive = false;
 
 export const activeTrackers = new Map<string, any>();
 export const activeInvalidators = new Map<string, () => void>();
 
-export function startGlobalAnimation() {
-  if (globalAnimTimer) return;
-  globalPulse.start();
-  globalAnimTimer = setInterval(() => {
-    if (activeTrackers.size === 0) return;
-    globalFrame = (globalFrame + 1) % (SPINNER_FRAMES.length * DOT_PULSE.length * BOUNCING_BAR.length);
-    if (globalFrame % 10 === 0) {
-      globalVerbIndex = (globalVerbIndex + 1) % STATUS_VERBS.length;
-    }
-    for (const invalidate of activeInvalidators.values()) {
-      try { invalidate(); } catch { logger.warn("empty catch") }
-    }
-  }, 80);
+export function tickGlobalAnimation(): void {
+  if (activeTrackers.size === 0 && !globalAnimActive) return;
+  globalFrame++;
+  if (globalFrame % 10 === 0) {
+    globalVerbIndex = (globalVerbIndex + 1) % STATUS_VERBS.length;
+  }
+  for (const invalidate of activeInvalidators.values()) {
+    try { invalidate(); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
+  }
 }
 
-export function stopGlobalAnimation() {
-  if (globalAnimTimer) {
-    clearInterval(globalAnimTimer);
-    globalAnimTimer = null;
-  }
+export function startGlobalAnimation(): void {
+  if (globalAnimActive) return;
+  globalAnimActive = true;
+  globalPulse.start();
+}
+
+export function stopGlobalAnimation(): void {
+  globalAnimActive = false;
   globalPulse.stop();
 }
 

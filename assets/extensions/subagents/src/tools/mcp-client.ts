@@ -73,7 +73,7 @@ export class McpCliConnection {
     }
     this.pendingRequests.clear();
     if (this.proc) {
-      try { this.proc.kill(); } catch { logger.warn("MCP config init write failed"); }
+      try { this.proc.kill(); } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
       this.proc = null;
     }
   }

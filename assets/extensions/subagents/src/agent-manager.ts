@@ -49,7 +49,7 @@ function loadCustomAgentDefinitions(): Array<{
       customAgentDefinitions = JSON.parse(raw);
       return customAgentDefinitions!;
     }
-  } catch { logger.warn("Failed to load custom agent definitions"); }
+  } catch (e: any) { logger.warn("Failed to load custom agent definitions", e?.message || String(e)); }
   customAgentDefinitions = [];
   return customAgentDefinitions;
 }
@@ -162,7 +162,7 @@ export function discoverAgents(force = false): AgentMetadata[] {
         agents.push(c);
       }
     }
-  } catch { logger.warn("Failed to load legacy agents config"); }
+  } catch (e: any) { logger.warn("Failed to load legacy agents config", e?.message || String(e)); }
   discoveryCache = { agents, timestamp: now };
   return agents;
 }
@@ -174,7 +174,7 @@ export function saveCustomAgent(agent: AgentMetadata): void {
     if (fs.existsSync(AGENTS_CONFIG_PATH)) {
       existing.push(...JSON.parse(fs.readFileSync(AGENTS_CONFIG_PATH, "utf8")));
     }
-  } catch { logger.warn("Failed to read existing agents config"); }
+  } catch (e: any) { logger.warn("Failed to read existing agents config", e?.message || String(e)); }
   const idx = existing.findIndex(a => a.id === agent.id);
   if (idx >= 0) existing[idx] = agent;
   else existing.push(agent);
