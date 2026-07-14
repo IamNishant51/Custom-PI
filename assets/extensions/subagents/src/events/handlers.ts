@@ -190,9 +190,8 @@ export function registerEventHandlers(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    // Cache the expensive assembly per (project, model window) so we don't
-    // re-run synchronous disk/process I/O on every turn. Doing it per turn
-    // blocks the event loop and freezes the TUI while the agent "thinks".
+    try { ctx.ui.setStatus("subagents", "Processing..."); } catch { /* not critical */ }
+    const t0 = Date.now();
     const modelContextWindow = (ctx as any).model?.contextWindow
       ?? (ctx as any).sessionManager?.model?.contextWindow
       ?? 32768;
@@ -205,6 +204,8 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
     const assembled = await assembleContextPrompt(event, ctx, modelContextWindow);
     contextCache.set(cacheKey, { prompt: assembled, ts: now });
+    const elapsed = Date.now() - t0;
+    if (elapsed > 200) logger.info(`[Timing] assembleContextPrompt took ${elapsed}ms`);
     return { systemPrompt: event.systemPrompt + assembled };
   });
 
