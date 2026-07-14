@@ -151,10 +151,17 @@ function renderTable(rows: string[][], width: number): string[] {
   for (let r = 0; r < rows.length; r++) {
     const cells = rows[r].map((cell, c) => {
       const w = colWidths[c] || 10;
-      const cleanCell = cell.length > w ? cell.slice(0, Math.max(1, w - 3)) + "..." : cell;
-      const padded = cleanCell.padEnd(w);
+      const isSeparator = /^-+$/.test(cell.trim());
+      if (isSeparator) {
+        return fg(THEME.hairline, "\u2500".repeat(w));
+      }
+      const styledCell = renderInline(cell, w);
+      const cellWidth = measureWidth(styledCell);
+      const truncated = cellWidth > w ? truncateToWidth(styledCell, w) : styledCell;
+      const truncatedWidth = measureWidth(truncated);
+      const padded = truncated + " ".repeat(Math.max(0, w - truncatedWidth));
       if (r === 0) return fgBold(THEME.ink, padded);
-      return fg(THEME.ink, padded);
+      return padded;
     });
     lines.push(fg(THEME.hairline, "\u2502 ") + cells.join(fg(THEME.hairline, " \u2502 ")) + fg(THEME.hairline, " \u2502"));
   }
