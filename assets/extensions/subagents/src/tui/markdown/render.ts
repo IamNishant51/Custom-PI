@@ -5,7 +5,7 @@ import { parseInline, type StyledSegment } from "./inline";
 import { parseBlocks, parseBlocksStreaming, type Block } from "./block";
 import { highlightBlock, highlightAsync } from "./highlight";
 import { BOX } from "../types";
-import { wordWrap, truncateToWidth, visibleWidth } from "../render/format";
+import { wordWrap, truncateToWidth, visibleWidth, stripAnsi } from "../render/format";
 
 export interface RenderOptions {
   width: number;
@@ -136,35 +136,86 @@ function renderTable(rows: string[][], width: number): string[] {
   if (rows.length === 0) return [];
   const colCount = Math.max(...rows.map(r => r.length));
   const colWidths: number[] = [];
-  for (let c = 0; c < colCount; c++) {
-    colWidths[c] = Math.max(...rows.map(r => measureWidth(r[c] || "")));
+
+  const isSeparatorRow = (row: string[]): boolean =>
+    row.every(c => /^[-: ]+$/.test(c.trim()));
+
+  const headerRows: string[][] = [];
+  const dataRows: string[][] = [];
+  let sepIndex = -1;
+  for (let r = 0; r < rows.length; r++) {
+    if (isSeparatorRow(rows[r])) {
+      sepIndex = r;
+    } else if (sepIndex < 0) {
+      headerRows.push(rows[r]);
+    } else {
+      dataRows.push(rows[r]);
+    }
   }
+  const allContentRows = [...headerRows, ...dataRows];
+  if (allContentRows.length === 0) return [];
+
+  for (let c = 0; c < colCount; c++) {
+    let maxW = 3;
+    for (const row of allContentRows) {
+      const raw = row[c] || "";
+      const styled = raw ? stripAnsi(renderInline(raw, Infinity)) : "";
+      const w = Math.max(3, measureWidth(styled || raw));
+      if (w > maxW) maxW = w;
+    }
+    colWidths[c] = maxW;
+  }
+
   const totalWidth = colWidths.reduce((s, w) => s + w + 3, 1);
   if (totalWidth > width - 4) {
-    const ratio = (width - 4) / totalWidth;
+    const available = width - 4;
+    const ratio = available / totalWidth;
+    let used = 0;
     for (let c = 0; c < colCount; c++) {
       colWidths[c] = Math.max(3, Math.floor(colWidths[c] * ratio));
+      used += colWidths[c] + 3;
+    }
+    used -= 1;
+    let remainder = available - used;
+    let c = colCount - 1;
+    while (remainder > 0 && c >= 0) {
+      colWidths[c]++;
+      remainder--;
+      c--;
     }
   }
 
+  const hairline = (s: string) => fg(THEME.hairline, s);
   const lines: string[] = [];
+  let headerRendered = false;
+
   for (let r = 0; r < rows.length; r++) {
-    const cells = rows[r].map((cell, c) => {
-      const w = colWidths[c] || 10;
-      const isSeparator = /^-+$/.test(cell.trim());
-      if (isSeparator) {
-        return fg(THEME.hairline, "\u2500".repeat(w));
-      }
+    const row = rows[r];
+
+    if (isSeparatorRow(row)) {
+      const segs = row.map((_cell, c) => hairline("\u2500".repeat(colWidths[c] || 3)));
+      lines.push(hairline("\u251c") + segs.join(hairline("\u253c")) + hairline("\u2524"));
+      continue;
+    }
+
+    const isHeader = !headerRendered && sepIndex >= 0;
+    headerRendered = true;
+
+    const cells = row.map((cell, c) => {
+      const w = colWidths[c] || 3;
       const styledCell = renderInline(cell, w);
-      const cellWidth = measureWidth(styledCell);
-      const truncated = cellWidth > w ? truncateToWidth(styledCell, w) : styledCell;
-      const truncatedWidth = measureWidth(truncated);
-      const padded = truncated + " ".repeat(Math.max(0, w - truncatedWidth));
-      if (r === 0) return fgBold(THEME.ink, padded);
+      const visibleText = stripAnsi(styledCell);
+      const cellWidth = measureWidth(visibleText);
+      const display = cellWidth > w ? truncateToWidth(styledCell, w) : styledCell;
+      const displayWidth = measureWidth(stripAnsi(display));
+      const padded = display + " ".repeat(Math.max(0, w - displayWidth));
+      if (isHeader) return fgBold(THEME.ink, padded);
       return padded;
     });
-    lines.push(fg(THEME.hairline, "\u2502 ") + cells.join(fg(THEME.hairline, " \u2502 ")) + fg(THEME.hairline, " \u2502"));
+
+    lines.push(hairline("\u2502 ") + cells.join(hairline(" \u2502 ")) + hairline(" \u2502"));
   }
+
   return lines;
 }
 
