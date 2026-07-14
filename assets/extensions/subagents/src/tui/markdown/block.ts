@@ -99,7 +99,7 @@ function groupBlocks(tokens: LineToken[], streaming: boolean): Block[] {
     if (t.type === "table-row") {
       const rows: string[][] = [];
       while (i < tokens.length && tokens[i].type === "table-row") {
-        const cells = tokens[i].text.split("|").filter((_, j, a) => j > 0 && j < a.length - 1).map(s => s.trim());
+        const cells = tokens[i].text.split(/[|│]/).filter((_, j, a) => j > 0 && j < a.length - 1).map(s => s.trim());
         rows.push(cells);
         i++;
       }

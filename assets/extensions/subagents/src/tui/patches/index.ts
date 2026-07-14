@@ -250,21 +250,14 @@ function patchAssistantMessage(proto: any) {
             if (lines.length > 0) lines.push("");
 
             if (isCollapsed) {
-              lines.push(`\x1b[2m\x1b[3m▶ Reasoning  (click to expand)\x1b[0m`);
+              lines.push(`\x1b[2m▶ Reasoning  (click to expand)\x1b[0m`);
             } else {
               lines.push(`\x1b[2m▼ Reasoning\x1b[0m`);
-              const innerWidth = contentWidth - 4;
-              const topBorder = `\x1b[2m╭${"─".repeat(innerWidth)}╮\x1b[0m`;
-              const bottomBorder = `\x1b[2m╰${"─".repeat(innerWidth)}╯\x1b[0m`;
-              lines.push(topBorder);
-              
-              const thinkingLines = renderMarkdown(c.thinking.trim(), { width: innerWidth, streaming: !!this.isStreaming });
+              // Minimal format: just indent the lines by 2 spaces and dim/italic them, no box
+              const thinkingLines = renderMarkdown(c.thinking.trim(), { width: contentWidth - 2, streaming: !!this.isStreaming });
               for (const line of thinkingLines) {
-                const plainLine = stripAnsi(line);
-                const padding = " ".repeat(Math.max(0, innerWidth - plainLine.length));
-                lines.push(`\x1b[2m│\x1b[0m \x1b[2m${line}${padding}\x1b[0m \x1b[2m│\x1b[0m`);
+                lines.push(`\x1b[2m${line}\x1b[0m`);
               }
-              lines.push(bottomBorder);
             }
           }
         }
@@ -615,11 +608,21 @@ function patchFooterComponent(proto: any) {
 }
 
 function handleTerminalMouseClick(col: number, row: number) {
-  debugLog(`CLICK AT col=${col}, row=${row}`);
-  if (!activeTuiInstance) return;
+  const logFile = path.join(os.homedir(), ".pi", "agent", "mouse-debug.log");
+  const log = (msg: string) => {
+    try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`, "utf8"); } catch {}
+  };
+
+  log(`CLICK AT col=${col}, row=${row}`);
+  if (!activeTuiInstance) {
+    log("No active TUI instance");
+    return;
+  }
 
   const viewportTop = activeTuiInstance.previousViewportTop || 0;
   const lineIndex = viewportTop + row - 1;
+  log(`viewportTop=${viewportTop}, lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
+  log(`Rendered components: ${JSON.stringify(renderedComponents.map(rc => ({ name: rc.component.constructor?.name, start: rc.startLine, end: rc.endLine })))}`);
 
   const clicked = renderedComponents.find(rc => {
     const absStart = chatContainerStartLine + rc.startLine;
@@ -627,7 +630,12 @@ function handleTerminalMouseClick(col: number, row: number) {
     return lineIndex >= absStart && lineIndex < absEnd;
   });
 
-  if (!clicked) return;
+  if (!clicked) {
+    log("No component matched click line");
+    return;
+  }
+
+  log(`Matched component: ${clicked.component.constructor?.name}`);
 
   if (clicked.component.constructor?.name === "UserMessageComponent") {
     const idx = renderedComponents.indexOf(clicked);
@@ -635,11 +643,13 @@ function handleTerminalMouseClick(col: number, row: number) {
     if (nextRc) {
       const assistant = nextRc.component;
       assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+      log(`Toggled next AssistantMessage hideThinkingBlock to ${assistant.hideThinkingBlock}`);
       activeTuiInstance.requestRender();
     }
   } else if (clicked.component.constructor?.name === "AssistantMessageComponent") {
     const assistant = clicked.component;
     assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+    log(`Toggled AssistantMessage hideThinkingBlock to ${assistant.hideThinkingBlock}`);
     activeTuiInstance.requestRender();
   }
 }
@@ -723,7 +733,14 @@ function patchTui(proto: any) {
     for (const child of this.children) {
       if (!child) continue;
       const isChat = child.children && child.children.some((c: any) =>
-        c.constructor?.name === "UserMessageComponent" || c.children?.some((cc: any) => cc.constructor?.name === "UserMessageComponent")
+        c.constructor?.name === "UserMessageComponent" ||
+        c.constructor?.name === "AssistantMessageComponent" ||
+        c.constructor?.name === "ToolExecutionComponent" ||
+        c.children?.some((cc: any) =>
+          cc.constructor?.name === "UserMessageComponent" ||
+          cc.constructor?.name === "AssistantMessageComponent" ||
+          cc.constructor?.name === "ToolExecutionComponent"
+        )
       );
       if (isChat) {
         chatContainerStartLine = offset;

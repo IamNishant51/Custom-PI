@@ -18,7 +18,7 @@ const UNORDERED_LIST_RE = /^(\s*)([-*+])\s+(.*)$/;
 const ORDERED_LIST_RE = /^(\s*)(\d+)\.\s+(.*)$/;
 const BLOCKQUOTE_RE = /^>\s?(.*)$/;
 const FENCE_RE = /^(```+|~~~+)\s*(\w*)\s*$/;
-const TABLE_RE = /^\|.+\|$/;
+const TABLE_RE = /^[|│].+[|│]$/;
 const EMPTY_RE = /^\s*$/;
 
 export function tokenizeLine(line: string): LineToken {
