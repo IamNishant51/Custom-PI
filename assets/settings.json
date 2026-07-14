@@ -1,6 +1,6 @@
 {
-  "defaultModel": "llama-3.1-8b-instant",
-  "defaultProvider": "groq",
+  "defaultModel": "north-mini-code-free",
+  "defaultProvider": "opencode",
   "defaultThinkingLevel": "high",
   "quietStartup": true,
   "editorPaddingX": 6,

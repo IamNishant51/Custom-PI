@@ -87,7 +87,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     initNudgeState();
 
     try {
-      const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN", "NVIDIA_API_KEY", "GROQ_API_KEY"];
+      const vaultKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "TAVILY_API_KEY", "SERPER_API_KEY", "HUGGINGFACE_TOKEN", "NVIDIA_API_KEY", "GROQ_API_KEY", "OPENCODE_API_KEY"];
       await vaultImportFromEnv(vaultKeys);
     } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
