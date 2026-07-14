@@ -49,6 +49,7 @@ import { bus, Topics } from "./event-bus/event-bus";
 // Phase 1 decomposition imports
 import { SubAgentCallCard, SubAgentResultCard, ParallelAgentsCallCard, ParallelAgentsResultCard, SubAgentCreatedCard, SubAgentListCard } from "./tui/components";
 import { setupWidget, teardownWidget } from "./tui/setup-widget";
+import { applyContainerPatch } from "./tui/patches";
 import { AGENTS_DIR_GLOBAL, AGENTS_DIR_LOCAL, loadAgents, invalidateAgentCache } from "./runtime/agent-config";
 import { resolveModel, resolveFastModel } from "./runtime/tool-registry";
 import { SubAgentRuntime } from "./runtime/subagent";
@@ -124,6 +125,21 @@ function applyRuntimePatches() {
       AgentSession.prototype._runAutoCompaction.__patched = true;
       logger.info("[Patch] Patched AgentSession._runAutoCompaction for silent overflow retries");
     }
+  }
+
+  // Patch 1b: Apply TUI container patches eagerly so message/tool components
+  // render with custom-pi styling from the first frame, not after first sub-agent use.
+  // These are also applied via setupWidget() in session_start, but the eager
+  // apply here catches the edge case where the first render happens before
+  // session_start fires.
+  try {
+    const piTui = req("@earendil-works/pi-tui");
+    if (piTui.Container && piTui.Container.prototype) {
+      applyContainerPatch(piTui.Container.prototype);
+      logger.info("[Patch] Applied eager TUI container patches");
+    }
+  } catch (e: any) {
+    logger.warn(`[Patch] Could not apply eager TUI container patches: ${e.message}`);
   }
 
   // Patch 2: Agent.prototype.continue

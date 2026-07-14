@@ -17,7 +17,7 @@ import { coalesceMessages } from "../swarm-router";
 import { stopGlobalAnimation, activeTrackers, activeInvalidators, startGlobalAnimation, tickGlobalAnimation } from "../animations";
 import { AnimManager } from "../tui/anim-manager";
 import { stopCronJobs } from "../cron-scheduler";
-import { teardownWidget } from "../tui/setup-widget";
+import { teardownWidget, setupWidget } from "../tui/setup-widget";
 import { serializeMessageContent, extractToolName, extractToolArgs } from "../utils/serialize-message";
 import { shutdownAscension } from "../ascension-bootstrap";
 import { bus, Topics } from "../event-bus/event-bus";
@@ -44,6 +44,12 @@ let globalAnimTimer: ReturnType<typeof setInterval> | null = null;
 export function registerEventHandlers(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     logger.info("session_start", { cwd: ctx.cwd });
+
+    try {
+      setupWidget(ctx);
+    } catch (e: any) {
+      logger.warn(`[TUI] Widget setup failed: ${e.message}`);
+    }
 
     try {
       const contextWindow = (ctx as any).model?.contextWindow

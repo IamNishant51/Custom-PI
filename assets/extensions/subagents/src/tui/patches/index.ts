@@ -22,6 +22,7 @@ let renderedComponents: Array<{
 let activeTuiInstance: any = null;
 
 let livePatchesApplied = false;
+let containerPatched = false;
 let userMessagePatched = false;
 let toolExecutionPatched = false;
 let customEditorPatched = false;
@@ -438,83 +439,12 @@ function handleTerminalMouseClick(col: number, row: number) {
   }
 }
 
-export function applyLivePatches(tui: any, themeInstance: any) {
-  if (livePatchesApplied) return;
-  livePatchesApplied = true;
-  debugLog("APPLYING LIVE ESM PATCHES");
+export function applyContainerPatch(containerProto: any): void {
+  if (containerPatched) return;
+  containerPatched = true;
 
-  const TuiPrototype = Object.getPrototypeOf(tui);
-  const ContainerPrototype = Object.getPrototypeOf(TuiPrototype);
-
-  const originalTuiRender = TuiPrototype.render;
-  TuiPrototype.render = function (this: any, width: number) {
-    let offset = 0;
-    for (const child of this.children) {
-      if (!child) continue;
-      const isChat = child.children && child.children.some((c: any) =>
-        c.constructor?.name === "UserMessageComponent" || c.children?.some((cc: any) => cc.constructor?.name === "UserMessageComponent")
-      );
-      if (isChat) {
-        chatContainerStartLine = offset;
-        break;
-      }
-      const childLines = child.render(width);
-      offset += childLines.length;
-    }
-    const lines = originalTuiRender.call(this, width);
-    return lines.filter((l: string) => {
-      const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
-      return plain !== "Dashboard active" && !plain.includes("Dashboard active");
-    });
-  };
-
-  const originalTuiStart = TuiPrototype.start;
-  TuiPrototype.start = function (this: any) {
-    activeTuiInstance = this;
-    originalTuiStart.call(this);
-
-    let originalEmit: typeof process.stdin.emit | null = null;
-
-    if (!(process.stdin as any)._customPiPatched) {
-      originalEmit = process.stdin.emit;
-      (process.stdin as any)._originalEmit = originalEmit;
-      (process.stdin as any)._customPiPatched = true;
-
-      process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
-        if (event === "data") {
-          const raw = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
-          const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-          if (mouseMatch) {
-            const button = parseInt(mouseMatch[1], 10);
-            const col = parseInt(mouseMatch[2], 10);
-            const row = parseInt(mouseMatch[3], 10);
-            const isRelease = mouseMatch[4] === "m";
-            if (!isRelease && button === 0 && col >= 0 && row >= 0) {
-              handleTerminalMouseClick(col, row);
-            }
-            return true;
-          }
-        }
-        const emit = (process.stdin as any)._originalEmit;
-        if (emit) return emit.call(this, event, data, ...args);
-        return EventEmitter.prototype.emit.call(this, event, data, ...args);
-      };
-    }
-  };
-
-  const originalTuiStop = TuiPrototype.stop;
-  TuiPrototype.stop = function (this: any) {
-    if ((process.stdin as any)._originalEmit) {
-      process.stdin.emit = (process.stdin as any)._originalEmit;
-      delete (process.stdin as any)._originalEmit;
-      delete (process.stdin as any)._customPiPatched;
-    }
-    activeTuiInstance = null;
-    originalTuiStop.call(this);
-  };
-
-  const originalContainerRender = ContainerPrototype.render;
-  ContainerPrototype.render = function (this: any, width: number) {
+  const originalContainerRender = containerProto.render;
+  containerProto.render = function (this: any, width: number) {
     if (this.children) {
       for (const child of this.children) {
         if (!child) continue;
@@ -584,4 +514,84 @@ export function applyLivePatches(tui: any, themeInstance: any) {
 
     return originalContainerRender.call(this, width);
   };
+}
+
+export function applyLivePatches(tui: any, themeInstance: any) {
+  if (livePatchesApplied) return;
+  livePatchesApplied = true;
+  debugLog("APPLYING LIVE ESM PATCHES");
+
+  const TuiPrototype = Object.getPrototypeOf(tui);
+  const ContainerPrototype = Object.getPrototypeOf(TuiPrototype);
+
+  applyContainerPatch(ContainerPrototype);
+
+  const originalTuiRender = TuiPrototype.render;
+  TuiPrototype.render = function (this: any, width: number) {
+    let offset = 0;
+    for (const child of this.children) {
+      if (!child) continue;
+      const isChat = child.children && child.children.some((c: any) =>
+        c.constructor?.name === "UserMessageComponent" || c.children?.some((cc: any) => cc.constructor?.name === "UserMessageComponent")
+      );
+      if (isChat) {
+        chatContainerStartLine = offset;
+        break;
+      }
+      const childLines = child.render(width);
+      offset += childLines.length;
+    }
+    const lines = originalTuiRender.call(this, width);
+    return lines.filter((l: string) => {
+      const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
+      return plain !== "Dashboard active" && !plain.includes("Dashboard active");
+    });
+  };
+
+  const originalTuiStart = TuiPrototype.start;
+  TuiPrototype.start = function (this: any) {
+    activeTuiInstance = this;
+    originalTuiStart.call(this);
+
+    let originalEmit: typeof process.stdin.emit | null = null;
+
+    if (!(process.stdin as any)._customPiPatched) {
+      originalEmit = process.stdin.emit;
+      (process.stdin as any)._originalEmit = originalEmit;
+      (process.stdin as any)._customPiPatched = true;
+
+      process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
+        if (event === "data") {
+          const raw = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+          const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+          if (mouseMatch) {
+            const button = parseInt(mouseMatch[1], 10);
+            const col = parseInt(mouseMatch[2], 10);
+            const row = parseInt(mouseMatch[3], 10);
+            const isRelease = mouseMatch[4] === "m";
+            if (!isRelease && button === 0 && col >= 0 && row >= 0) {
+              handleTerminalMouseClick(col, row);
+            }
+            return true;
+          }
+        }
+        const emit = (process.stdin as any)._originalEmit;
+        if (emit) return emit.call(this, event, data, ...args);
+        return EventEmitter.prototype.emit.call(this, event, data, ...args);
+      };
+    }
+  };
+
+  const originalTuiStop = TuiPrototype.stop;
+  TuiPrototype.stop = function (this: any) {
+    if ((process.stdin as any)._originalEmit) {
+      process.stdin.emit = (process.stdin as any)._originalEmit;
+      delete (process.stdin as any)._originalEmit;
+      delete (process.stdin as any)._customPiPatched;
+    }
+    activeTuiInstance = null;
+    originalTuiStop.call(this);
+  };
+
+  originalTuiStop.__patched = true;
 }
