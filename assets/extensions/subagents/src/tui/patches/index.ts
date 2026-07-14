@@ -357,12 +357,12 @@ function patchToolExecution(proto: any) {
     const displayName = getDisplayToolName(this.toolName);
     const argsStr = formatArgInParens(this.toolName, this.args);
 
+    let finalLines: string[] = [];
+
     if (isRunning) {
       const dot = `\x1b[32m●\x1b[0m`;
-      return [`${dot} \x1b[1m${displayName}\x1b[0m${argsStr}`];
-    }
-
-    if (isError) {
+      finalLines = [`${dot} \x1b[1m${displayName}\x1b[0m${argsStr}`];
+    } else if (isError) {
       const dot = `\x1b[31m●\x1b[0m`;
       const errorMsg = this.result?.details?.message || this.result?.details || "failed";
       const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
@@ -374,47 +374,51 @@ function patchToolExecution(proto: any) {
       rawLines = rawLines.filter((l: string) => l.trim() !== "");
       const outputLines = rawLines.slice(0, 10).map((l: string) => `    \x1b[31m│\x1b[0m  \x1b[2m${l}\x1b[0m`);
       
-      return [headerLine, errorLine, ...outputLines];
-    }
+      finalLines = [headerLine, errorLine, ...outputLines];
+    } else {
+      const dot = `\x1b[32m●\x1b[0m`;
+      const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
 
-    const dot = `\x1b[32m●\x1b[0m`;
-    const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
+      const contentWidth = Math.max(10, width - 8);
+      let rawLines = originalToolRender.call(this, contentWidth);
+      rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
+      rawLines = rawLines.filter((l: string) => l.trim() !== "");
 
-    const contentWidth = Math.max(10, width - 8);
-    let rawLines = originalToolRender.call(this, contentWidth);
-    rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
-    rawLines = rawLines.filter((l: string) => l.trim() !== "");
+      let firstLine = rawLines[0] || "";
+      const cleanFirstLine = firstLine.replace(/^(Read|Updated|Listed)\s+.*?\s+with\s+/, "$1 ");
+      const resultSummary = cleanFirstLine ? cleanFirstLine : "Completed";
 
-    let firstLine = rawLines[0] || "";
-    const cleanFirstLine = firstLine.replace(/^(Read|Updated|Listed)\s+.*?\s+with\s+/, "$1 ");
-    const resultSummary = cleanFirstLine ? cleanFirstLine : "Completed";
+      const resultLine = `  \x1b[2m└\x1b[0m ${resultSummary} \x1b[2m(ctrl+r to expand)\x1b[0m`;
 
-    const resultLine = `  \x1b[2m└\x1b[0m ${resultSummary} \x1b[2m(ctrl+r to expand)\x1b[0m`;
-
-    const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit" || this.toolName === "replace_file_content" || this.toolName === "multi_replace_file_content";
-    
-    if (isEditTool && rawLines.length > 0) {
-      const diffLines = rawLines.filter((l: string) => {
-        const plain = stripAnsi(l).trim();
-        return plain.startsWith("+") || plain.startsWith("-") || /^\d+\s/.test(plain);
-      });
+      const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit" || this.toolName === "replace_file_content" || this.toolName === "multi_replace_file_content";
       
-      if (diffLines.length > 0) {
-        const outputLines = diffLines.slice(0, 15).map((l: string) => {
-          const plain = stripAnsi(l);
-          if (plain.startsWith("+") && !plain.startsWith("+++")) {
-            return `    \x1b[32m${l}\x1b[0m`;
-          } else if (plain.startsWith("-") && !plain.startsWith("---")) {
-            return `    \x1b[31m${l}\x1b[0m`;
-          } else {
-            return `    \x1b[2m${l}\x1b[0m`;
-          }
+      if (isEditTool && rawLines.length > 0) {
+        const diffLines = rawLines.filter((l: string) => {
+          const plain = stripAnsi(l).trim();
+          return plain.startsWith("+") || plain.startsWith("-") || /^\d+\s/.test(plain);
         });
-        return [headerLine, resultLine, ...outputLines];
+        
+        if (diffLines.length > 0) {
+          const outputLines = diffLines.slice(0, 15).map((l: string) => {
+            const plain = stripAnsi(l);
+            if (plain.startsWith("+") && !plain.startsWith("+++")) {
+              return `    \x1b[32m${l}\x1b[0m`;
+            } else if (plain.startsWith("-") && !plain.startsWith("---")) {
+              return `    \x1b[31m${l}\x1b[0m`;
+            } else {
+              return `    \x1b[2m${l}\x1b[0m`;
+            }
+          });
+          finalLines = [headerLine, resultLine, ...outputLines];
+        } else {
+          finalLines = [headerLine, resultLine];
+        }
+      } else {
+        finalLines = [headerLine, resultLine];
       }
     }
 
-    return [headerLine, resultLine];
+    return truncateLines(finalLines, width);
   };
 }
 
