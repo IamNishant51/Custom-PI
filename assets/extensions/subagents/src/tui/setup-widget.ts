@@ -22,7 +22,7 @@ export function setupWidget(ctx: ExtensionContext) {
   activeInvalidators.set(key, invalidator);
 
   try {
-    ctx.ui.setHeader((tui: any, themeInstance: any) => {
+    (ctx.ui as any).setHeader((tui: any, themeInstance: any) => {
       activeTuiInstance = tui;
       return bannerInstance!;
     });
@@ -39,7 +39,7 @@ export function setupWidget(ctx: ExtensionContext) {
 }
 
 export function teardownWidget(ctx: ExtensionContext) {
-  try { ctx.ui.setHeader(undefined); } catch {}
+  try { (ctx.ui as any).setHeader(undefined); } catch {}
   ctx.ui.setWidget("subagent-dashboard", undefined);
   ctx.ui.setWidget("app-mode-indicator", undefined);
   ctx.ui.setStatus("app-mode", undefined);

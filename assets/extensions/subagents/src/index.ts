@@ -136,10 +136,10 @@ function applyRuntimePatches() {
     const piTui = req("@earendil-works/pi-tui");
     if (piTui.Container && piTui.Container.prototype) {
       applyContainerPatch(piTui.Container.prototype);
-      logger.info("[Patch] Applied eager TUI container patches");
     }
-  } catch (e: any) {
-    logger.warn(`[Patch] Could not apply eager TUI container patches: ${e.message}`);
+  } catch {
+    // Host package not resolvable from extension dist — this is expected.
+    // The patches are applied via setupWidget() in session_start instead.
   }
 
   // Patch 2: Agent.prototype.continue

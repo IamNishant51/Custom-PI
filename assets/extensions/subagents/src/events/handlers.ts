@@ -110,10 +110,9 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       }
     } catch (err: any) { logger.warn(`Checkpoint check failed: ${err.message}`); }
 
-    await checkAndSuggestWorkflows(ctx, pi);
+    checkAndSuggestWorkflows(ctx, pi).catch(err => logger.error(`Workflow suggestions failed: ${err.message}`));
 
     animManager.start("requesting");
-    startGlobalAnimation();
 
     const animFrameTimer = setInterval(() => tickGlobalAnimation(), 80);
     if (animFrameTimer?.unref) animFrameTimer.unref();
@@ -203,6 +202,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
         intervalMs: 100,
       });
+      startGlobalAnimation();
     } catch { /* not critical */ }
     const t0 = Date.now();
     const modelContextWindow = (ctx as any).model?.contextWindow
@@ -421,6 +421,8 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     if (event.message.role !== "assistant") return;
     const msgHasToolCalls = event.message.content.some((c: any) => c.type === "toolCall");
     if (msgHasToolCalls) return;
+
+    stopGlobalAnimation();
 
     if (backgroundDebounceTimer) clearTimeout(backgroundDebounceTimer);
     setBackgroundDebounceTimer(setTimeout(() => {

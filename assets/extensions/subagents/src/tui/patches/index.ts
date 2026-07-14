@@ -9,6 +9,7 @@ import { fg, fgBold, bgFg, dim } from "../theme/colorize";
 import { hexToRgb } from "../utils/color";
 import { stripAnsi, truncateToWidth, truncateLines, measureWidth } from "../render/format";
 import { render as renderMarkdown } from "../markdown/render";
+import { setReRenderCallback } from "../markdown/highlight";
 import { getGlobalFrame, getDotPulse, getPulseColor, getSpinner, activeTrackers, globalPulse, startGlobalAnimation, stopGlobalAnimation } from "../../animations";
 import { QuantumHUDWidget } from "../components/quantum-hud";
 import { getHostAdapter } from "../../host-adapter";
@@ -54,31 +55,39 @@ function patchUserMessage(proto: any) {
   userMessagePatched = true;
   debugLog("PATCHING USER MESSAGE PROTOTYPE");
 
+  const originalRender = proto.render;
   proto.render = function (this: any, width: number) {
-    const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
-    if (!markdownComponent) return [];
+    try {
+      const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
+      if (!markdownComponent) {
+        return originalRender.call(this, width);
+      }
 
-    const contentWidth = Math.max(20, width - 8);
-    const rawText = markdownComponent.content || markdownComponent.text || "";
-    const mdLines = rawText
-      ? renderMarkdown(rawText, { width: contentWidth })
-      : markdownComponent.render(contentWidth);
+      const contentWidth = Math.max(20, width - 8);
+      const rawText = markdownComponent.content || markdownComponent.text || "";
+      const mdLines = rawText
+        ? renderMarkdown(rawText, { width: contentWidth })
+        : markdownComponent.render(contentWidth);
 
-    const pointerColor = (s: string) => fg(THEME.accent, s);
-    const dimFn = (s: string) => fg(THEME.muted, s);
+      const pointerColor = (s: string) => fg(THEME.accent, s);
+      const dimFn = (s: string) => fg(THEME.muted, s);
 
-    const lines: string[] = [];
-    const pointer = ICONS.userTurn + " ";
-    if (mdLines.length > 0) {
-      lines.push(pointerColor(pointer) + dimFn("You") + "  " + (mdLines[0] || ""));
+      const lines: string[] = [];
+      const pointer = ICONS.userTurn + " ";
+      if (mdLines.length > 0) {
+        lines.push(pointerColor(pointer) + dimFn("You") + "  " + (mdLines[0] || ""));
+      }
+      for (let i = 1; i < mdLines.length; i++) {
+        lines.push("  " + (mdLines[i] || ""));
+      }
+      lines[0] = OSC133_ZONE_START + lines[0];
+      lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
+
+      return truncateLines(lines, width);
+    } catch (err: any) {
+      logger.error(`[TUI] UserMessage rendering failed: ${err.message}`);
+      return originalRender.call(this, width);
     }
-    for (let i = 1; i < mdLines.length; i++) {
-      lines.push("  " + (mdLines[i] || ""));
-    }
-    lines[0] = OSC133_ZONE_START + lines[0];
-    lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
-
-    return truncateLines(lines, width);
   };
 }
 
@@ -211,42 +220,61 @@ function patchAssistantMessage(proto: any) {
 
   const originalRender = proto.render;
   proto.render = function (this: any, width: number) {
-    const contentWidth = Math.max(20, width - 8);
-    const rawText = this.content || this.text || "";
+    try {
+      const contentWidth = Math.max(20, width - 8);
+      let lines: string[] = [];
 
-    let lines: string[];
-    if (rawText) {
-      lines = renderMarkdown(rawText, { width: contentWidth, streaming: !!this.isStreaming });
-    } else {
-      lines = originalRender.call(this, contentWidth);
-    }
-
-    if (lines.length === 0) return lines;
-
-    const accentColor = (s: string) => fg(THEME.accent, s);
-    const dimFn = (s: string) => fg(THEME.muted, s);
-
-    const assistantLabel = ICONS.assistantLabel;
-    const prefix = ICONS.assistantTurn + " ";
-
-    const result: string[] = [];
-    result.push(accentColor(truncateToWidth(prefix + assistantLabel, width - 4)));
-    for (const line of lines) {
-      result.push(line);
-    }
-
-    if (this.isStreaming) {
-      const lastIdx = result.length - 1;
-      if (lastIdx >= 0) {
-        const frame = getGlobalFrame();
-        const pulse = Math.sin(frame * 0.15) * 0.5 + 0.5;
-        const brightness = Math.round(160 + pulse * 95);
-        const cursor = `\x1b[38;2;${brightness};${brightness};${brightness}m\u2588\x1b[0m`;
-        result[lastIdx] = result[lastIdx] + cursor;
+      if (this.lastMessage && Array.isArray(this.lastMessage.content)) {
+        for (const c of this.lastMessage.content) {
+          if (c.type === "text" && c.text.trim()) {
+            const textLines = renderMarkdown(c.text.trim(), { width: contentWidth, streaming: !!this.isStreaming });
+            if (lines.length > 0) lines.push("");
+            lines.push(...textLines);
+          } else if (c.type === "thinking" && c.thinking.trim()) {
+            const isCollapsed = !!this.hideThinkingBlock;
+            const chevron = isCollapsed ? "\u25b8" : "\u25be";
+            const header = fg(THEME.muted, `${chevron} Reasoning`);
+            if (lines.length > 0) lines.push("");
+            lines.push(header);
+            if (!isCollapsed) {
+              const thinkingLines = renderMarkdown(c.thinking.trim(), { width: contentWidth - 4, streaming: !!this.isStreaming });
+              const leftBar = fg(THEME.hairline, "\u2502 ");
+              lines.push(...thinkingLines.map(line => leftBar + `\x1b[3m\x1b[2m${line}\x1b[22m\x1b[23m`));
+            }
+          }
+        }
+      } else {
+        lines = originalRender.call(this, contentWidth);
       }
-    }
 
-    return result;
+      if (lines.length === 0) return lines;
+
+      const accentColor = (s: string) => fg(THEME.accent, s);
+      const assistantLabel = ICONS.assistantLabel;
+      const prefix = ICONS.assistantTurn + " ";
+
+      const result: string[] = [];
+      result.push(accentColor(truncateToWidth(prefix + assistantLabel, width - 4)));
+      for (const line of lines) {
+        result.push(line);
+      }
+
+      if (this.isStreaming) {
+        const lastIdx = result.length - 1;
+        if (lastIdx >= 0) {
+          const frame = getGlobalFrame();
+          const pulse = Math.sin(frame * 0.15) * 0.5 + 0.5;
+          const brightness = Math.round(160 + pulse * 95);
+          const cursor = `\x1b[38;2;${brightness};${brightness};${brightness}m\u2588\x1b[0m`;
+          result[lastIdx] = result[lastIdx] + cursor;
+        }
+      }
+
+      return result;
+    } catch (err: any) {
+      logger.error(`[TUI] AssistantMessage rendering failed: ${err.message}`);
+      return originalRender.call(this, width);
+    }
   };
 }
 
@@ -520,6 +548,16 @@ export function applyLivePatches(tui: any, themeInstance: any) {
   if (livePatchesApplied) return;
   livePatchesApplied = true;
   debugLog("APPLYING LIVE ESM PATCHES");
+
+  setReRenderCallback(() => {
+    if (activeTuiInstance) {
+      try {
+        activeTuiInstance.requestRender();
+      } catch (e: any) {
+        logger.warn(`Failed to request render: ${e.message}`);
+      }
+    }
+  });
 
   const TuiPrototype = Object.getPrototypeOf(tui);
   const ContainerPrototype = Object.getPrototypeOf(TuiPrototype);

@@ -31,6 +31,12 @@ export function highlightBlock(code: string, lang: string): string {
   return cached || code;
 }
 
+let triggerReRender: (() => void) | null = null;
+
+export function setReRenderCallback(cb: () => void) {
+  triggerReRender = cb;
+}
+
 export async function highlightAsync(code: string, lang: string): Promise<string> {
   if (!lang) return code;
   const key = cacheKey(code, lang);
@@ -43,6 +49,11 @@ export async function highlightAsync(code: string, lang: string): Promise<string
   try {
     const result = hl(code, lang);
     highlightCache.set(key, result);
+    if (triggerReRender) {
+      setImmediate(() => {
+        if (triggerReRender) triggerReRender();
+      });
+    }
     return result;
   } catch {
     return code;

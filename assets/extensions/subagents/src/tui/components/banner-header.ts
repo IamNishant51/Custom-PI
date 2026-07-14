@@ -42,22 +42,25 @@ export class BannerHeader {
     }
 
     const bannerColors = interpolateColors(THEME.banner, BANNER.length);
+    const frame = Math.floor(Date.now() / 100);
+    const shimmerT = (Math.sin(frame * 0.05) * 0.5 + 0.5);
+    const shimmerX = Math.floor(shimmerT * (BANNER[0].length - 10));
+
     for (let i = 0; i < BANNER.length; i++) {
       const color = bannerColors[i] || bannerColors[bannerColors.length - 1];
-      lines.push(fg(color, BANNER[i]));
-    }
+      const rawLine = BANNER[i];
+      const ch = rawLine[shimmerX];
 
-    const frame = Math.floor(Date.now() / 100);
-    if (frame > 0) {
-      const shimmerT = (Math.sin(frame * 0.05) * 0.5 + 0.5);
-      const shimmerX = Math.floor(shimmerT * (BANNER[0].length - 10));
-      for (let i = 0; i < BANNER.length; i++) {
-        const ch = BANNER[i][shimmerX];
-        if (ch && ch !== " ") {
-          const line = lines[i];
-          const colored = `\x1b[38;2;255;255;255m${ch}\x1b[0m`;
-          lines[i] = line.slice(0, shimmerX) + colored + line.slice(shimmerX + 1);
-        }
+      if (frame > 0 && ch && ch !== " ") {
+        const left = rawLine.slice(0, shimmerX);
+        const right = rawLine.slice(shimmerX + 1);
+        const [r, g, b] = hexToRgb(color);
+        const coloredLeft = left ? `\x1b[38;2;${r};${g};${b}m${left}` : "";
+        const coloredMid = `\x1b[38;2;255;255;255m\x1b[1m${ch}`;
+        const coloredRight = right ? `\x1b[38;2;${r};${g};${b}m${right}` : "";
+        lines.push(coloredLeft + coloredMid + coloredRight + "\x1b[0m");
+      } else {
+        lines.push(fg(color, rawLine));
       }
     }
 

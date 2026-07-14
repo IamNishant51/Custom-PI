@@ -99,6 +99,9 @@ function renderCode(code: string, lang: string, lines: string[], width: number):
       result.push(`  ${line}`);
     }
   } else {
+    if (lang) {
+      highlightAsync(code, lang);
+    }
     for (const line of lines) {
       const trimmed = line.length > innerWidth ? line.slice(0, innerWidth) : line;
       result.push(`  ${dim(trimmed)}`);
