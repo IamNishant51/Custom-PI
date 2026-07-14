@@ -39,6 +39,7 @@ let renderedComponents: Array<{
   startLine: number;
   endLine: number;
   reasoningToggleLines: number[];
+  renderedLines: string[];
 }> = [];
 let activeTuiInstance: any = null;
 
@@ -609,6 +610,10 @@ function patchFooterComponent(proto: any) {
   };
 }
 
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\].*?\x1b\\/g, "").trim();
+}
+
 function handleTerminalMouseClick(col: number, row: number) {
   const logFile = path.join(os.homedir(), ".pi", "agent", "mouse-debug.log");
   const log = (msg: string) => {
@@ -623,7 +628,6 @@ function handleTerminalMouseClick(col: number, row: number) {
 
   const lineIndex = row - 1;
   log(`lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
-  log(`Rendered components: ${JSON.stringify(renderedComponents.map(rc => ({ name: rc.component.constructor?.name, start: rc.startLine, end: rc.endLine })))}`);
 
   const clicked = renderedComponents.find(rc => {
     const absStart = chatContainerStartLine + rc.startLine;
@@ -705,7 +709,7 @@ export function applyContainerPatch(containerProto: any): void {
           const reasoningToggleLines = (child._thinkingToggleLineIndices && Array.isArray(child._thinkingToggleLineIndices))
             ? [...child._thinkingToggleLineIndices]
             : [];
-          renderedComponents.push({ component: child, startLine, endLine, reasoningToggleLines });
+          renderedComponents.push({ component: child, startLine, endLine, reasoningToggleLines, renderedLines: childLines });
         }
 
         if (renderable.includes(child)) {
@@ -733,33 +737,29 @@ function patchTui(proto: any) {
   proto.render = function (this: any, width: number) {
     activeTuiInstance = this;
 
-    let offset = 0;
-    for (const child of this.children) {
-      if (!child) continue;
-      const isChat = child.children && child.children.some((c: any) =>
-        c.constructor?.name === "UserMessageComponent" ||
-        c.constructor?.name === "AssistantMessageComponent" ||
-        c.constructor?.name === "ToolExecutionComponent" ||
-        c.children?.some((cc: any) =>
-          cc.constructor?.name === "UserMessageComponent" ||
-          cc.constructor?.name === "AssistantMessageComponent" ||
-          cc.constructor?.name === "ToolExecutionComponent"
-        )
-      );
-      if (isChat) {
-        chatContainerStartLine = offset;
-        break;
-      }
-      const childLines = child.render(width);
-      offset += childLines.length;
-    }
-
     const lines = originalTuiRender.call(this, width);
     const cleaned = lines.map(stripBackgroundColors);
-    const filtered = cleaned.filter((l: string) => {
+    const filtered = cleaned.map((l: string) => {
       const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
-      return plain !== "Dashboard active" && !plain.includes("Dashboard active");
+      if (plain === "Dashboard active" || plain.includes("Dashboard active")) return "";
+      return l;
     });
+
+    // Compute chatContainerStartLine by finding the first rendered component
+    // in the filtered output. This avoids the stale-pass vs. filtered mismatch.
+    chatContainerStartLine = 0;
+    if (renderedComponents.length > 0) {
+      const firstComp = renderedComponents[0];
+      if (firstComp.renderedLines.length > 0) {
+        const target = stripAnsi(firstComp.renderedLines[0]);
+        for (let i = 0; i < filtered.length; i++) {
+          if (stripAnsi(filtered[i]) === target) {
+            chatContainerStartLine = i - firstComp.startLine;
+            break;
+          }
+        }
+      }
+    }
 
     if (showHelpOverlay) {
       overlayHelp(filtered, width);
