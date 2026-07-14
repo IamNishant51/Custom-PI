@@ -169,8 +169,8 @@ function stripBackgroundColors(str: string): string {
         newParts.push(parts[i]);
         continue;
       }
-      if ((val >= 40 && val <= 47) || (val >= 100 && val <= 107)) {
-        // Skip standard background colors
+      if ((val >= 40 && val <= 47) || (val >= 100 && val <= 107) || val === 49 || val === 109) {
+        // Skip standard background colors and bg resets
         continue;
       }
       if (val === 48) {
@@ -194,37 +194,26 @@ function patchUserMessage(proto: any) {
   userMessagePatched = true;
   debugLog("PATCHING USER MESSAGE PROTOTYPE");
 
-  const originalRender = proto.render;
   proto.render = function (this: any, width: number) {
     try {
-      const markdownComponent = findMarkdownComponent(this);
-      if (!markdownComponent) {
-        return originalRender.call(this, width);
-      }
+      const rawText: string = this.text || "";
+      if (!rawText.trim()) return [];
 
-      const contentWidth = Math.max(20, width - 8);
-      const rawText = markdownComponent.content || markdownComponent.text || "";
-      const mdLines = rawText
-        ? renderMarkdown(rawText, { width: contentWidth })
-        : markdownComponent.render(contentWidth);
-
+      const contentWidth = Math.max(20, width - 4);
+      const mdLines = renderMarkdown(rawText.trim(), { width: contentWidth });
       if (mdLines.length === 0) return [];
 
-      const maxLineLen = Math.max(...mdLines.map((l: string) => stripAnsi(l).length));
-      const indentVal = Math.max(0, width - maxLineLen - 4);
-      const indentSpaces = " ".repeat(indentVal);
-
       const lines: string[] = [];
-      lines.push(OSC133_ZONE_START + indentSpaces + "\x1b[36m>\x1b[0m " + (mdLines[0] || ""));
+      lines.push(OSC133_ZONE_START + "\x1b[36m>\x1b[0m " + (mdLines[0] || ""));
       for (let i = 1; i < mdLines.length; i++) {
-        lines.push(indentSpaces + "  " + (mdLines[i] || ""));
+        lines.push("  " + (mdLines[i] || ""));
       }
       lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
 
       return truncateLines(lines, width);
     } catch (err: any) {
       logger.error(`[TUI] UserMessage rendering failed: ${err.message}`);
-      return originalRender.call(this, width);
+      return [];
     }
   };
 }
@@ -242,13 +231,13 @@ function patchAssistantMessage(proto: any) {
 
   proto.render = function (this: any, width: number) {
     try {
-      const contentWidth = Math.max(20, width - 8);
+      const contentWidth = Math.max(20, width - 4);
       let lines: string[] = [];
 
       if (this.lastMessage && Array.isArray(this.lastMessage.content)) {
         for (const c of this.lastMessage.content) {
           if (c.type === "text" && c.text.trim()) {
-            const textLines = renderMarkdown(c.text.trim(), { width: contentWidth, streaming: !!this.isStreaming });
+            const textLines = renderMarkdown(c.text.trim(), { width: contentWidth - 2, streaming: !!this.isStreaming });
             if (lines.length > 0) lines.push("");
             lines.push(...textLines);
           } else if (c.type === "thinking" && c.thinking.trim()) {
@@ -256,19 +245,19 @@ function patchAssistantMessage(proto: any) {
             if (lines.length > 0) lines.push("");
 
             if (isCollapsed) {
-              lines.push(`  \x1b[2m\x1b[3m▶ Reasoning  (click to expand)\x1b[0m`);
+              lines.push(`\x1b[2m\x1b[3m▶ Reasoning  (click to expand)\x1b[0m`);
             } else {
-              lines.push(`  \x1b[2m▼ Reasoning\x1b[0m`);
+              lines.push(`\x1b[2m▼ Reasoning\x1b[0m`);
               const innerWidth = contentWidth - 4;
-              const topBorder = `  \x1b[2m╭${"─".repeat(innerWidth)}╮\x1b[0m`;
-              const bottomBorder = `  \x1b[2m╰${"─".repeat(innerWidth)}╯\x1b[0m`;
+              const topBorder = `\x1b[2m╭${"─".repeat(innerWidth)}╮\x1b[0m`;
+              const bottomBorder = `\x1b[2m╰${"─".repeat(innerWidth)}╯\x1b[0m`;
               lines.push(topBorder);
               
               const thinkingLines = renderMarkdown(c.thinking.trim(), { width: innerWidth, streaming: !!this.isStreaming });
               for (const line of thinkingLines) {
                 const plainLine = stripAnsi(line);
                 const padding = " ".repeat(Math.max(0, innerWidth - plainLine.length));
-                lines.push(`  \x1b[2m│\x1b[0m \x1b[2m${line}${padding}\x1b[0m \x1b[2m│\x1b[0m`);
+                lines.push(`\x1b[2m│\x1b[0m \x1b[2m${line}${padding}\x1b[0m \x1b[2m│\x1b[0m`);
               }
               lines.push(bottomBorder);
             }
@@ -280,15 +269,10 @@ function patchAssistantMessage(proto: any) {
 
       if (lines.length === 0) return lines;
 
-      const accentColor = (s: string) => fg(THEME.accent, s);
-      const assistantLabel = ICONS.assistantLabel;
-      const prefix = ICONS.assistantTurn + " ";
-
       const result: string[] = [];
-      result.push("  " + accentColor(truncateToWidth(prefix + assistantLabel, width - 6)));
-      result.push(""); // blank line
-      for (const line of lines) {
-        result.push("  " + line);
+      result.push("● " + (lines[0] || ""));
+      for (let i = 1; i < lines.length; i++) {
+        result.push("  " + lines[i]);
       }
 
       if (this.isStreaming) {
@@ -308,6 +292,40 @@ function patchAssistantMessage(proto: any) {
       return originalRender.call(this, width);
     }
   };
+}
+
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  list_dir: "List",
+  view_file: "Read",
+  run_command: "Bash",
+  write_to_file: "Write",
+  replace_file_content: "Update",
+  multi_replace_file_content: "Update",
+  grep_search: "Search",
+  search_web: "WebSearch",
+  read_url_content: "Fetch",
+  generate_image: "Image",
+  bash: "Bash",
+  read: "Read",
+  write: "Write",
+  edit: "Update",
+  str_replace: "Update",
+};
+
+function toPascalCase(name: string): string {
+  return name.split(/[_\s-]+/).map(w => w[0].toUpperCase() + w.slice(1)).join("");
+}
+
+function getDisplayToolName(rawName: string): string {
+  return TOOL_DISPLAY_NAMES[rawName] ?? toPascalCase(rawName);
+}
+
+function formatArgInParens(toolName: string, args: any): string {
+  const primary = getPrimaryArg(toolName, args);
+  if (!primary) return "";
+  const cleanPath = primary.replace(/^\/home\/[^/]+\/Desktop\/pi-custom-pack\//, "");
+  const truncated = cleanPath.length > 60 ? "…" + cleanPath.slice(-57) : cleanPath;
+  return `\x1b[2m(${truncated})\x1b[0m`;
 }
 
 function patchToolExecution(proto: any) {
@@ -331,50 +349,67 @@ function patchToolExecution(proto: any) {
     const durationMs = (this.endTime || Date.now()) - (this.startTime || Date.now());
     const durationSec = (durationMs / 1000).toFixed(1);
 
-    let headerLine = "";
+    const displayName = getDisplayToolName(this.toolName);
+    const argsStr = formatArgInParens(this.toolName, this.args);
+
     if (isRunning) {
-      const frame = getGlobalFrame();
-      const spinnerChar = ICONS.spinnerDots[frame % ICONS.spinnerDots.length];
-      const statusDot = `\x1b[33m${spinnerChar}\x1b[0m`;
-      const primaryStr = getPrimaryArg(this.toolName, this.args);
-      const argText = primaryStr ? `  \x1b[2m"${primaryStr.slice(0, 60)}"\x1b[0m` : "";
-      headerLine = `  ${statusDot} \x1b[2m\x1b[37m${this.toolName}\x1b[0m${argText}`;
-      return [headerLine];
+      const dot = `\x1b[32m●\x1b[0m`;
+      return [`${dot} \x1b[1m${displayName}\x1b[0m${argsStr}`];
     }
 
     if (isError) {
-      const statusDot = `\x1b[31m✗\x1b[0m`;
+      const dot = `\x1b[31m●\x1b[0m`;
       const errorMsg = this.result?.details?.message || this.result?.details || "failed";
-      headerLine = `  ${statusDot} \x1b[2m\x1b[37m${this.toolName}\x1b[0m  \x1b[2m(${durationSec}s)\x1b[0m  \x1b[31m${errorMsg}\x1b[0m`;
+      const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
+      const errorLine = `  \x1b[31m└\x1b[0m \x1b[31m${errorMsg}\x1b[0m`;
       
       const contentWidth = Math.max(10, width - 8);
       let rawLines = originalToolRender.call(this, contentWidth);
       rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
       rawLines = rawLines.filter((l: string) => l.trim() !== "");
-      const outputLines = rawLines.slice(0, 10).map((l: string) => `  \x1b[31m│\x1b[0m  \x1b[2m${l}\x1b[0m`);
+      const outputLines = rawLines.slice(0, 10).map((l: string) => `    \x1b[31m│\x1b[0m  \x1b[2m${l}\x1b[0m`);
       
-      return [headerLine, ...outputLines];
+      return [headerLine, errorLine, ...outputLines];
     }
 
-    const statusDot = `\x1b[32m✓\x1b[0m`;
-    headerLine = `  ${statusDot} \x1b[2m\x1b[37m${this.toolName}\x1b[0m  \x1b[2m(${durationSec}s)\x1b[0m`;
+    const dot = `\x1b[32m●\x1b[0m`;
+    const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
 
-    const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
-    if (isEditTool) {
-      const contentWidth = Math.max(10, width - 8);
-      let rawLines = originalToolRender.call(this, contentWidth);
-      rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
-      rawLines = rawLines.filter((l: string) => l.trim() !== "");
+    const contentWidth = Math.max(10, width - 8);
+    let rawLines = originalToolRender.call(this, contentWidth);
+    rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
+    rawLines = rawLines.filter((l: string) => l.trim() !== "");
+
+    let firstLine = rawLines[0] || "";
+    const cleanFirstLine = firstLine.replace(/^(Read|Updated|Listed)\s+.*?\s+with\s+/, "$1 ");
+    const resultSummary = cleanFirstLine ? cleanFirstLine : "Completed";
+
+    const resultLine = `  \x1b[2m└\x1b[0m ${resultSummary} \x1b[2m(ctrl+r to expand)\x1b[0m`;
+
+    const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit" || this.toolName === "replace_file_content" || this.toolName === "multi_replace_file_content";
+    
+    if (isEditTool && rawLines.length > 0) {
+      const diffLines = rawLines.filter((l: string) => {
+        const plain = stripAnsi(l).trim();
+        return plain.startsWith("+") || plain.startsWith("-") || /^\d+\s/.test(plain);
+      });
       
-      const added = rawLines.filter((l: string) => l.trim().startsWith("+") && !l.trim().startsWith("+++")).length;
-      const removed = rawLines.filter((l: string) => l.trim().startsWith("-") && !l.trim().startsWith("---")).length;
-      if (added > 0 || removed > 0) {
-        const diffSummary = `  \x1b[2m│\x1b[0m  \x1b[32m+${added} lines\x1b[0m  \x1b[31m-${removed} lines\x1b[0m`;
-        return [headerLine, diffSummary];
+      if (diffLines.length > 0) {
+        const outputLines = diffLines.slice(0, 15).map((l: string) => {
+          const plain = stripAnsi(l);
+          if (plain.startsWith("+") && !plain.startsWith("+++")) {
+            return `    \x1b[32m${l}\x1b[0m`;
+          } else if (plain.startsWith("-") && !plain.startsWith("---")) {
+            return `    \x1b[31m${l}\x1b[0m`;
+          } else {
+            return `    \x1b[2m${l}\x1b[0m`;
+          }
+        });
+        return [headerLine, resultLine, ...outputLines];
       }
     }
 
-    return [headerLine];
+    return [headerLine, resultLine];
   };
 }
 
@@ -384,14 +419,11 @@ function patchCustomEditor(proto: any) {
   debugLog("PATCHING CUSTOM EDITOR PROTOTYPE");
 
   proto.render = function (this: any, width: number) {
-    const paddingX = this.paddingX || 0;
-    const contentWidth = Math.max(1, width - paddingX * 2);
-    const prefixWidth = 2;
-    const contentWidthForText = Math.max(1, contentWidth - prefixWidth);
-    const layoutWidth = Math.max(1, contentWidthForText - (paddingX ? 0 : 1));
-    this.lastWidth = layoutWidth;
+    const boxWidth = Math.max(10, width - 2);
+    const contentWidthForText = boxWidth - 4; // internal content width
+    this.lastWidth = contentWidthForText;
 
-    const layoutLines = this.layoutText(layoutWidth);
+    const layoutLines = this.layoutText(contentWidthForText);
     const terminalRows = this.tui.terminal.rows;
     const maxVisibleLines = Math.max(5, Math.floor(terminalRows * 0.3));
 
@@ -408,24 +440,20 @@ function patchCustomEditor(proto: any) {
 
     const visibleLines = layoutLines.slice(this.scrollOffset, this.scrollOffset + maxVisibleLines);
     const result: string[] = [];
-    const leftPadding = " ".repeat(paddingX);
-    const rightPadding = leftPadding;
     const dimFn = (s: string) => fg(THEME.muted, s);
 
-    const horizontalStr = "\u2500".repeat(width);
-    const horizontal = dimFn(horizontalStr);
-
+    // Top border
+    let topBorder = "";
     if (this.scrollOffset > 0) {
-      const indicator = `\u2500\u2500\u2500 \u2191 ${this.scrollOffset} more `;
-      const remaining = width - measureWidth(stripAnsi(indicator));
-      if (remaining >= 0) {
-        result.push(dimFn(indicator + "\u2500".repeat(remaining)));
-      } else {
-        result.push(dimFn(truncateToWidth(indicator, width)));
-      }
+      const label = ` ↑ ${this.scrollOffset} more `;
+      const lineLen = boxWidth - 2 - label.length;
+      const leftBar = Math.max(0, Math.floor(lineLen / 2));
+      const rightBar = Math.max(0, lineLen - leftBar);
+      topBorder = " " + dimFn("┌" + "─".repeat(leftBar) + label + "─".repeat(rightBar) + "┐") + " ";
     } else {
-      result.push(horizontal);
+      topBorder = " " + dimFn("┌" + "─".repeat(boxWidth - 2) + "┐") + " ";
     }
+    result.push(topBorder);
 
     const emitCursorMarker = this.focused && !this.autocompleteState;
     const prefixStr = "\x1b[36m>\x1b[0m ";
@@ -445,7 +473,6 @@ function patchCustomEditor(proto: any) {
       const layoutLine = visibleLines[i];
       let displayText = layoutLine.text;
       let lineVisibleWidth = vw(layoutLine.text);
-      let cursorInPadding = false;
 
       if (isEmpty) {
         const marker = emitCursorMarker ? CURSOR_MARKER : "";
@@ -466,32 +493,38 @@ function patchCustomEditor(proto: any) {
           const cursor = "\x1b[7m \x1b[0m";
           displayText = before + marker + cursor;
           lineVisibleWidth = lineVisibleWidth + 1;
-          if (lineVisibleWidth > contentWidthForText && paddingX > 0) {
-            cursorInPadding = true;
-          }
         }
       }
 
       const linePrefix = (i === 0 && this.scrollOffset === 0) ? prefixStr : indentStr;
       const padding = " ".repeat(Math.max(0, contentWidthForText - lineVisibleWidth));
-      const lineRightPadding = cursorInPadding ? rightPadding.slice(1) : rightPadding;
-      result.push(`${leftPadding}${linePrefix}${displayText}${padding}${lineRightPadding}`);
+      
+      // Constructed line: " │ " + prefix + text + padding + " │ "
+      result.push(" " + dimFn("│ ") + linePrefix + displayText + padding + dimFn(" │") + " ");
     }
 
+    // Bottom border
     const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
+    let bottomBorder = "";
     if (linesBelow > 0) {
-      const indicator = `\u2500\u2500\u2500 \u2193 ${linesBelow} more `;
-      const remaining = width - measureWidth(stripAnsi(indicator));
-      result.push(dimFn(indicator + "\u2500".repeat(Math.max(0, remaining))));
+      const label = ` ↓ ${linesBelow} more `;
+      const lineLen = boxWidth - 2 - label.length;
+      const leftBar = Math.max(0, Math.floor(lineLen / 2));
+      const rightBar = Math.max(0, lineLen - leftBar);
+      bottomBorder = " " + dimFn("└" + "─".repeat(leftBar) + label + "─".repeat(rightBar) + "┘") + " ";
+    } else {
+      bottomBorder = " " + dimFn("└" + "─".repeat(boxWidth - 2) + "┘") + " ";
     }
+    result.push(bottomBorder);
 
     if (this.autocompleteState && this.autocompleteList) {
       const autocompleteResult = this.autocompleteList.render(contentWidthForText);
       for (const line of autocompleteResult) {
         const lineWidth = vw(line);
         const linePadding = " ".repeat(Math.max(0, contentWidthForText - lineWidth));
-        result.push(`${leftPadding}${indentStr}${line}${linePadding}${rightPadding}`);
+        result.push(" " + dimFn("│ ") + indentStr + line + linePadding + dimFn(" │") + " ");
       }
+      result.push(bottomBorder); // Re-add bottom border under autocomplete
     }
 
     return result;
@@ -532,21 +565,36 @@ function patchFooterComponent(proto: any) {
     const totalTokens = totalInput + totalOutput;
     const modelName = state.model?.id || "gemma-4-e4b";
 
-    const mode = appMode;
-    const modeColour = mode === "agent" ? "\x1b[32m" : "\x1b[33m";
-    const modeSymbol = mode === "agent" ? "●" : "◆";
-    const modeText = mode === "agent" ? "AGENT" : "PLAN";
+    const runningTool = activeTuiInstance?.children?.find((c: any) =>
+      c && c.constructor?.name === "ToolExecutionComponent" && c.isPartial
+    );
+    const isAssistantRunning = activeTuiInstance?.children?.some((c: any) =>
+      c && c.constructor?.name === "AssistantMessageComponent" && c.isStreaming
+    );
+    const isRunning = runningTool || isAssistantRunning;
 
-    const left = `${modeColour}${modeSymbol} ${modeText}\x1b[0m`;
-    const mid = `\x1b[2m·\x1b[0m  \x1b[36m${modelName}\x1b[0m  \x1b[2m·  ${totalTokens.toLocaleString()} tok  ·  $${totalCost.toFixed(3)}\x1b[0m`;
+    let left = "";
+    if (isRunning) {
+      const symbol = `\x1b[33m✳\x1b[0m`;
+      const action = runningTool ? `${getDisplayToolName(runningTool.toolName)}...` : "Thinking...";
+      let elapsedStr = "";
+      if (runningTool && runningTool.startTime) {
+        const secs = Math.floor((Date.now() - runningTool.startTime) / 1000);
+        elapsedStr = `${secs}s · `;
+      }
+      left = `${symbol} \x1b[1m${action}\x1b[0m \x1b[2m(${elapsedStr}✳ ${totalTokens.toLocaleString()} tokens · esc to interrupt)\x1b[0m`;
+    } else {
+      const symbol = `\x1b[32m●\x1b[0m`;
+      left = `${symbol} \x1b[2m${modelName} · ${totalTokens.toLocaleString()} tok · $${totalCost.toFixed(3)}\x1b[0m`;
+    }
+
     const right = `\x1b[2mTab to toggle  ·  ? for help\x1b[0m`;
 
-    const fullLeft = `${left}  ${mid}`;
-    const leftVisible = stripAnsi(fullLeft).length;
+    const leftVisible = stripAnsi(left).length;
     const rightVisible = stripAnsi(right).length;
     const spaces = Math.max(1, width - leftVisible - rightVisible);
 
-    return [fullLeft + " ".repeat(spaces) + right];
+    return [left + " ".repeat(spaces) + right];
   };
 }
 
@@ -601,28 +649,41 @@ export function applyContainerPatch(containerProto: any): void {
 
       renderedComponents = [];
       const lines: string[] = [];
-      let prevWasRenderable = false;
+      let prevWasMessageOrTool = false;
+      let prevType: string | null = null;
+
       for (const child of this.children) {
         if (!child) continue;
-        const startLine = lines.length;
         const childLines = child.render(width);
+        if (childLines.length === 0) continue;
+
+        const currentType = child.constructor?.name;
+        const isMessageOrTool = currentType === "UserMessageComponent" ||
+                               currentType === "AssistantMessageComponent" ||
+                               currentType === "ToolExecutionComponent";
+
+        if (prevWasMessageOrTool && isMessageOrTool) {
+          // Do not put blank lines between consecutive ToolExecutionComponents
+          if (prevType === "ToolExecutionComponent" && currentType === "ToolExecutionComponent") {
+            // No blank line
+          } else {
+            lines.push("");
+          }
+        }
+
+        const startLine = lines.length;
         const endLine = startLine + childLines.length;
 
-        if (prevWasRenderable) lines.push("");
-
-        const offsetStart = prevWasRenderable ? startLine + 1 : startLine;
-        const offsetEnd = offsetStart + childLines.length;
-
-        if (child.constructor?.name === "UserMessageComponent" || child.constructor?.name === "AssistantMessageComponent") {
-          renderedComponents.push({ component: child, startLine: offsetStart, endLine: offsetEnd });
+        if (currentType === "UserMessageComponent" || currentType === "AssistantMessageComponent") {
+          renderedComponents.push({ component: child, startLine, endLine });
         }
 
         if (renderable.includes(child)) {
           treeCtx.index++;
-          prevWasRenderable = true;
-        } else {
-          prevWasRenderable = false;
         }
+
+        prevWasMessageOrTool = isMessageOrTool;
+        prevType = currentType;
 
         for (const line of childLines) {
           lines.push(line);
@@ -657,7 +718,8 @@ function patchTui(proto: any) {
     }
 
     const lines = originalTuiRender.call(this, width);
-    const filtered = lines.filter((l: string) => {
+    const cleaned = lines.map(stripBackgroundColors);
+    const filtered = cleaned.filter((l: string) => {
       const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
       return plain !== "Dashboard active" && !plain.includes("Dashboard active");
     });
@@ -756,6 +818,16 @@ export function applyLivePatches(tui: any, themeInstance: any) {
 
 setImmediate(() => {
   try {
+    // Monkey-patch Theme class to disable background colors
+    try {
+      const piThemeModule = require("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+      if (piThemeModule && piThemeModule.Theme) {
+        piThemeModule.Theme.prototype.bg = function(this: any, color: string, text: string) {
+          return text;
+        };
+      }
+    } catch {}
+
     applyContainerPatch(Container.prototype);
     patchUserMessage(UserMessageComponent.prototype);
     patchAssistantMessage(AssistantMessageComponent.prototype);
