@@ -31,6 +31,21 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
+function hueToRgb(hue: number, saturation: number): string {
+  const h = ((hue % 360) + 360) % 360;
+  const c = saturation;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = 0.15;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  return `${Math.round((r + m) * 255)},${Math.round((g + m) * 255)},${Math.round((b + m) * 255)}`;
+}
+
 let treeCtx: { index: number; total: number } = { index: 0, total: 0 };
 let treeCtxActive = false;
 
@@ -108,12 +123,21 @@ function patchToolExecution(proto: any) {
     const isRunning = this.isPartial;
     const isError = this.result?.isError;
 
-    const dotChar = isRunning && (getGlobalFrame() % 6) < 3 ? "\u25cb" : "\u25cf";
-    const dotColor = isRunning
-      ? `\x1b[38;2;255;165;0m`
-      : isError
-        ? `\x1b[38;2;255;80;80m`
-        : `\x1b[38;2;80;200;120m`;
+    let dotColor: string;
+    let dotChar: string;
+    if (isRunning) {
+      const frame = getGlobalFrame();
+      const hue = (frame * 3) % 360;
+      dotColor = `\x1b[38;2;${hueToRgb(hue, 0.8)}m`;
+      const blinkPhase = Math.sin(frame * 0.2);
+      dotChar = blinkPhase > 0 ? "\u25cf" : "\u25cb";
+    } else if (isError) {
+      dotColor = `\x1b[38;2;255;80;80m`;
+      dotChar = "\u25cf";
+    } else {
+      dotColor = `\x1b[38;2;80;200;120m`;
+      dotChar = "\u25cf";
+    }
     const statusDot = `${dotColor}${dotChar}\x1b[0m`;
     const yellow = (s: string) => `\x1b[38;2;220;180;60m${s}\x1b[0m`;
 
@@ -213,7 +237,11 @@ function patchAssistantMessage(proto: any) {
     if (this.isStreaming) {
       const lastIdx = result.length - 1;
       if (lastIdx >= 0) {
-        result[lastIdx] = result[lastIdx] + dimFn("\u2588");
+        const frame = getGlobalFrame();
+        const pulse = Math.sin(frame * 0.15) * 0.5 + 0.5;
+        const brightness = Math.round(160 + pulse * 95);
+        const cursor = `\x1b[38;2;${brightness};${brightness};${brightness}m\u2588\x1b[0m`;
+        result[lastIdx] = result[lastIdx] + cursor;
       }
     }
 

@@ -23,7 +23,6 @@ export const MEMORY_TTL_DAYS = 180;
 export const SKILL_TTL_DAYS = 365;
 export const CHECKPOINT_STALE_MS = 3600_000;
 
-export let globalVerbCycler: ReturnType<typeof setInterval> | null = null;
 export let appMode: "agent" | "plan" = "agent";
 export let unsubTabHandler: (() => void) | null = null;
 export let isProcessingBackground = false;
@@ -31,10 +30,6 @@ export let backgroundDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 export let turnCounter = 0;
 export const clonedRepos = new Set<string>();
 export const BACKGROUND_DEBOUNCE_MS = 2000;
-
-export function setGlobalVerbCycler(v: ReturnType<typeof setInterval> | null) {
-  globalVerbCycler = v;
-}
 
 export function setAppMode(m: "agent" | "plan") {
   appMode = m;

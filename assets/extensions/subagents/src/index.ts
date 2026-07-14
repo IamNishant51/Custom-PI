@@ -71,7 +71,7 @@ import { McpCliConnection } from "./tools/mcp-client";
 // Shared mutable state — extracted into modular file
 import {
   CHECKPOINT_STALE_MS, COMPACT_RESERVE_RATIO, BACKGROUND_DEBOUNCE_MS,
-  globalVerbCycler, appMode, unsubTabHandler,
+  appMode, unsubTabHandler,
 } from "./runtime/agent-state";
 
 function applyRuntimePatches() {

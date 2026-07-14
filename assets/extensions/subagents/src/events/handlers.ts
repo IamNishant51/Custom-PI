@@ -14,17 +14,18 @@ import { detectStack } from "../stack-detector";
 import { buildMemoryContextBlock } from "../memory-retrieval";
 import { contextMonitor } from "../context-monitor";
 import { coalesceMessages } from "../swarm-router";
-import { stopGlobalAnimation, activeTrackers, activeInvalidators } from "../animations";
+import { stopGlobalAnimation, activeTrackers, activeInvalidators, startGlobalAnimation, tickGlobalAnimation } from "../animations";
+import { AnimManager } from "../tui/anim-manager";
 import { stopCronJobs } from "../cron-scheduler";
 import { teardownWidget } from "../tui/setup-widget";
 import { serializeMessageContent, extractToolName, extractToolArgs } from "../utils/serialize-message";
 import { shutdownAscension } from "../ascension-bootstrap";
 import { bus, Topics } from "../event-bus/event-bus";
 import {
-  globalVerbCycler, appMode, unsubTabHandler, clonedRepos,
+  appMode, unsubTabHandler, clonedRepos,
   backgroundDebounceTimer, turnCounter,
   BACKGROUND_DEBOUNCE_MS,
-  setAppMode, setGlobalVerbCycler, setUnsubTabHandler,
+  setAppMode, setUnsubTabHandler,
   setBackgroundDebounceTimer, incrementTurnCounter,
   deriveSessionId, runBackgroundProcessing,
   checkAndStartCron, checkAndSuggestWorkflows,
@@ -96,8 +97,12 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       if (sid) ensureSession(sid);
     } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
 
-    const megaFrames = ["◐", "◓", "◑", "◒"];
-    ctx.ui.setWorkingIndicator({ frames: megaFrames, intervalMs: 100 });
+    let animStopped = false;
+    const animManager = new AnimManager(
+      (msg) => { if (!animStopped) { try { ctx.ui.setWorkingMessage(msg); } catch { animStopped = true; } } },
+      (indicator) => { if (!animStopped) { try { indicator ? ctx.ui.setWorkingIndicator(indicator) : ctx.ui.setWorkingIndicator(); } catch { animStopped = true; } } },
+    );
+    (ctx as any).__animManager = animManager;
 
     try {
       const latest = await getLatestCheckpoint();
@@ -112,43 +117,48 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
     await checkAndSuggestWorkflows(ctx, pi);
 
+    animManager.start("requesting");
+    startGlobalAnimation();
+
+    const animFrameTimer = setInterval(() => tickGlobalAnimation(), 80);
+    if (animFrameTimer?.unref) animFrameTimer.unref();
+    (ctx as any).__animFrameTimer = animFrameTimer;
+
     if (ctx.signal) {
       ctx.signal.addEventListener("abort", () => {
         stopGlobalAnimation();
-        ctx.ui.setWorkingIndicator();
-        ctx.ui.setWorkingMessage();
+        animManager.stop();
         ctx.ui.setStatus("subagents", undefined);
-        if (globalVerbCycler) {
-          clearInterval(globalVerbCycler);
-          setGlobalVerbCycler(null);
-        }
       }, { once: true });
     }
 
-    if (!globalVerbCycler) {
-      let verbIdx = 0;
-      let charIdx = 0;
-      const STATUS_VERBS = ["analyzing", "synthesizing", "exploring", "architecting", "weaving", "scaffolding", "resonating", "iterating", "deep-diving", "aligning", "optimizing", "translating", "indexing", "reconfiguring", "bootstrapping", "calibrating", "orchestrating", "manifesting"];
-      setGlobalVerbCycler(setInterval(() => {
-        const verb = STATUS_VERBS[verbIdx % STATUS_VERBS.length];
-        charIdx++;
-        if (charIdx > verb.length + 3) {
-          verbIdx++;
-          charIdx = 0;
-        }
-        const showLen = Math.min(charIdx, verb.length);
-        const partial = verb.slice(0, showLen) + (showLen < verb.length ? "…" : "");
-        ctx.ui.setWorkingMessage(partial + "...");
-      }, 500));
-    }
-
     try {
+      let lastModeToggle = 0;
+      setUnsubTabHandler(ctx.ui.onTerminalInput((data: string) => {
+        if (data === "\t") {
+          setAppMode(appMode === "agent" ? "plan" : "agent");
+          lastModeToggle = Date.now();
+          ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
+          ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
+          return { consume: true };
+        }
+      }));
+
       ctx.ui.setWidget("app-mode-indicator", (_tui: any, _theme: any) => ({
         render(width: number): string[] {
           const mode = appMode === "agent" ? "AGENT" : "PLAN";
           const modeColor = appMode === "agent" ? "\x1b[32m" : "\x1b[33m";
           const reset = "\x1b[0m";
-          const label = `${modeColor}◆ ${mode} MODE${reset}`;
+          const elapsed = Date.now() - lastModeToggle;
+          let glow = "";
+          if (elapsed < 1200) {
+            const intensity = Math.max(0, 1 - elapsed / 1200);
+            const bright = Math.round(200 + intensity * 55);
+            glow = `\x1b[38;2;${bright};${bright};${bright}m`;
+          }
+          const label = glow
+            ? `${glow}◆ ${modeColor}${mode} MODE${reset}`
+            : `${modeColor}◆ ${mode} MODE${reset}`;
           const hint = "\x1b[2mTab\x1b[0m to toggle";
           const line = ` ${label}  │  ${hint}`;
           return [line];
@@ -179,7 +189,6 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     }, 5000);
 
     await checkAndStartCron(ctx, pi);
-    ctx.ui.notify("Subagent extensions active. All TUI enhancements applied to default UI.", "info");
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -538,10 +547,8 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     clonedRepos.clear();
 
     stopGlobalAnimation();
-    if (globalVerbCycler) {
-      clearInterval(globalVerbCycler);
-      setGlobalVerbCycler(null);
-    }
+    try { const am = (ctx as any).__animManager; if (am && typeof am.stop === "function") am.stop(); } catch {}
+    try { const t = (ctx as any).__animFrameTimer; if (t) clearInterval(t); } catch {}
     stopCronJobs();
     if (unsubTabHandler) { try { unsubTabHandler(); } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) } setUnsubTabHandler(null); }
     if (globalAnimTimer) { clearInterval(globalAnimTimer); globalAnimTimer = null; }
