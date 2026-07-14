@@ -145,6 +145,50 @@ function getPrimaryArg(toolName: string, args: any): string {
   return "";
 }
 
+function findMarkdownComponent(component: any): any {
+  if (!component) return null;
+  if (component.constructor?.name === "Markdown" || component.constructor?.name === "Text") {
+    return component;
+  }
+  if (component.children && component.children.length > 0) {
+    for (const child of component.children) {
+      const found = findMarkdownComponent(child);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function stripBackgroundColors(str: string): string {
+  return str.replace(/\x1b\[([0-9;]*)m/g, (match, p1) => {
+    const parts = p1.split(";");
+    const newParts: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const val = parseInt(parts[i], 10);
+      if (Number.isNaN(val)) {
+        newParts.push(parts[i]);
+        continue;
+      }
+      if ((val >= 40 && val <= 47) || (val >= 100 && val <= 107)) {
+        // Skip standard background colors
+        continue;
+      }
+      if (val === 48) {
+        // Truecolor or 256 background color
+        if (parts[i + 1] === "5") {
+          i = Math.min(parts.length - 1, i + 2);
+        } else if (parts[i + 1] === "2") {
+          i = Math.min(parts.length - 1, i + 4);
+        }
+        continue;
+      }
+      newParts.push(parts[i]);
+    }
+    if (newParts.length === 0) return "";
+    return `\x1b[${newParts.join(";")}m`;
+  });
+}
+
 function patchUserMessage(proto: any) {
   if (userMessagePatched) return;
   userMessagePatched = true;
@@ -153,7 +197,7 @@ function patchUserMessage(proto: any) {
   const originalRender = proto.render;
   proto.render = function (this: any, width: number) {
     try {
-      const markdownComponent = this.contentBox && this.contentBox.children && this.contentBox.children[0];
+      const markdownComponent = findMarkdownComponent(this);
       if (!markdownComponent) {
         return originalRender.call(this, width);
       }
@@ -305,7 +349,7 @@ function patchToolExecution(proto: any) {
       
       const contentWidth = Math.max(10, width - 8);
       let rawLines = originalToolRender.call(this, contentWidth);
-      rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
+      rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
       rawLines = rawLines.filter((l: string) => l.trim() !== "");
       const outputLines = rawLines.slice(0, 10).map((l: string) => `  \x1b[31m│\x1b[0m  \x1b[2m${l}\x1b[0m`);
       
@@ -319,7 +363,7 @@ function patchToolExecution(proto: any) {
     if (isEditTool) {
       const contentWidth = Math.max(10, width - 8);
       let rawLines = originalToolRender.call(this, contentWidth);
-      rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
+      rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
       rawLines = rawLines.filter((l: string) => l.trim() !== "");
       
       const added = rawLines.filter((l: string) => l.trim().startsWith("+") && !l.trim().startsWith("+++")).length;
