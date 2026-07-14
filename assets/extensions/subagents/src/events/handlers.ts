@@ -144,21 +144,27 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
 
     // Defer skill sync to avoid blocking TUI startup
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
+        const fsp = require("node:fs/promises");
         const skillsSrc = path.join(os.homedir(), ".pi", "agent", "extensions", "subagents", "skills");
-        if (fs.existsSync(skillsSrc)) {
-          const skillDirs = fs.readdirSync(skillsSrc, { withFileTypes: true }).filter(d => d.isDirectory());
-          for (const dir of skillDirs) {
-            const skillFile = path.join(skillsSrc, dir.name, "SKILL.md");
-            if (fs.existsSync(skillFile)) {
-              const targetDir = path.join(os.homedir(), ".pi", "skills", "agent", dir.name);
-              const targetFile = path.join(targetDir, "SKILL.md");
-              try {
-                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-                fs.copyFileSync(skillFile, targetFile);
-              } catch (err: any) { logger.warn(`Skill install failed: ${err.message}`); }
-            }
+        try {
+          await fsp.access(skillsSrc);
+        } catch {
+          return;
+        }
+        const skillDirs = await fsp.readdir(skillsSrc, { withFileTypes: true });
+        const dirs = skillDirs.filter((d: any) => d.isDirectory());
+        for (const dir of dirs) {
+          const skillFile = path.join(skillsSrc, dir.name, "SKILL.md");
+          try {
+            await fsp.access(skillFile);
+            const targetDir = path.join(os.homedir(), ".pi", "skills", "agent", dir.name);
+            const targetFile = path.join(targetDir, "SKILL.md");
+            await fsp.mkdir(targetDir, { recursive: true });
+            await fsp.copyFile(skillFile, targetFile);
+          } catch (err: any) {
+            // Ignored if file does not exist or copy failed
           }
         }
       } catch (e: any) { logger.warn(`Skill sync failed: ${e.message}`); }

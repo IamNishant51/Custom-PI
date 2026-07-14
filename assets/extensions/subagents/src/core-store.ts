@@ -65,7 +65,7 @@ export async function loadEntries(): Promise<MemoryEntry[]> {
     return cache;
   }
   try {
-    const raw = fs.readFileSync(SEMANTIC_FILE, "utf8");
+    const raw = await fsp.readFile(SEMANTIC_FILE, "utf8");
     await ensureEncryptionKey();
     const decrypted = decryptMemory(raw) || raw;
     const rawEntries: any[] = JSON.parse(decrypted);
@@ -90,7 +90,9 @@ export async function saveAllEntries(entries: MemoryEntry[]): Promise<void> {
   cacheTs = Date.now();
   const plaintext = JSON.stringify(entries, null, 2);
   const encrypted = await encryptMemory(plaintext);
-  safeWriteFileSync(SEMANTIC_FILE, encrypted);
+  const tmpPath = SEMANTIC_FILE + ".tmp." + Date.now();
+  await fsp.writeFile(tmpPath, encrypted, "utf8");
+  await fsp.rename(tmpPath, SEMANTIC_FILE);
 }
 
 export function loadSync(): MemoryEntry[] {
