@@ -791,6 +791,22 @@ function patchTui(proto: any) {
   };
 }
 
+let mouseBuffer = "";
+
+function processMouseChunk(raw: string) {
+  const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const button = parseInt(m[1], 10);
+    const col = parseInt(m[2], 10);
+    const row = parseInt(m[3], 10);
+    const isRelease = m[4] === "m";
+    if (!isRelease && button === 0 && col >= 0 && row >= 0) {
+      handleTerminalMouseClick(col, row);
+    }
+  }
+}
+
 function enableMouseTracking() {
   if ((process.stdin as any)._customPiPatched) return;
 
@@ -830,26 +846,16 @@ function enableMouseTracking() {
           return true;
         }
       }
+
+      // Process mouse events in the emit patch (catches every data event, no pause/resume gaps)
+      // Use buffer to handle split SGR sequences across data chunks
+      mouseBuffer = (mouseBuffer + raw).slice(-64);
+      processMouseChunk(mouseBuffer);
     }
     const emit = (process.stdin as any)._originalEmit;
     if (emit) return emit.call(this, event, data, ...args);
     return EventEmitter.prototype.emit.call(this, event, data, ...args);
   };
-
-  // Separate listener for mouse events — doesn't consume, fires alongside other listeners
-  process.stdin.on("data", function (this: any, data: Buffer) {
-    const raw = data.toString("utf8");
-    const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-    if (mouseMatch) {
-      const button = parseInt(mouseMatch[1], 10);
-      const col = parseInt(mouseMatch[2], 10);
-      const row = parseInt(mouseMatch[3], 10);
-      const isRelease = mouseMatch[4] === "m";
-      if (!isRelease && button === 0 && col >= 0 && row >= 0) {
-        handleTerminalMouseClick(col, row);
-      }
-    }
-  });
 }
 
 export function applyLivePatches(tui: any, themeInstance: any) {
