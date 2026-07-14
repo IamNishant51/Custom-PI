@@ -38,6 +38,7 @@ let renderedComponents: Array<{
   component: any;
   startLine: number;
   endLine: number;
+  reasoningToggleLines: number[];
 }> = [];
 let activeTuiInstance: any = null;
 
@@ -636,21 +637,21 @@ function handleTerminalMouseClick(col: number, row: number) {
 
   log(`Matched component: ${clicked.component.constructor?.name}`);
 
-  if (clicked.component.constructor?.name === "UserMessageComponent") {
-    const idx = renderedComponents.indexOf(clicked);
-    const nextRc = renderedComponents.slice(idx + 1).find(rc => rc.component.constructor?.name === "AssistantMessageComponent");
-    if (nextRc) {
-      const assistant = nextRc.component;
-      assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
-      log(`Toggled next AssistantMessage hideThinkingBlock to ${assistant.hideThinkingBlock}`);
-      activeTuiInstance.requestRender();
-    }
-  } else if (clicked.component.constructor?.name === "AssistantMessageComponent") {
-    const assistant = clicked.component;
-    assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
-    log(`Toggled AssistantMessage hideThinkingBlock to ${assistant.hideThinkingBlock}`);
-    activeTuiInstance.requestRender();
+  if (clicked.component.constructor?.name !== "AssistantMessageComponent") {
+    log("Not an AssistantMessage — ignoring");
+    return;
   }
+
+  const relativeLine = lineIndex - chatContainerStartLine - clicked.startLine;
+  if (!clicked.reasoningToggleLines.includes(relativeLine)) {
+    log(`Clicked line ${relativeLine} is not a reasoning toggle line (toggles at ${JSON.stringify(clicked.reasoningToggleLines)})`);
+    return;
+  }
+
+  const assistant = clicked.component;
+  assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+  log(`Toggled AssistantMessage hideThinkingBlock to ${assistant.hideThinkingBlock}`);
+  activeTuiInstance.requestRender();
 }
 
 export function applyContainerPatch(containerProto: any): void {
@@ -700,7 +701,16 @@ export function applyContainerPatch(containerProto: any): void {
         const endLine = startLine + childLines.length;
 
         if (currentType === "UserMessageComponent" || currentType === "AssistantMessageComponent") {
-          renderedComponents.push({ component: child, startLine, endLine });
+          const reasoningToggleLines: number[] = [];
+          if (currentType === "AssistantMessageComponent") {
+            for (let i = 0; i < childLines.length; i++) {
+              const plain = stripAnsi(childLines[i]).trim();
+              if (plain.startsWith("▶ Reasoning") || plain.startsWith("▼ Reasoning")) {
+                reasoningToggleLines.push(i);
+              }
+            }
+          }
+          renderedComponents.push({ component: child, startLine, endLine, reasoningToggleLines });
         }
 
         if (renderable.includes(child)) {
