@@ -4,7 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { THEME } from "../theme/theme";
+import { ICONS } from "../theme/icons";
 import { fg, fgBold, bgFg, dim } from "../theme/colorize";
+import { hexToRgb } from "../utils/color";
 import { stripAnsi, truncateToWidth, truncateLines, measureWidth } from "../render/format";
 import { render as renderMarkdown } from "../markdown/render";
 import { getGlobalFrame, getDotPulse, getPulseColor, getSpinner, activeTrackers, globalPulse, startGlobalAnimation, stopGlobalAnimation } from "../../animations";
@@ -65,7 +67,7 @@ function patchUserMessage(proto: any) {
     const dimFn = (s: string) => fg(THEME.muted, s);
 
     const lines: string[] = [];
-    const pointer = "\u276f ";
+    const pointer = ICONS.userTurn + " ";
     if (mdLines.length > 0) {
       lines.push(pointerColor(pointer) + dimFn("You") + "  " + (mdLines[0] || ""));
     }
@@ -141,10 +143,23 @@ function patchToolExecution(proto: any) {
     const contentRaw = rawLines.length > 1 ? rawLines.slice(1) : [];
 
     if ((isEditTool || hasDiff) && !isRunning) {
-      const diffAdded = (s: string) => bgFg("#004d00", "#b4ffb4", ` ${s} `);
-      const diffRemoved = (s: string) => bgFg("#5a0000", "#ffb4b4", ` ${s} `);
+      const [canvasR, canvasG, canvasB] = hexToRgb(THEME.canvas);
+      const [successR, successG, successB] = hexToRgb(THEME.success);
+      const [errorR, errorG, errorB] = hexToRgb(THEME.error);
+      const diffAdded = (s: string) => {
+        const mr = Math.round(canvasR + (successR - canvasR) * 0.3);
+        const mg = Math.round(canvasG + (successG - canvasG) * 0.3);
+        const mb = Math.round(canvasB + (successB - canvasB) * 0.3);
+        return `\x1b[48;2;${mr};${mg};${mb}m\x1b[38;2;${successR};${successG};${successB}m ${s} \x1b[0m`;
+      };
+      const diffRemoved = (s: string) => {
+        const mr = Math.round(canvasR + (errorR - canvasR) * 0.3);
+        const mg = Math.round(canvasG + (errorG - canvasG) * 0.3);
+        const mb = Math.round(canvasB + (errorB - canvasB) * 0.3);
+        return `\x1b[48;2;${mr};${mg};${mb}m\x1b[38;2;${errorR};${errorG};${errorB}m ${s} \x1b[0m`;
+      };
       const dimFn2 = (s: string) => fg(THEME.muted, s);
-      const bgNeutral = (s: string) => bgFg(THEME.canvas, "#b4b9c3", ` ${s} `);
+      const bgNeutral = (s: string) => fg(THEME.textSecondary, ` ${s} `);
       contentLines = [];
       const isWriteTool = this.toolName === "write";
       let diffBlockOpen = false;
@@ -210,8 +225,8 @@ function patchAssistantMessage(proto: any) {
     const accentColor = (s: string) => fg(THEME.accent, s);
     const dimFn = (s: string) => fg(THEME.muted, s);
 
-    const assistantLabel = "Custom-PI";
-    const prefix = "\u2756 ";
+    const assistantLabel = ICONS.assistantLabel;
+    const prefix = ICONS.assistantTurn + " ";
 
     const result: string[] = [];
     result.push(accentColor(truncateToWidth(prefix + assistantLabel, width - 4)));

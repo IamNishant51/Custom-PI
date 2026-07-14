@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { THEME } from "../theme/theme";
 
 export type ToastType = "info" | "success" | "warning" | "error";
 
@@ -24,7 +25,6 @@ export class ToastManager {
       duration: duration ?? this.defaultDuration,
       createdAt: Date.now(),
     });
-    // Trim expired
     this.prune();
     return id;
   }
@@ -49,15 +49,15 @@ export class ToastManager {
 }
 
 export const toastColors: Record<ToastType, string> = {
-  info: "#5ac8fa",
-  success: "#30d158",
-  warning: "#ff9f0a",
-  error: "#ff3b30",
+  info: THEME.info,
+  success: THEME.success,
+  warning: THEME.warning,
+  error: THEME.error,
 };
 
 export const toastIcons: Record<ToastType, string> = {
   info: "\u2139",
   success: "\u2713",
   warning: "\u26a0",
-  error: "\u2717",
+  error: "\u25a3",
 };

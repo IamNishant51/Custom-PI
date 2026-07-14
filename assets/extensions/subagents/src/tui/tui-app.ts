@@ -17,6 +17,14 @@ interface TrackerData {
   outputLines: string[];
 }
 
+const ROTATING_HINTS = [
+  "? for shortcuts",
+  "Tab to toggle agent/plan mode",
+  "Esc to cancel",
+  "Ctrl+Enter to send",
+  "/help for commands",
+];
+
 export class TuiApp {
   tui: TuiManager;
   private active = false;
@@ -46,6 +54,8 @@ export class TuiApp {
   private _rendering = false;
   private _messageLogVersion = 0;
   private _lastMessageCount = -1;
+  private hintIndex = 0;
+  private lastHintSwitch = 0;
 
   private hasActiveAnimations(): boolean {
     if (this.trackers.size > 0) return true;
@@ -231,7 +241,17 @@ export class TuiApp {
     const renderer = this.tui.renderer;
     const cols = renderer.screen.getCols();
     const rows = renderer.screen.getRows();
-    if (cols < SPACING.minScreenCols || rows < SPACING.minScreenRows) return;
+    const canvasStyle = renderer.style({ bg: renderer.theme.canvas });
+    if (cols < SPACING.minScreenCols || rows < SPACING.minScreenRows) {
+      renderer.screen.clear(canvasStyle);
+      const msg = "Resize your terminal to at least 60x16 to use the Custom-PI TUI";
+      const x = Math.max(0, Math.floor((cols - msg.length) / 2));
+      const y = Math.floor(rows / 2);
+      const msgStyle = renderer.style({ fg: renderer.theme.warning, bold: true });
+      renderer.screen.writeString(x, y, msg, msgStyle);
+      renderer.render();
+      return;
+    }
 
     renderer.updateLayout();
 
@@ -256,7 +276,7 @@ export class TuiApp {
       y = 1;
     }
 
-    y = renderer.drawBanner(y);
+    y = renderer.drawBanner(y, this.frameCounter);
 
     const header: ConversationHeader = {
       modelName: this.sessionModel,
@@ -346,6 +366,11 @@ export class TuiApp {
     }
 
     if (statusBarY < rows) {
+      const now = Date.now();
+      if (now - this.lastHintSwitch > 5000) {
+        this.hintIndex = (this.hintIndex + 1) % ROTATING_HINTS.length;
+        this.lastHintSwitch = now;
+      }
       if (runningCount > 0) {
         renderer.drawPulseInStatusBar(statusBarY, `agents: ${runningCount}`);
       } else {
@@ -354,6 +379,7 @@ export class TuiApp {
           memoryCount: this.memoryCount || undefined,
           vaultCount: this.vaultCount || undefined,
           agentStatus: `\u25cb idle`,
+          hint: ROTATING_HINTS[this.hintIndex],
         });
       }
     }

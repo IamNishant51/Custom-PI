@@ -9,6 +9,7 @@ import {
 import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
 import { hexToRgb, rgbToHex } from "./utils/color";
 import { useTruecolor } from "./theme/capabilities";
+import { ICONS } from "./theme/icons";
 import { PulseController } from "./app/pulse-controller";
 
 const GUTTER = SPACING.gutter;
@@ -152,12 +153,22 @@ export class ScreenRenderer {
     }, 100);
   }
 
+  private frameTiming = 0;
+
   render(): void {
+    const start = process.env.PI_TUI_DEBUG_FRAMES ? performance.now() : 0;
     const output = this.screen.flush();
     if (output) {
       process.stdout.write(output);
     }
     this.writer.flush();
+    if (start) {
+      const elapsed = performance.now() - start;
+      if (elapsed > 4) {
+        const rows = this.screen.getRows();
+        process.stderr.write(`\x1b[2m[frame: ${elapsed.toFixed(1)}ms, rows: ${rows}]\x1b[0m\n`);
+      }
+    }
   }
 
   // ── New Layout Methods ──────────────────────────────────────────────────
@@ -221,7 +232,28 @@ export class ScreenRenderer {
     return y + 1;
   }
 
-  drawBanner(startY: number): number {
+  private interpolateBannerColors(): string[] {
+    const colors = this.theme.banner;
+    if (colors.length >= 6) return colors.slice(0, 6);
+    const steps = 6;
+    const result: string[] = [];
+    for (let i = 0; i < steps; i++) {
+      const t = steps > 1 ? i / (steps - 1) : 0;
+      const segIdx = Math.min(Math.floor(t * (colors.length - 1)), colors.length - 2);
+      const segT = (t * (colors.length - 1)) - segIdx;
+      const c1 = hexToRgb(colors[segIdx]);
+      const c2 = hexToRgb(colors[Math.min(segIdx + 1, colors.length - 1)]);
+      const mixed: [number, number, number] = [
+        Math.round(c1[0] + (c2[0] - c1[0]) * segT),
+        Math.round(c1[1] + (c2[1] - c1[1]) * segT),
+        Math.round(c1[2] + (c2[2] - c1[2]) * segT),
+      ];
+      result.push(rgbToHex(...mixed));
+    }
+    return result;
+  }
+
+  drawBanner(startY: number, animFrame?: number): number {
     const banner = [
       "  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗",
       " ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║",
@@ -231,23 +263,49 @@ export class ScreenRenderer {
       "  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝",
     ];
     const cols = this.screen.getCols();
-    const colors = this.theme.banner;
     const canvasStyle = this.style({ bg: this.theme.canvas });
 
-    // Show full banner on wide, compact on narrow
-    const showFull = cols >= 80;
-    const displayBanner = showFull ? banner : banner.map(l => l.slice(0, Math.floor(cols * 0.6)));
+    const bp = this.breakpoint;
+    if (bp === "compact") {
+      const glyph = "\u2756 Custom-PI";
+      const gStyle = this.style({ fg: this.theme.accent, bold: true });
+      this.screen.clearLine(startY, canvasStyle);
+      this.screen.writeString(this.contentLeft, startY, glyph, gStyle);
+      const dimStyle = this.style({ fg: this.theme.dim });
+      const sub = "terminal agent";
+      this.screen.writeString(this.contentLeft + measureWidth(glyph) + 2, startY, sub, dimStyle);
+      return startY + 2;
+    }
 
-    for (let i = 0; i < displayBanner.length; i++) {
-      const line = displayBanner[i];
-      const color = colors[i] || colors[colors.length - 1];
+    const bannerColors = this.interpolateBannerColors();
+    for (let i = 0; i < banner.length; i++) {
+      const line = banner[i];
+      const color = bannerColors[i] || bannerColors[bannerColors.length - 1];
       const s = this.style({ fg: color });
       const y = startY + i;
       this.screen.clearLine(y, canvasStyle);
-      const x = showFull ? this.contentLeft : GUTTER;
-      this.screen.writeString(x, y, line, s);
+      this.screen.writeString(this.contentLeft, y, line, s);
     }
-    return startY + displayBanner.length + SPACING.paddingSm;
+
+    if (animFrame !== undefined) {
+      const shimmerT = (Math.sin(animFrame * 0.02) * 0.5 + 0.5);
+      const shimmerX = Math.floor(shimmerT * (banner[0].length - 10));
+      const shimmerColor = rgbToHex(
+        Math.round(255),
+        Math.round(255),
+        Math.round(255)
+      );
+      const sStyle = this.style({ fg: shimmerColor, bold: true });
+      for (let i = 0; i < banner.length; i++) {
+        const y = startY + i;
+        const line = banner[i];
+        if (shimmerX < line.length) {
+          this.screen.writeString(this.contentLeft + shimmerX, y, line[shimmerX] || " ", sStyle);
+        }
+      }
+    }
+
+    return startY + banner.length + SPACING.paddingSm;
   }
 
   drawBox(y: number, width: number, title: string, content: string[], borderColor: string, accentColor?: string): number {
@@ -335,8 +393,8 @@ export class ScreenRenderer {
     const bubbleBg = this.style({ bg: bgColor });
 
     // Identity bar: badge symbol + role name + optional model tag
-    const badgeSym = isUser ? "\u25c6" : "\u25a3";
-    const name = isUser ? "You" : (opts?.agentName || "Assistant");
+    const badgeSym = isUser ? ICONS.userTurn : ICONS.assistantTurn;
+    const name = isUser ? "You" : (opts?.agentName || ICONS.assistantLabel);
     const modelTag = (!isUser && opts?.modelName) ? ` \u2502 ${opts.modelName}` : "";
 
     // Meta info (right side of header)
@@ -668,7 +726,7 @@ export class ScreenRenderer {
     const outputStyle = this.style({ fg: borderColor, dim: true });
     const canvasStyle = this.style({ bg: this.theme.canvas });
 
-    const icon = isError ? "\u2717" : isSuccess ? "\u2713" : isRunning ? "\u25cf" : "\u25f4";
+    const icon = isError ? ICONS.cross : isSuccess ? ICONS.checkmark : isRunning ? ICONS.running : ICONS.waiting;
     const iconColor = isError ? this.theme.error : isSuccess ? this.theme.success : isRunning ? this.theme.agentRunning : this.theme.agentWaiting;
     const iconStyle = this.style({ fg: iconColor });
 
@@ -737,6 +795,7 @@ export class ScreenRenderer {
     cost?: string;
     tokens?: string;
     agentStatus?: string;
+    hint?: string;
   }): number {
     const cols = this.screen.getCols();
     if (y >= this.screen.getRows()) return y;
@@ -791,6 +850,16 @@ export class ScreenRenderer {
     // Right: terminal size
     const sizeStr = ` ${cols}x${this.screen.getRows()} `;
     this.screen.writeString(cols - measureWidth(sizeStr) - GUTTER, y, sizeStr, dimStyle);
+
+    // Hint (centered between info and size)
+    if (opts?.hint) {
+      const hintStyle = this.style({ fg: this.theme.dim, italic: true });
+      const hintW = measureWidth(stripAnsi(opts.hint));
+      const hintX = cols - GUTTER - hintW - measureWidth(stripAnsi(sizeStr)) - 4;
+      if (hintX > x + 4) {
+        this.screen.writeString(hintX, y, opts.hint, hintStyle);
+      }
+    }
 
     return y + 1;
   }
