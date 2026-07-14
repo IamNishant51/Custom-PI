@@ -100,7 +100,8 @@ export class TuiAppV2 {
   }
 
   addMessage(message: Message): void {
-    this.messageLog.push(message);
+    if (!message || !message.role) return;
+    this.messageLog.push({ ...message, content: message.content ?? "" });
     if (this.messageLog.length > this.messageLimit) {
       this.messageLog.shift();
     }
@@ -417,7 +418,8 @@ export class TuiAppV2 {
     const headerWidth = this._measureWidth(headerLeft) + this._measureWidth(headerRight) + 4;
     const maxBubbleW = Math.min(cw, 100);
     const innerWrapW = Math.max(20, maxBubbleW - 6);
-    const lines = this._wordWrap(content, innerWrapW);
+    const safeContent = content ?? "";
+    const lines = this._wordWrap(safeContent, innerWrapW);
     let maxLineW = 0;
     for (const line of lines) {
       const w = this._measureWidth(line.trimEnd());
@@ -494,8 +496,9 @@ export class TuiAppV2 {
     y++;
 
     if (!isCollapsed && content) {
+      const safeContent = content ?? "";
       const innerW = cw - 4;
-      const lines = this._wordWrap(content, innerW);
+      const lines = this._wordWrap(safeContent, innerW);
       for (const line of lines) {
         if (y >= this.renderer.screen.getRows() - 3) break;
         this._clearLine(y, canvasStyle);
