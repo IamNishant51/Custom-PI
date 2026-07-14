@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { BannerHeader } from "./components";
+import { applyLivePatches } from "./patches";
 
 let bannerInstance: BannerHeader | null = null;
 let activeTuiInstance: any = null;
@@ -12,6 +13,7 @@ export function setupWidget(ctx: ExtensionContext) {
   try {
     (ctx.ui as any).setHeader((tui: any, themeInstance: any) => {
       activeTuiInstance = tui;
+      applyLivePatches(tui, themeInstance);
       return bannerInstance!;
     });
   } catch (e: any) {
