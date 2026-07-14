@@ -42,9 +42,6 @@ const contextCache = new Map<string, { prompt: string; ts: number }>();
 let globalAnimTimer: ReturnType<typeof setInterval> | null = null;
 
 export function registerEventHandlers(pi: ExtensionAPI) {
-  const v2Tui = () => (globalThis as any).__customPiTuiV2 as
-    { addMessage?: (r: string, c: string) => void; updateTracker?: (id: string, d: any) => void; removeTracker?: (id: string) => void } | undefined;
-
   pi.on("session_start", async (_event, ctx) => {
     logger.info("session_start", { cwd: ctx.cwd });
 
@@ -201,7 +198,6 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         intervalMs: 100,
       });
     } catch { /* not critical */ }
-    v2Tui()?.updateTracker("ceo", { name: "CEO", status: "running", currentTool: "thinking" });
     const t0 = Date.now();
     const modelContextWindow = (ctx as any).model?.contextWindow
       ?? (ctx as any).sessionManager?.model?.contextWindow
@@ -404,8 +400,6 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       const toolName = extractToolName(msg);
       const toolArgs = extractToolArgs(msg);
       insertMessage(sid, msg.role, text, toolName || undefined, toolArgs || undefined);
-      v2Tui()?.addMessage(msg.role, text);
-      v2Tui()?.removeTracker("ceo");
     } catch {
       // persistence must never crash the message flow
     } finally {
@@ -451,7 +445,6 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
   pi.on("tool_call", (event, _ctx) => {
     try {
-      v2Tui()?.updateTracker("ceo", { name: "CEO", status: "calling_tool", currentTool: event.toolName });
       if (appMode === "plan" && (event.toolName === "write" || event.toolName === "edit")) {
         return {
           block: true,
