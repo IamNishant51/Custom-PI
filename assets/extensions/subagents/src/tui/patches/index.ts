@@ -10,9 +10,23 @@ import { hexToRgb } from "../utils/color";
 import { stripAnsi, truncateToWidth, truncateLines, measureWidth } from "../render/format";
 import { render as renderMarkdown } from "../markdown/render";
 import { setReRenderCallback } from "../markdown/highlight";
-import { getGlobalFrame, getDotPulse, getPulseColor, getSpinner, activeTrackers, globalPulse, startGlobalAnimation, stopGlobalAnimation } from "../../animations";
-import { QuantumHUDWidget } from "../components/quantum-hud";
+import { getGlobalFrame } from "../../animations";
 import { getHostAdapter } from "../../host-adapter";
+import { appMode } from "../../runtime/agent-state";
+
+// Use runtime require to bypass static type-resolution limitations
+const piAgent = require("@earendil-works/pi-coding-agent") as any;
+const UserMessageComponent = piAgent.UserMessageComponent;
+const AssistantMessageComponent = piAgent.AssistantMessageComponent;
+const ToolExecutionComponent = piAgent.ToolExecutionComponent;
+const CustomEditor = piAgent.CustomEditor;
+const FooterComponent = piAgent.FooterComponent;
+const DynamicBorder = piAgent.DynamicBorder;
+
+const piTui = require("@earendil-works/pi-tui") as any;
+const Container = piTui.Container;
+const TUI = piTui.TUI;
+const sliceByColumn = piTui.sliceByColumn;
 
 let chatContainerStartLine = 0;
 let renderedComponents: Array<{
@@ -37,6 +51,27 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
 let treeCtx: { index: number; total: number } = { index: 0, total: 0 };
 let treeCtxActive = false;
+let showHelpOverlay = false;
+
+const HELP_LINES = [
+  "┌─────────────────────────────────────────────┐",
+  "│  Custom-PI  Keyboard Shortcuts              │",
+  "├─────────────────────────────────────────────┤",
+  "│  Enter         Submit message               │",
+  "│  Shift+Enter   New line                     │",
+  "│  ↑ / ↓         History                      │",
+  "│  Tab           Toggle AGENT / PLAN mode     │",
+  "│  Ctrl+C        Interrupt / Exit             │",
+  "│  Ctrl+R        Toggle reasoning             │",
+  "│  Ctrl+B        Swarm panel                  │",
+  "│  Ctrl+H        Session history              │",
+  "│  Ctrl+L        Clear screen                 │",
+  "│  Escape        Abort generation             │",
+  "│  ?             This help                    │",
+  "├─────────────────────────────────────────────┤",
+  "│  Press any key to dismiss                   │",
+  "└─────────────────────────────────────────────┘"
+];
 
 const debugLog = process.env.PI_DEBUG
   ? (msg: string) => {
@@ -48,6 +83,66 @@ const debugLog = process.env.PI_DEBUG
 
 export async function locateTheme(): Promise<any> {
   return null;
+}
+
+export function getActiveSession() {
+  if (!activeTuiInstance) return null;
+  const footer = activeTuiInstance.children?.find((c: any) => c && c.constructor?.name === "FooterComponent");
+  return footer?.session || null;
+}
+
+export function getFooterData() {
+  if (!activeTuiInstance) return null;
+  const footer = activeTuiInstance.children?.find((c: any) => c && c.constructor?.name === "FooterComponent");
+  return footer?.footerData || null;
+}
+
+export function formatCwdForFooter(cwd: string, home?: string): string {
+  if (!cwd) return "";
+  if (!home) return cwd;
+  const resolvedCwd = path.resolve(cwd);
+  const resolvedHome = path.resolve(home);
+  if (resolvedCwd === resolvedHome) return "~";
+  if (resolvedCwd.startsWith(resolvedHome + path.sep)) {
+    return "~" + resolvedCwd.slice(resolvedHome.length);
+  }
+  return cwd;
+}
+
+function overlayHelp(lines: string[], width: number) {
+  const overlayHeight = HELP_LINES.length;
+  const overlayWidth = 47;
+  const startRow = Math.max(0, Math.floor((lines.length - overlayHeight) / 2));
+  const startCol = Math.max(0, Math.floor((width - overlayWidth) / 2));
+
+  for (let r = 0; r < overlayHeight; r++) {
+    const targetRow = startRow + r;
+    if (targetRow >= lines.length) break;
+
+    const originalLine = lines[targetRow];
+    const overlayLine = HELP_LINES[r];
+    
+    const leftPart = sliceByColumn(originalLine, 0, startCol);
+    const rightPart = sliceByColumn(originalLine, startCol + overlayWidth);
+    lines[targetRow] = leftPart + fg(THEME.accent, overlayLine) + rightPart;
+  }
+}
+
+function getPrimaryArg(toolName: string, args: any): string {
+  if (!args || typeof args !== "object") return "";
+  if (toolName === "bash" && args.CommandLine) return args.CommandLine;
+  if (toolName === "bash" && args.command) return args.command;
+  if (args.query) return args.query;
+  if (args.path) return args.path;
+  if (args.AbsolutePath) return args.AbsolutePath;
+  if (args.TargetFile) return args.TargetFile;
+  
+  const values = Object.values(args);
+  if (values.length > 0) {
+    const val = values[0];
+    return typeof val === "string" ? val : JSON.stringify(val);
+  }
+  return "";
 }
 
 function patchUserMessage(proto: any) {
@@ -69,18 +164,17 @@ function patchUserMessage(proto: any) {
         ? renderMarkdown(rawText, { width: contentWidth })
         : markdownComponent.render(contentWidth);
 
-      const pointerColor = (s: string) => fg(THEME.accent, s);
-      const dimFn = (s: string) => fg(THEME.muted, s);
+      if (mdLines.length === 0) return [];
+
+      const maxLineLen = Math.max(...mdLines.map((l: string) => stripAnsi(l).length));
+      const indentVal = Math.max(0, width - maxLineLen - 4);
+      const indentSpaces = " ".repeat(indentVal);
 
       const lines: string[] = [];
-      const pointer = ICONS.userTurn + " ";
-      if (mdLines.length > 0) {
-        lines.push(pointerColor(pointer) + dimFn("You") + "  " + (mdLines[0] || ""));
-      }
+      lines.push(OSC133_ZONE_START + indentSpaces + "\x1b[36m>\x1b[0m " + (mdLines[0] || ""));
       for (let i = 1; i < mdLines.length; i++) {
-        lines.push("  " + (mdLines[i] || ""));
+        lines.push(indentSpaces + "  " + (mdLines[i] || ""));
       }
-      lines[0] = OSC133_ZONE_START + lines[0];
       lines[lines.length - 1] = lines[lines.length - 1] + OSC133_ZONE_END + OSC133_ZONE_FINAL;
 
       return truncateLines(lines, width);
@@ -91,134 +185,17 @@ function patchUserMessage(proto: any) {
   };
 }
 
-function patchToolExecution(proto: any) {
-  if (toolExecutionPatched) return;
-  toolExecutionPatched = true;
-  debugLog("PATCHING TOOL EXECUTION PROTOTYPE");
-
-  const originalToolRender = proto.render;
-  proto.render = function (this: any, width: number) {
-    if (this.hideComponent) return [];
-
-    const contentWidth = Math.max(10, width - 8);
-    let rawLines = originalToolRender.call(this, contentWidth);
-    rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
-    let prevBlank = false;
-    rawLines = rawLines.filter((l: string) => {
-      const isBlank = l.trim() === "";
-      if (isBlank && prevBlank) return false;
-      prevBlank = isBlank;
-      return true;
-    });
-    while (rawLines.length > 0 && rawLines[0].trim() === "") rawLines.shift();
-    while (rawLines.length > 0 && rawLines[rawLines.length - 1].trim() === "") rawLines.pop();
-
-    const isRunning = this.isPartial;
-    const isError = this.result?.isError;
-
-    let dotColor: string;
-    let dotChar: string;
-    if (isRunning) {
-      const frame = getGlobalFrame();
-      const hue = (frame * 3) % 360;
-      dotColor = fg(THEME.accent, "");
-      dotChar = "\u25cf";
-    } else if (isError) {
-      dotColor = fg(THEME.error, "");
-      dotChar = "\u25cf";
-    } else {
-      dotColor = fg(THEME.success, "");
-      dotChar = "\u25cf";
-    }
-    const statusDot = `${dotColor}${dotChar}\x1b[0m`;
-    const toolNameColor = (s: string) => fg(THEME.warning, s);
-
-    let paramSummary = "";
-    if (this.args && typeof this.args === "object") {
-      const params: string[] = [];
-      for (const [key, val] of Object.entries(this.args)) {
-        const v = typeof val === "string" ? val.slice(0, 60) : JSON.stringify(val);
-        params.push(`${key}: ${v}`);
-      }
-      if (params.length > 0) paramSummary = "(" + params.join(", ") + ")";
-    }
-
-    const headerLine = `${statusDot} ${toolNameColor(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
-
-    const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
-    const hasDiff = rawLines.some((l: string) => /^[+-]{1,3}/.test(l.trim()));
-
-    const indent = "  ";
-    let contentLines: string[];
-    const contentRaw = rawLines.length > 1 ? rawLines.slice(1) : [];
-
-    if ((isEditTool || hasDiff) && !isRunning) {
-      const [canvasR, canvasG, canvasB] = hexToRgb(THEME.canvas);
-      const [successR, successG, successB] = hexToRgb(THEME.success);
-      const [errorR, errorG, errorB] = hexToRgb(THEME.error);
-      const diffAdded = (s: string) => {
-        const mr = Math.round(canvasR + (successR - canvasR) * 0.3);
-        const mg = Math.round(canvasG + (successG - canvasG) * 0.3);
-        const mb = Math.round(canvasB + (successB - canvasB) * 0.3);
-        return `\x1b[48;2;${mr};${mg};${mb}m\x1b[38;2;${successR};${successG};${successB}m ${s} \x1b[0m`;
-      };
-      const diffRemoved = (s: string) => {
-        const mr = Math.round(canvasR + (errorR - canvasR) * 0.3);
-        const mg = Math.round(canvasG + (errorG - canvasG) * 0.3);
-        const mb = Math.round(canvasB + (errorB - canvasB) * 0.3);
-        return `\x1b[48;2;${mr};${mg};${mb}m\x1b[38;2;${errorR};${errorG};${errorB}m ${s} \x1b[0m`;
-      };
-      const dimFn2 = (s: string) => fg(THEME.muted, s);
-      const bgNeutral = (s: string) => fg(THEME.textSecondary, ` ${s} `);
-      contentLines = [];
-      const isWriteTool = this.toolName === "write";
-      let diffBlockOpen = false;
-      for (const line of contentRaw) {
-        const clean = line.trimEnd();
-        const trimmed = clean.trim();
-        if (isWriteTool) {
-          contentLines.push(indent + diffAdded(clean));
-        } else if (trimmed.startsWith("+++") || trimmed.startsWith("---") || trimmed.startsWith("@@")) {
-          contentLines.push(indent + dimFn2(clean));
-        } else if (trimmed.startsWith("+") && !trimmed.startsWith("+++")) {
-          if (!diffBlockOpen) {
-            const sepLen = Math.max(3, Math.floor((width - 10) / 2));
-            contentLines.push(indent + dimFn2("\u2501").repeat(sepLen) + " diff " + dimFn2("\u2501").repeat(sepLen));
-            diffBlockOpen = true;
-          }
-          contentLines.push(indent + diffAdded(clean));
-        } else if (trimmed.startsWith("-") && !trimmed.startsWith("---")) {
-          if (!diffBlockOpen) {
-            const sepLen = Math.max(3, Math.floor((width - 10) / 2));
-            contentLines.push(indent + dimFn2("\u2501").repeat(sepLen) + " diff " + dimFn2("\u2501").repeat(sepLen));
-            diffBlockOpen = true;
-          }
-          contentLines.push(indent + diffRemoved(clean));
-        } else {
-          contentLines.push(indent + bgNeutral(clean));
-        }
-      }
-    } else {
-      const bgNeutral = (s: string) => bgFg(THEME.canvas, "#b4b9c3", ` ${s} `);
-      contentLines = contentRaw.map((line: string) => indent + bgNeutral(line.trimEnd()));
-    }
-
-    const allLines = [headerLine, ...contentLines];
-    const adapter = getHostAdapter();
-    return allLines.map((l: string) => {
-      const vw = adapter.visibleWidth(l);
-      if (vw > width) return truncateToWidth(l, width);
-      return l;
-    });
-  };
-}
-
 function patchAssistantMessage(proto: any) {
   if (assistantMessagePatched) return;
   assistantMessagePatched = true;
   debugLog("PATCHING ASSISTANT MESSAGE PROTOTYPE");
 
   const originalRender = proto.render;
+
+  proto.setHideThinkingBlock = function (this: any, val: boolean) {
+    this.hideThinkingBlock = val;
+  };
+
   proto.render = function (this: any, width: number) {
     try {
       const contentWidth = Math.max(20, width - 8);
@@ -231,15 +208,25 @@ function patchAssistantMessage(proto: any) {
             if (lines.length > 0) lines.push("");
             lines.push(...textLines);
           } else if (c.type === "thinking" && c.thinking.trim()) {
-            const isCollapsed = !!this.hideThinkingBlock;
-            const chevron = isCollapsed ? "\u25b8" : "\u25be";
-            const header = fg(THEME.muted, `${chevron} Reasoning`);
+            const isCollapsed = this.hideThinkingBlock !== false;
             if (lines.length > 0) lines.push("");
-            lines.push(header);
-            if (!isCollapsed) {
-              const thinkingLines = renderMarkdown(c.thinking.trim(), { width: contentWidth - 4, streaming: !!this.isStreaming });
-              const leftBar = fg(THEME.hairline, "\u2502 ");
-              lines.push(...thinkingLines.map(line => leftBar + `\x1b[3m\x1b[2m${line}\x1b[22m\x1b[23m`));
+
+            if (isCollapsed) {
+              lines.push(`  \x1b[2m\x1b[3m▶ Reasoning  (click to expand)\x1b[0m`);
+            } else {
+              lines.push(`  \x1b[2m▼ Reasoning\x1b[0m`);
+              const innerWidth = contentWidth - 4;
+              const topBorder = `  \x1b[2m╭${"─".repeat(innerWidth)}╮\x1b[0m`;
+              const bottomBorder = `  \x1b[2m╰${"─".repeat(innerWidth)}╯\x1b[0m`;
+              lines.push(topBorder);
+              
+              const thinkingLines = renderMarkdown(c.thinking.trim(), { width: innerWidth, streaming: !!this.isStreaming });
+              for (const line of thinkingLines) {
+                const plainLine = stripAnsi(line);
+                const padding = " ".repeat(Math.max(0, innerWidth - plainLine.length));
+                lines.push(`  \x1b[2m│\x1b[0m \x1b[2m${line}${padding}\x1b[0m \x1b[2m│\x1b[0m`);
+              }
+              lines.push(bottomBorder);
             }
           }
         }
@@ -254,9 +241,10 @@ function patchAssistantMessage(proto: any) {
       const prefix = ICONS.assistantTurn + " ";
 
       const result: string[] = [];
-      result.push(accentColor(truncateToWidth(prefix + assistantLabel, width - 4)));
+      result.push("  " + accentColor(truncateToWidth(prefix + assistantLabel, width - 6)));
+      result.push(""); // blank line
       for (const line of lines) {
-        result.push(line);
+        result.push("  " + line);
       }
 
       if (this.isStreaming) {
@@ -275,6 +263,74 @@ function patchAssistantMessage(proto: any) {
       logger.error(`[TUI] AssistantMessage rendering failed: ${err.message}`);
       return originalRender.call(this, width);
     }
+  };
+}
+
+function patchToolExecution(proto: any) {
+  if (toolExecutionPatched) return;
+  toolExecutionPatched = true;
+  debugLog("PATCHING TOOL EXECUTION PROTOTYPE");
+
+  const originalToolRender = proto.render;
+  proto.render = function (this: any, width: number) {
+    if (this.hideComponent) return [];
+
+    if (!this.startTime) {
+      this.startTime = Date.now();
+    }
+    if (!this.isPartial && !this.endTime) {
+      this.endTime = Date.now();
+    }
+
+    const isRunning = this.isPartial;
+    const isError = this.result?.isError;
+    const durationMs = (this.endTime || Date.now()) - (this.startTime || Date.now());
+    const durationSec = (durationMs / 1000).toFixed(1);
+
+    let headerLine = "";
+    if (isRunning) {
+      const frame = getGlobalFrame();
+      const spinnerChar = ICONS.spinnerDots[frame % ICONS.spinnerDots.length];
+      const statusDot = `\x1b[33m${spinnerChar}\x1b[0m`;
+      const primaryStr = getPrimaryArg(this.toolName, this.args);
+      const argText = primaryStr ? `  \x1b[2m"${primaryStr.slice(0, 60)}"\x1b[0m` : "";
+      headerLine = `  ${statusDot} \x1b[2m\x1b[37m${this.toolName}\x1b[0m${argText}`;
+      return [headerLine];
+    }
+
+    if (isError) {
+      const statusDot = `\x1b[31m✗\x1b[0m`;
+      const errorMsg = this.result?.details?.message || this.result?.details || "failed";
+      headerLine = `  ${statusDot} \x1b[2m\x1b[37m${this.toolName}\x1b[0m  \x1b[2m(${durationSec}s)\x1b[0m  \x1b[31m${errorMsg}\x1b[0m`;
+      
+      const contentWidth = Math.max(10, width - 8);
+      let rawLines = originalToolRender.call(this, contentWidth);
+      rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
+      rawLines = rawLines.filter((l: string) => l.trim() !== "");
+      const outputLines = rawLines.slice(0, 10).map((l: string) => `  \x1b[31m│\x1b[0m  \x1b[2m${l}\x1b[0m`);
+      
+      return [headerLine, ...outputLines];
+    }
+
+    const statusDot = `\x1b[32m✓\x1b[0m`;
+    headerLine = `  ${statusDot} \x1b[2m\x1b[37m${this.toolName}\x1b[0m  \x1b[2m(${durationSec}s)\x1b[0m`;
+
+    const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
+    if (isEditTool) {
+      const contentWidth = Math.max(10, width - 8);
+      let rawLines = originalToolRender.call(this, contentWidth);
+      rawLines = rawLines.map((l: string) => l.replace(/\x1b\[[0-9;]*48(?:;[0-9;]*)*m/g, ''));
+      rawLines = rawLines.filter((l: string) => l.trim() !== "");
+      
+      const added = rawLines.filter((l: string) => l.trim().startsWith("+") && !l.trim().startsWith("+++")).length;
+      const removed = rawLines.filter((l: string) => l.trim().startsWith("-") && !l.trim().startsWith("---")).length;
+      if (added > 0 || removed > 0) {
+        const diffSummary = `  \x1b[2m│\x1b[0m  \x1b[32m+${added} lines\x1b[0m  \x1b[31m-${removed} lines\x1b[0m`;
+        return [headerLine, diffSummary];
+      }
+    }
+
+    return [headerLine];
   };
 }
 
@@ -328,8 +384,7 @@ function patchCustomEditor(proto: any) {
     }
 
     const emitCursorMarker = this.focused && !this.autocompleteState;
-    const pointerColor = (s: string) => fg(THEME.accent, s);
-    const prefixStr = pointerColor("\u276f ");
+    const prefixStr = "\x1b[36m>\x1b[0m ";
     const indentStr = "  ";
 
     const segmenter = typeof this.segment === "function"
@@ -340,13 +395,20 @@ function patchCustomEditor(proto: any) {
     const CURSOR_MARKER = adapter2.cursorMarker();
     const vw = adapter2.visibleWidth;
 
+    const isEmpty = !this.value || this.value.length === 0;
+
     for (let i = 0; i < visibleLines.length; i++) {
       const layoutLine = visibleLines[i];
       let displayText = layoutLine.text;
       let lineVisibleWidth = vw(layoutLine.text);
       let cursorInPadding = false;
 
-      if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+      if (isEmpty) {
+        const marker = emitCursorMarker ? CURSOR_MARKER : "";
+        const cursor = emitCursorMarker ? "\x1b[7m \x1b[0m" : "";
+        displayText = "\x1b[2mMessage Custom-PI…\x1b[0m" + marker + cursor;
+        lineVisibleWidth = measureWidth("Message Custom-PI…") + (emitCursorMarker ? 1 : 0);
+      } else if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
         const before = displayText.slice(0, layoutLine.cursorPos);
         const after = displayText.slice(layoutLine.cursorPos);
         const marker = emitCursorMarker ? CURSOR_MARKER : "";
@@ -401,40 +463,47 @@ function patchDynamicBorder(proto: any) {
   };
 }
 
-function patchFooterComponent(child: any) {
+function patchFooterComponent(proto: any) {
   if (footerComponentPatched) return;
-  if (!child.footerData) return;
   footerComponentPatched = true;
-  debugLog("PATCHING FOOTER COMPONENT PROVIDER");
+  debugLog("PATCHING FOOTER COMPONENT PROTOTYPE");
 
-  if (child.footerData.extensionStatuses instanceof Map) {
-    for (const [key, val] of child.footerData.extensionStatuses.entries()) {
-      if (val === "Dashboard active" || (typeof val === "string" && val.includes("Dashboard active"))) {
-        child.footerData.extensionStatuses.delete(key);
+  proto.render = function (this: any, width: number) {
+    const session = this.session;
+    if (!session) return [];
+
+    const state = session.state;
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalCost = 0;
+
+    for (const entry of session.sessionManager.getEntries()) {
+      if (entry.type === "message" && entry.message.role === "assistant") {
+        totalInput += entry.message.usage.input;
+        totalOutput += entry.message.usage.output;
+        totalCost += entry.message.usage.cost.total;
       }
     }
-  }
 
-  const footerDataProto = Object.getPrototypeOf(child.footerData);
-  const originalSetExtensionStatus = footerDataProto.setExtensionStatus;
-  footerDataProto.setExtensionStatus = function (this: any, key: string, text: string) {
-    if (text === "Dashboard active" || (text && text.includes("Dashboard active"))) {
-      return originalSetExtensionStatus.call(this, key, "");
-    }
-    return originalSetExtensionStatus.call(this, key, text);
+    const totalTokens = totalInput + totalOutput;
+    const modelName = state.model?.id || "gemma-4-e4b";
+
+    const mode = appMode;
+    const modeColour = mode === "agent" ? "\x1b[32m" : "\x1b[33m";
+    const modeSymbol = mode === "agent" ? "●" : "◆";
+    const modeText = mode === "agent" ? "AGENT" : "PLAN";
+
+    const left = `${modeColour}${modeSymbol} ${modeText}\x1b[0m`;
+    const mid = `\x1b[2m·\x1b[0m  \x1b[36m${modelName}\x1b[0m  \x1b[2m·  ${totalTokens.toLocaleString()} tok  ·  $${totalCost.toFixed(3)}\x1b[0m`;
+    const right = `\x1b[2mTab to toggle  ·  ? for help\x1b[0m`;
+
+    const fullLeft = `${left}  ${mid}`;
+    const leftVisible = stripAnsi(fullLeft).length;
+    const rightVisible = stripAnsi(right).length;
+    const spaces = Math.max(1, width - leftVisible - rightVisible);
+
+    return [fullLeft + " ".repeat(spaces) + right];
   };
-
-  const proto = Object.getPrototypeOf(child);
-  if (proto && typeof proto.render === "function") {
-    const originalFooterRender = proto.render;
-    proto.render = function (this: any, width: number) {
-      const lines = originalFooterRender.call(this, width);
-      return lines.filter((l: string) => {
-        const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
-        return plain !== "Dashboard active" && !plain.includes("Dashboard active");
-      });
-    };
-  }
 }
 
 function handleTerminalMouseClick(col: number, row: number) {
@@ -473,26 +542,6 @@ export function applyContainerPatch(containerProto: any): void {
 
   const originalContainerRender = containerProto.render;
   containerProto.render = function (this: any, width: number) {
-    if (this.children) {
-      for (const child of this.children) {
-        if (!child) continue;
-        const className = child.constructor?.name;
-        if (className === "UserMessageComponent") {
-          patchUserMessage(Object.getPrototypeOf(child));
-        } else if (className === "AssistantMessageComponent") {
-          patchAssistantMessage(Object.getPrototypeOf(child));
-        } else if (className === "ToolExecutionComponent") {
-          patchToolExecution(Object.getPrototypeOf(child));
-        } else if (className === "CustomEditor") {
-          patchCustomEditor(Object.getPrototypeOf(child));
-        } else if (className === "DynamicBorder") {
-          patchDynamicBorder(Object.getPrototypeOf(child));
-        } else if (className === "FooterComponent") {
-          patchFooterComponent(child);
-        }
-      }
-    }
-
     const isChatContainer = this.children && this.children.some((child: any) =>
       child.constructor?.name === "UserMessageComponent" || child.constructor?.name === "AssistantMessageComponent"
     );
@@ -544,28 +593,11 @@ export function applyContainerPatch(containerProto: any): void {
   };
 }
 
-export function applyLivePatches(tui: any, themeInstance: any) {
-  if (livePatchesApplied) return;
-  livePatchesApplied = true;
-  debugLog("APPLYING LIVE ESM PATCHES");
+function patchTui(proto: any) {
+  const originalTuiRender = proto.render;
+  proto.render = function (this: any, width: number) {
+    activeTuiInstance = this;
 
-  setReRenderCallback(() => {
-    if (activeTuiInstance) {
-      try {
-        activeTuiInstance.requestRender();
-      } catch (e: any) {
-        logger.warn(`Failed to request render: ${e.message}`);
-      }
-    }
-  });
-
-  const TuiPrototype = Object.getPrototypeOf(tui);
-  const ContainerPrototype = Object.getPrototypeOf(TuiPrototype);
-
-  applyContainerPatch(ContainerPrototype);
-
-  const originalTuiRender = TuiPrototype.render;
-  TuiPrototype.render = function (this: any, width: number) {
     let offset = 0;
     for (const child of this.children) {
       if (!child) continue;
@@ -579,17 +611,27 @@ export function applyLivePatches(tui: any, themeInstance: any) {
       const childLines = child.render(width);
       offset += childLines.length;
     }
+
     const lines = originalTuiRender.call(this, width);
-    return lines.filter((l: string) => {
+    const filtered = lines.filter((l: string) => {
       const plain = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
       return plain !== "Dashboard active" && !plain.includes("Dashboard active");
     });
+
+    if (showHelpOverlay) {
+      overlayHelp(filtered, width);
+    }
+
+    return filtered;
   };
 
-  const originalTuiStart = TuiPrototype.start;
-  TuiPrototype.start = function (this: any) {
+  const originalTuiStart = proto.start;
+  proto.start = function (this: any) {
     activeTuiInstance = this;
     originalTuiStart.call(this);
+
+    // Enable SGR mouse tracking explicitly
+    process.stdout.write("\x1b[?1000h\x1b[?1006h");
 
     let originalEmit: typeof process.stdin.emit | null = null;
 
@@ -601,6 +643,34 @@ export function applyLivePatches(tui: any, themeInstance: any) {
       process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
         if (event === "data") {
           const raw = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+
+          if (showHelpOverlay) {
+            showHelpOverlay = false;
+            if (activeTuiInstance) activeTuiInstance.requestRender();
+            return true;
+          }
+
+          if (raw === "\x12") {
+            const lastAssistant = [...renderedComponents]
+              .reverse()
+              .find(rc => rc.component.constructor?.name === "AssistantMessageComponent");
+            if (lastAssistant) {
+              const assistant = lastAssistant.component;
+              assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
+              if (activeTuiInstance) activeTuiInstance.requestRender();
+            }
+            return true;
+          }
+
+          if (raw === "?") {
+            const editor = activeTuiInstance?.children?.find((c: any) => c && c.constructor?.name === "CustomEditor");
+            if (editor && (!editor.value || editor.value.trim() === "")) {
+              showHelpOverlay = true;
+              if (activeTuiInstance) activeTuiInstance.requestRender();
+              return true;
+            }
+          }
+
           const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
           if (mouseMatch) {
             const button = parseInt(mouseMatch[1], 10);
@@ -620,8 +690,11 @@ export function applyLivePatches(tui: any, themeInstance: any) {
     }
   };
 
-  const originalTuiStop = TuiPrototype.stop;
-  TuiPrototype.stop = function (this: any) {
+  const originalTuiStop = proto.stop;
+  proto.stop = function (this: any) {
+    // Disable SGR mouse tracking explicitly
+    process.stdout.write("\x1b[?1000l\x1b[?1006l");
+
     if ((process.stdin as any)._originalEmit) {
       process.stdin.emit = (process.stdin as any)._originalEmit;
       delete (process.stdin as any)._originalEmit;
@@ -630,6 +703,24 @@ export function applyLivePatches(tui: any, themeInstance: any) {
     activeTuiInstance = null;
     originalTuiStop.call(this);
   };
-
-  originalTuiStop.__patched = true;
 }
+
+export function applyLivePatches(tui: any, themeInstance: any) {
+  // Prototype patching is now applied statically at startup via setImmediate.
+  // This function is kept for compatibility.
+}
+
+setImmediate(() => {
+  try {
+    applyContainerPatch(Container.prototype);
+    patchUserMessage(UserMessageComponent.prototype);
+    patchAssistantMessage(AssistantMessageComponent.prototype);
+    patchToolExecution(ToolExecutionComponent.prototype);
+    patchCustomEditor(CustomEditor.prototype);
+    patchFooterComponent(FooterComponent.prototype);
+    patchDynamicBorder(DynamicBorder.prototype);
+    patchTui(TUI.prototype);
+  } catch (e: any) {
+    logger.warn(`Failed to apply static TUI patches: ${e.message}`);
+  }
+});

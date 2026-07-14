@@ -141,30 +141,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       }));
     } catch (e: any) { logger.warn(`Tab handler setup failed: ${e.message}`); }
 
-    try {
-      ctx.ui.setWidget("app-mode-indicator", (_tui: any, _theme: any) => ({
-        render(width: number): string[] {
-          const mode = appMode === "agent" ? "AGENT" : "PLAN";
-          const modeColor = appMode === "agent" ? "\x1b[32m" : "\x1b[33m";
-          const reset = "\x1b[0m";
-          const elapsed = Date.now() - lastModeToggle;
-          let glow = "";
-          if (elapsed < 1200) {
-            const intensity = Math.max(0, 1 - elapsed / 1200);
-            const bright = Math.round(200 + intensity * 55);
-            glow = `\x1b[38;2;${bright};${bright};${bright}m`;
-          }
-          const label = glow
-            ? `${glow}◆ ${modeColor}${mode} MODE${reset}`
-            : `${modeColor}◆ ${mode} MODE${reset}`;
-          const hint = "\x1b[2mTab\x1b[0m to toggle";
-          const line = ` ${label}  │  ${hint}`;
-          return [line];
-        },
-        dispose() {},
-      }), { placement: "aboveEditor" });
-      ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-    } catch (e: any) { logger.warn(`Widget setup failed: ${e.message}`); }
+
 
     // Defer skill sync to avoid blocking TUI startup
     setTimeout(() => {

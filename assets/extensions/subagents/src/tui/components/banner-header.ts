@@ -1,33 +1,12 @@
-import { THEME } from "../theme/theme";
-import { hexToRgb, rgbToHex } from "../utils/color";
-import { fg } from "../theme/colorize";
+import { appMode } from "../../runtime/agent-state";
+import { getActiveSession, getFooterData, formatCwdForFooter } from "../patches";
+import { stripAnsi } from "../render/format";
 
-const BANNER = [
-  "  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗",
-  " ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║",
-  " ██║      ██║   ██║╚██████╗    ██║   ██║   ██║██╔████╔██║█████╗██████╔╝██║",
-  " ██║      ██║   ██║ ╚═══██║    ██║   ██║   ██║██║╚██╔╝██║╚════╝██╔═══╝ ██║",
-  " ╚██████╗ ╚██████╔╝██████╔╝    ██║   ╚██████╔╝██║ ╚═╝ ██║      ██║     ██║",
-  "  ╚═════╝  ╚═════╝ ╚═════╝     ╚═╝    ╚═════╝ ╚═╝     ╚═╝      ╚═╝     ╚═╝",
-];
-
-function interpolateColors(colors: string[], steps: number): string[] {
-  if (colors.length >= steps) return colors.slice(0, steps);
-  const result: string[] = [];
-  for (let i = 0; i < steps; i++) {
-    const t = steps > 1 ? i / (steps - 1) : 0;
-    const segIdx = Math.min(Math.floor(t * (colors.length - 1)), colors.length - 2);
-    const segT = (t * (colors.length - 1)) - segIdx;
-    const c1 = hexToRgb(colors[segIdx]);
-    const c2 = hexToRgb(colors[Math.min(segIdx + 1, colors.length - 1)]);
-    const mixed: [number, number, number] = [
-      Math.round(c1[0] + (c2[0] - c1[0]) * segT),
-      Math.round(c1[1] + (c2[1] - c1[1]) * segT),
-      Math.round(c1[2] + (c2[2] - c1[2]) * segT),
-    ];
-    result.push(rgbToHex(...mixed));
-  }
-  return result;
+function rightAlign(left: string, right: string, width: number): string {
+  const leftVisible = stripAnsi(left).length;
+  const rightVisible = stripAnsi(right).length;
+  const spaces = Math.max(1, width - leftVisible - rightVisible);
+  return left + " ".repeat(spaces) + right;
 }
 
 export class BannerHeader {
@@ -35,38 +14,33 @@ export class BannerHeader {
 
   render(width: number): string[] {
     if (this._disposed) return [];
-    const lines: string[] = [];
-    if (width < 60) {
-      lines.push("\u2756 Custom-PI  \u2500\u2500  terminal agent");
-      return lines;
+
+    const session = getActiveSession();
+    const footerData = getFooterData();
+    const modelName = session?.state?.model?.id || "gemma-4-e4b";
+
+    const version = "v1.11.0";
+    const mode = appMode;
+    const modeColour = mode === "agent" ? "\x1b[32m" : "\x1b[33m";
+
+    const leftText = `\x1b[2mcustom-pi\x1b[0m  \x1b[2m${version}\x1b[0m  ·  \x1b[36m${modelName}\x1b[0m  ·  ${modeColour}${mode} mode\x1b[0m`;
+
+    let rightText = "";
+    if (session) {
+      const rawCwd = session.sessionManager?.getCwd() || "";
+      const pwd = formatCwdForFooter(rawCwd, process.env.HOME || process.env.USERPROFILE);
+      const branch = footerData?.getGitBranch() || "";
+      rightText = `\x1b[2m${pwd}${branch ? ` (${branch})` : ""}\x1b[0m`;
     }
 
-    const bannerColors = interpolateColors(THEME.banner, BANNER.length);
-    const frame = Math.floor(Date.now() / 100);
-    const shimmerT = (Math.sin(frame * 0.05) * 0.5 + 0.5);
-    const shimmerX = Math.floor(shimmerT * (BANNER[0].length - 10));
+    const headerLine = rightText ? rightAlign(leftText, rightText, width) : leftText;
+    const separator = `\x1b[2m${"─".repeat(width)}\x1b[0m`;
 
-    for (let i = 0; i < BANNER.length; i++) {
-      const color = bannerColors[i] || bannerColors[bannerColors.length - 1];
-      const rawLine = BANNER[i];
-      const ch = rawLine[shimmerX];
-
-      if (frame > 0 && ch && ch !== " ") {
-        const left = rawLine.slice(0, shimmerX);
-        const right = rawLine.slice(shimmerX + 1);
-        const [r, g, b] = hexToRgb(color);
-        const coloredLeft = left ? `\x1b[38;2;${r};${g};${b}m${left}` : "";
-        const coloredMid = `\x1b[38;2;255;255;255m\x1b[1m${ch}`;
-        const coloredRight = right ? `\x1b[38;2;${r};${g};${b}m${right}` : "";
-        lines.push(coloredLeft + coloredMid + coloredRight + "\x1b[0m");
-      } else {
-        lines.push(fg(color, rawLine));
-      }
-    }
-
-    return lines;
+    return [headerLine, separator];
   }
 
   invalidate(): void {}
-  dispose(): void { this._disposed = true; }
+  dispose(): void {
+    this._disposed = true;
+  }
 }
