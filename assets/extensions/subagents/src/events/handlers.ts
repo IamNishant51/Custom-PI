@@ -170,9 +170,12 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       } catch (e: any) { logger.warn(`Skill sync failed: ${e.message}`); }
     }, 3000).unref();
 
-    setTimeout(() => {
+    // Defer consolidation far enough away from startup to not block TUI
+    // 60s gives the user a chance to start interacting before any heavy background work
+    const consolidationTimer = setTimeout(() => {
       consolidateMemory().catch((e: any) => logger.warn(`Consolidation failed: ${e.message}`));
-    }, 5000);
+    }, 60_000);
+    if (consolidationTimer?.unref) consolidationTimer.unref();
 
     await checkAndStartCron(ctx, pi);
   });

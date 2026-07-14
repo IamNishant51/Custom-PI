@@ -13,9 +13,13 @@ import { setReRenderCallback } from "../markdown/highlight";
 import { getGlobalFrame } from "../../animations";
 import { getHostAdapter } from "../../host-adapter";
 import { appMode } from "../../runtime/agent-state";
+import * as piCodingAgentTyped from "@earendil-works/pi-coding-agent";
+import * as piTuiTyped from "@earendil-works/pi-tui";
 
-// Use runtime require to bypass static type-resolution limitations
-const piAgent = require("@earendil-works/pi-coding-agent") as any;
+// Runtime references — typed as any to allow accessing runtime-only exports
+const piAgent = piCodingAgentTyped as any;
+const piTuiMod = piTuiTyped as any;
+
 const UserMessageComponent = piAgent.UserMessageComponent;
 const AssistantMessageComponent = piAgent.AssistantMessageComponent;
 const ToolExecutionComponent = piAgent.ToolExecutionComponent;
@@ -23,10 +27,11 @@ const CustomEditor = piAgent.CustomEditor;
 const FooterComponent = piAgent.FooterComponent;
 const DynamicBorder = piAgent.DynamicBorder;
 
-const piTui = require("@earendil-works/pi-tui") as any;
-const Container = piTui.Container;
-const TUI = piTui.TUI;
-const sliceByColumn = piTui.sliceByColumn;
+const Container = piTuiMod.Container;
+const TUI = piTuiMod.TUI;
+const sliceByColumn = piTuiMod.sliceByColumn;
+
+
 
 let chatContainerStartLine = 0;
 let renderedComponents: Array<{
@@ -818,15 +823,26 @@ export function applyLivePatches(tui: any, themeInstance: any) {
 
 setImmediate(() => {
   try {
-    // Monkey-patch Theme class to disable background colors
-    try {
-      const piThemeModule = require("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
-      if (piThemeModule && piThemeModule.Theme) {
-        piThemeModule.Theme.prototype.bg = function(this: any, color: string, text: string) {
-          return text;
-        };
+    // Patch Theme.prototype.bg to disable all background colors
+    // Use dynamic import() since pi-coding-agent is ESM-only (require() fails)
+    import("@earendil-works/pi-coding-agent").then((piMod: any) => {
+      try {
+        // The theme singleton is at globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")]
+        // We patch the Theme class's bg() method via the global theme instance
+        const themeKey = Symbol.for("@earendil-works/pi-coding-agent:theme");
+        const themeInstance = (globalThis as any)[themeKey];
+        if (themeInstance && themeInstance.constructor) {
+          themeInstance.constructor.prototype.bg = function(this: any, _color: string, text: string) {
+            return text; // Return text without any background ANSI codes
+          };
+          logger.info("[TUI] Theme.bg patched successfully — all background colors disabled");
+        }
+      } catch (e: any) {
+        logger.warn(`[TUI] Theme.bg patch failed: ${e.message}`);
       }
-    } catch {}
+    }).catch((e: any) => {
+      logger.warn(`[TUI] Dynamic import for theme patch failed: ${e.message}`);
+    });
 
     applyContainerPatch(Container.prototype);
     patchUserMessage(UserMessageComponent.prototype);
@@ -836,6 +852,7 @@ setImmediate(() => {
     patchFooterComponent(FooterComponent.prototype);
     patchDynamicBorder(DynamicBorder.prototype);
     patchTui(TUI.prototype);
+    logger.info("[TUI] All prototype patches applied successfully");
   } catch (e: any) {
     logger.warn(`Failed to apply static TUI patches: ${e.message}`);
   }
