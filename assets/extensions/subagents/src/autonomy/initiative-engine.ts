@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
 import { environmentSensor } from "../perception/environment-sensor";
@@ -10,6 +10,18 @@ import { writeAtomic } from "../storage-driver";
 import { logger } from "../logger";
 
 import { PATHS } from "../config";
+
+function execAsync(cmd: string, options: any = {}): Promise<string> {
+  return new Promise((resolve) => {
+    exec(cmd, options, (error, stdout: any) => {
+      if (error) {
+        resolve("");
+      } else {
+        resolve(typeof stdout === "string" ? stdout : stdout.toString());
+      }
+    });
+  });
+}
 
 const INITIATIVE_STATE_FILE = PATHS.INITIATIVE_STATE;
 
@@ -215,7 +227,7 @@ export class InitiativeEngine {
 
   private async scanOpenPRs(): Promise<void> {
     try {
-      const result = execSync("gh pr list --state open --json number,title,state,createdAt,url --limit 10 2>/dev/null || true", {
+      const result = await execAsync("gh pr list --state open --json number,title,state,createdAt,url --limit 10 2>/dev/null || true", {
         encoding: "utf8", timeout: 10000,
       });
       if (!result.trim()) return;
@@ -236,7 +248,7 @@ export class InitiativeEngine {
 
   private async scanStaleBranches(): Promise<void> {
     try {
-      const result = execSync("git branch -r --merged HEAD 2>/dev/null | head -20 || true", {
+      const result = await execAsync("git branch -r --merged HEAD 2>/dev/null | head -20 || true", {
         encoding: "utf8", timeout: 10000,
       });
       if (!result.trim()) return;
@@ -252,7 +264,7 @@ export class InitiativeEngine {
 
   private async scanTodos(): Promise<void> {
     try {
-      const result = execSync("rg -l 'TODO|FIXME|HACK|XXX|todo|fixme' --type-add 'code:*.{ts,js,tsx,jsx,mjs,mts}' -t code -g '!node_modules' -g '!dist' 2>/dev/null | head -20 || true", {
+      const result = await execAsync("rg -l 'TODO|FIXME|HACK|XXX|todo|fixme' --type-add 'code:*.{ts,js,tsx,jsx,mjs,mts}' -t code -g '!node_modules' -g '!dist' 2>/dev/null | head -20 || true", {
         encoding: "utf8", timeout: 15000,
       });
       if (!result.trim()) return;
@@ -268,7 +280,7 @@ export class InitiativeEngine {
 
   private async scanFailingTests(): Promise<void> {
     try {
-      const result = execSync("npx vitest run --reporter=json 2>/dev/null || true", {
+      const result = await execAsync("npx vitest run --reporter=json 2>/dev/null || true", {
         encoding: "utf8", timeout: 60000,
       });
       if (!result.trim()) return;

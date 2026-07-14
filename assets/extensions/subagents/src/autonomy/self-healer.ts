@@ -1,11 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import { bus, Topics } from "../event-bus/event-bus";
 import { getDaemon, Daemon } from "../daemon/daemon";
 import { logger } from "../logger";
 import Database from "better-sqlite3";
+
+function execAsync(cmd: string, options: any = {}): Promise<string> {
+  return new Promise((resolve) => {
+    exec(cmd, options, (error, stdout: any) => {
+      if (error) {
+        resolve("");
+      } else {
+        resolve(typeof stdout === "string" ? stdout : stdout.toString());
+      }
+    });
+  });
+}
+
 
 type HealthStatus = "healthy" | "degraded" | "unhealthy" | "unknown";
 
@@ -122,7 +135,7 @@ export class SelfHealer {
       severity: "high",
       check: async () => {
         try {
-          const result = execSync("df -BG ~ | tail -1", { encoding: "utf8", timeout: 3000 });
+          const result = await execAsync("df -BG ~ | tail -1", { encoding: "utf8", timeout: 3000 });
           const parts = result.trim().split(/\s+/);
           const usedPercent = parseInt(parts[4]?.replace("%", "") || "0");
           if (usedPercent > 95) return "unhealthy";
