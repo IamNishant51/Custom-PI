@@ -21,7 +21,7 @@ import { gateguard, policyValidator } from "./gateguard";
 import { registerPlugin, listPlugins, listCardRenderers, listCommands } from "./tui";
 import { contextMonitor } from "./context-monitor";
 import { coalesceMessages, strictifySchema } from "./swarm-router";
-import { C } from "./tui-colors";
+import { THEME } from "./tui/theme/theme";
 import { SPINNER_FRAMES, DOT_PULSE, PROGRESS_SPINNER, BOUNCING_BAR, STATUS_VERBS, activeTrackers, activeInvalidators, startGlobalAnimation, stopGlobalAnimation, getSpinner, getDotPulse, getProgressSpinner, getBouncingBar, getStatusVerb, getGlobalFrame, getGlobalVerbIndex, getPulseColor, getPulseBrightColor, globalPulse } from "./animations";
 import { TuiManager, SPACING as TUI_SPACING } from "./tui";
 import { logger } from "./logger";

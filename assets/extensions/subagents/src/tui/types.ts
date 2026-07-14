@@ -142,40 +142,7 @@ export interface SpinnerConfig {
   interval: number;
 }
 
-export const THEME: ThemeColors = {
-  banner: ["#ff0087", "#ff00ff", "#af5fff", "#5f00ff", "#00ffff", "#00d7ff"],
-  accent: "#ff7a17",
-  success: "#30d158",
-  warning: "#ff9f0a",
-  error: "#ff3b30",
-  info: "#5ac8fa",
-  canvas: "#0a0a0a",
-  surface: "#1a1c20",
-  surfaceElevated: "#222222",
-  surfaceOverlay: "#1e1e1e",
-  card: "#191919",
-  hairline: "#212327",
-  ink: "#ffffff",
-  muted: "#7d8187",
-  dim: "#4e5257",
-  userBubble: "#1a1c20",
-  assistantBubble: "#191919",
-  userBubbleBorder: "#212327",
-  assistantBubbleBorder: "#2c2f34",
-  agentRunning: "#ff7a17",
-  agentSuccess: "#30d158",
-  agentError: "#ff3b30",
-  agentWaiting: "#7d8187",
-  borderFocus: "#ff7a17",
-  borderActive: "#5ac8fa",
-  textSecondary: "#9ea2a8",
-  textTertiary: "#6a6e74",
-  scrollbar: "#1a1c20",
-  scrollbarThumb: "#3a3c40",
-  link: "#5ac8fa",
-  gradientStart: "#ff7a17",
-  gradientEnd: "#7c3aed",
-};
+export { THEME } from "./theme/theme";
 
 export const SPINNERS = {
   dots: { frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], interval: 80 },

@@ -5,7 +5,7 @@ import yaml from "yaml";
 import chalk from "chalk";
 import { SubAgentCreatedCard } from "../tui/components";
 import { loadAgents, AGENTS_DIR_GLOBAL, invalidateAgentCache } from "../runtime/agent-config";
-import { C } from "../tui-colors";
+import { THEME } from "../tui/theme/theme";
 
 export const toolCreateSubagent = {
   name: "create_subagent",
@@ -56,7 +56,7 @@ This specialized sub-agent is dynamically generated to handle complex tasks matc
 
     fs.writeFileSync(filePath, markdownContent, "utf8");
     invalidateAgentCache();
-    context.ui.notify(`${chalk.hex(C.teal)("\u2726")} Created sub-agent: ${chalk.hex(C.cream).bold(safeName)}`, "info");
+    context.ui.notify(`${chalk.hex(THEME.info)("\u2726")} Created sub-agent: ${chalk.hex(THEME.ink).bold(safeName)}`, "info");
 
     return {
       content: [{

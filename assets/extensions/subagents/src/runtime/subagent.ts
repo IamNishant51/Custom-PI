@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import chalk from "chalk";
 import yaml from "yaml";
 import { completeSimple } from "@earendil-works/pi-ai";
-import { C } from "../tui-colors";
+import { THEME } from "../tui/theme/theme";
 import { getSpinner, activeTrackers, startGlobalAnimation, stopGlobalAnimation } from "../animations";
 import { gateguard, policyValidator } from "../gateguard";
 import { runVerification } from "../verification-engine";
@@ -502,9 +502,9 @@ export class SubAgentRuntime {
       turnCount++;
       this.tracker.turn = turnCount;
       this.tracker.status = "running";
+      this.ctx.ui.setStatus("subagents", `${chalk.hex(THEME.accent)(getSpinner())} ${this.config.name} (turn ${turnCount}/${MAX_TURNS})`);
 
-      this.ctx.ui.setStatus("subagents", `${chalk.hex(C.lavender)(getSpinner())} ${this.config.name} (turn ${turnCount}/${MAX_TURNS})`);
-      this.onProgress?.call(null, `${chalk.hex(C.lavender)(getSpinner())} ${this.config.name} \u2014 turn ${turnCount}/${MAX_TURNS}`);
+      this.onProgress?.call(null, `${chalk.hex(THEME.accent)(getSpinner())} ${this.config.name} \u2014 turn ${turnCount}/${MAX_TURNS}`);
 
       const response = await this.callWithRetry(() => {
       if (this.signal?.aborted) throw new ToolExecutionError("Aborted by user.");
@@ -542,7 +542,7 @@ export class SubAgentRuntime {
         const results = await Promise.all(toolCalls.map(async (call: any) => {
           if (call.type !== "toolCall") return null;
           this.ctx.ui.notify(
-            `${chalk.hex(C.teal)("\u26a1")} ${this.parentName} \u2192 ${chalk.hex(C.lavender)(call.name)} \u2192 ${chalk.hex(C.cream)(this.config.name)}`,
+            `${chalk.hex(THEME.info)("\u26a1")} ${this.parentName} \u2192 ${chalk.hex(THEME.accent)(call.name)} \u2192 ${chalk.hex(THEME.ink)(this.config.name)}`,
             "info"
           );
           const result = await this.runTool(call.name, call.arguments);

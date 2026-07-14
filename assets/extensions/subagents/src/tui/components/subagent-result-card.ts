@@ -1,6 +1,6 @@
-import chalk from "chalk";
-import { C } from "../../tui-colors";
-import { truncate, elapsed, stripAnsi } from "../render/format";
+import { THEME } from "../theme/theme";
+import { fg, fgBold, dim } from "../theme/colorize";
+import { truncate, elapsed, stripAnsi, measureWidth } from "../render/format";
 import { activeTrackers } from "../../animations";
 import type { Component } from "@earendil-works/pi-tui";
 
@@ -20,15 +20,14 @@ export class SubAgentResultCard implements Component {
     const tracker = activeTrackers.get(this.ctx.toolCallId);
     const isError = this.result?.isError || this.ctx.isError;
     const lines: string[] = [];
-    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
-    const accentClr = isError ? C.coral : C.sage;
+    const accentClr = isError ? THEME.error : THEME.success;
     const icon = isError ? "\u2717" : "\u2713";
     const name = tracker?.name || this.ctx.args?.agentId || "agent";
 
     lines.push(
-      chalk.hex(accentClr).bold(`\u2500 ${icon} Sub-Agent: ${name}`) +
-      dim("\u2500".repeat(Math.max(0, w - 16 - stripAnsi(name).length)))
+      fgBold(accentClr, `\u2500 ${icon} Sub-Agent: ${name}`) +
+      dim("\u2500".repeat(Math.max(0, w - 16 - measureWidth(stripAnsi(name)))))
     );
 
     if (tracker) {
@@ -50,13 +49,13 @@ export class SubAgentResultCard implements Component {
       const COLLAPSED_LINES = 8;
       const showAll = this.expanded || resultLines.length <= COLLAPSED_LINES;
       const displayLines = showAll ? resultLines : resultLines.slice(0, COLLAPSED_LINES);
-      const contentColor = isError ? chalk.hex(C.coral) : chalk.hex(C.sand);
+      const contentColor = isError ? fg(THEME.error, "") : "";
       for (const rl of displayLines) {
-        lines.push(`  ${contentColor(truncate(rl, w - 4))}`);
+        lines.push(`  ${isError ? fg(THEME.error, truncate(rl, w - 4)) : fg(THEME.ink, truncate(rl, w - 4))}`);
       }
       if (!showAll) {
         const remaining = resultLines.length - COLLAPSED_LINES;
-        lines.push(`  ${chalk.hex(C.lavender)(`\u25b8 ${remaining} more lines - press e to expand`)}`);
+        lines.push(`  ${fg(THEME.accent, `\u25b8 ${remaining} more lines - press e to expand`)}`);
       } else if (resultLines.length > COLLAPSED_LINES) {
         lines.push(`  ${dim(`\u25be Showing all ${resultLines.length} lines - press e to collapse`)}`);
       }

@@ -1,9 +1,10 @@
-import chalk from "chalk";
 import os from "node:os";
-import { stripAnsi, truncateToWidth, elapsed } from "../render/format";
+import { stripAnsi, truncateToWidth, elapsed, measureWidth } from "../render/format";
 import { getPulseColor, getSpinner, activeTrackers } from "../../animations";
 import { stats as memoryStats } from "../../memory-store";
 import type { Component } from "@earendil-works/pi-tui";
+import { THEME } from "../theme/theme";
+import { fg } from "../theme/colorize";
 
 interface ThemeAccessor {
   fg(color: string, text: string): string;
@@ -82,8 +83,8 @@ export class QuantumHUDWidget implements Component {
 
     const headerPrefix = this.bold(this.t("accent", title));
     const headerSuffix = ` \u2500\u2500 ${statsText} `;
-    const visiblePrefixLen = stripAnsi(headerPrefix).length;
-    const visibleSuffixLen = stripAnsi(headerSuffix).length;
+    const visiblePrefixLen = measureWidth(stripAnsi(headerPrefix));
+    const visibleSuffixLen = measureWidth(stripAnsi(headerSuffix));
     const dashesCount = Math.max(0, w - visiblePrefixLen - visibleSuffixLen);
     const dashes = this.t("muted", "\u2500".repeat(dashesCount));
 
@@ -95,7 +96,7 @@ export class QuantumHUDWidget implements Component {
         const branchChar = isLast ? "\u2514\u2500\u2500" : "\u251c\u2500\u2500";
         const isRunning = agent.status === "running" || agent.status === "calling_tool" || agent.status === "spawning";
         const dot = isRunning
-          ? chalk.hex(pulseColor)(getSpinner())
+          ? fg(pulseColor, getSpinner())
           : agent.status === "success"
             ? this.t("success", "\u2713")
             : this.t("muted", "\u25cb");

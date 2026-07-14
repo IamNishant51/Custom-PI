@@ -4,7 +4,7 @@ import { ParallelAgentsCallCard, ParallelAgentsResultCard } from "../tui/compone
 import { loadAgents } from "../runtime/agent-config";
 import { SubAgentRuntime } from "../runtime/subagent";
 import { PROGRESS_SPINNER, stopGlobalAnimation, activeTrackers } from "../animations";
-import { C } from "../tui-colors";
+import { THEME } from "../tui/theme/theme";
 import { saveCheckpoint } from "../state-db";
 import { logger } from "../logger";
 import { setupWidget } from "../tui/setup-widget";
@@ -41,7 +41,7 @@ export const toolParallelSubagent = {
     }
 
     context.ui.setWorkingIndicator({
-      frames: PROGRESS_SPINNER.map((f: string) => chalk.hex(C.lavender)(f)),
+      frames: PROGRESS_SPINNER.map((f: string) => chalk.hex(THEME.accent)(f)),
       intervalMs: 120,
     });
     context.ui.setWorkingMessage(`Running ${tasks.length} sub-agents in parallel...`);
@@ -73,7 +73,7 @@ export const toolParallelSubagent = {
     setupWidget(context);
 
     context.ui.notify(
-      `${chalk.hex(C.lavender)("\u26a1")} Spawning ${chalk.hex(C.cream).bold(String(tasks.length))} sub-agents in parallel`,
+      `${chalk.hex(THEME.accent)("\u26a1")} Spawning ${chalk.hex(THEME.ink).bold(String(tasks.length))} sub-agents in parallel`,
       "info"
     );
 

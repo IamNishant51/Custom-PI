@@ -1,5 +1,5 @@
-import chalk from "chalk";
-import { C } from "../../tui-colors";
+import { THEME } from "../theme/theme";
+import { fg, fgBold, dim } from "../theme/colorize";
 import { truncate, elapsed, progressBar, stripAnsi } from "../render/format";
 import { getPulseColor, globalPulse, getDotPulse, activeTrackers, activeInvalidators } from "../../animations";
 import type { Component } from "@earendil-works/pi-tui";
@@ -38,7 +38,6 @@ export class ParallelAgentsCallCard implements Component {
   render(width: number): string[] {
     const w = Math.min(width, 100);
     const lines: string[] = [];
-    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
     const trackers: any[] = [];
     for (const [key, t] of activeTrackers) {
@@ -57,9 +56,9 @@ export class ParallelAgentsCallCard implements Component {
 
     const pulseColor = getPulseColor();
     const pulseSymbol = globalPulse.getSymbol();
-    const spinner = chalk.hex(pulseColor)(pulseSymbol);
+    const spinner = fg(pulseColor, pulseSymbol);
     lines.push(
-      chalk.hex(C.lavender)(`${spinner} Parallel Execution`) +
+      fg(THEME.accent, `${spinner} Parallel Execution`) +
       dim(` \u00b7  ${doneCount}/${total} done`) +
       dim("\u2500".repeat(Math.max(0, w - 26 - String(doneCount).length - String(total).length)))
     );
@@ -73,22 +72,22 @@ export class ParallelAgentsCallCard implements Component {
 
       let icon: string, nameStyle: string, statusLine: string;
       if (!tracker || tracker.status === "spawning") {
-        icon = chalk.hex(C.dusty)("\u25cc");
-        nameStyle = chalk.hex(C.dusty)(task.agentId);
-        statusLine = chalk.hex(C.dusty)("waiting...");
+        icon = fg(THEME.muted, "\u25cc");
+        nameStyle = fg(THEME.muted, task.agentId);
+        statusLine = fg(THEME.muted, "waiting...");
       } else if (tracker.status === "running" || tracker.status === "calling_tool") {
-        icon = chalk.hex(C.teal)(getDotPulse());
-        nameStyle = chalk.hex(C.cream).bold(task.agentId);
-        const toolInfo = tracker.currentTool ? chalk.hex(C.lavender)(` ${tracker.currentTool}`) : "";
-        statusLine = chalk.hex(C.sand)(`turn ${tracker.turn}/${tracker.maxTurns}${toolInfo}`) + dim(`  \u25f7${elapsed(tracker.startTime)}`);
+        icon = fg(THEME.info, getDotPulse());
+        nameStyle = fgBold(THEME.ink, task.agentId);
+        const toolInfo = tracker.currentTool ? fg(THEME.accent, ` ${tracker.currentTool}`) : "";
+        statusLine = fg(THEME.ink, `turn ${tracker.turn}/${tracker.maxTurns}${toolInfo}`) + dim(`  \u25f7${elapsed(tracker.startTime)}`);
       } else if (tracker.status === "complete") {
-        icon = chalk.hex(C.sage)("\u2713");
-        nameStyle = chalk.hex(C.sage).bold(task.agentId);
-        statusLine = chalk.hex(C.sage)("done") + dim(`  ${elapsed(tracker.startTime, tracker.endTime)} \u00b7 ${tracker.toolCallCount}tools`);
+        icon = fg(THEME.success, "\u2713");
+        nameStyle = fgBold(THEME.success, task.agentId);
+        statusLine = fg(THEME.success, "done") + dim(`  ${elapsed(tracker.startTime, tracker.endTime)} \u00b7 ${tracker.toolCallCount}tools`);
       } else {
-        icon = chalk.hex(C.warmRed)("\u2717");
-        nameStyle = chalk.hex(C.warmRed).bold(task.agentId);
-        statusLine = chalk.hex(C.coral)(tracker.error || "failed");
+        icon = fg(THEME.error, "\u2717");
+        nameStyle = fgBold(THEME.error, task.agentId);
+        statusLine = fg(THEME.error, tracker.error || "failed");
       }
 
       const taskPreview = truncate(task.task, Math.max(20, w - 40));
@@ -97,19 +96,19 @@ export class ParallelAgentsCallCard implements Component {
 
       if (tracker?.ceoRequest) {
         const ceo = tracker.ceoRequest;
-        const cColor = ceo.status === 'requesting' || ceo.status === 'ceo_evaluating' ? C.sage : C.orange;
+        const cColor = ceo.status === 'requesting' || ceo.status === 'ceo_evaluating' ? THEME.success : THEME.warning;
         const cIcon = ceo.status === 'ceo_evaluating' ? "\u25d0" : "\u25c9";
         const cLabel = ceo.status === 'requesting' ? `\u2192CEO:${ceo.toolName}`
           : ceo.status === 'ceo_evaluating' ? `CEO:${ceo.toolName}`
           : ceo.status === 'ceo_approved' ? `CEO\u2713:${ceo.toolName}`
           : `CEO\u2717:${ceo.toolName}`;
-        lines.push(`${childPrefix} ${chalk.hex(cColor)(cIcon)} ${dim(cLabel)}`);
+        lines.push(`${childPrefix} ${fg(cColor, cIcon)} ${dim(cLabel)}`);
       }
     }
 
     const barWidth = Math.min(30, w - 30);
-    const bar = progressBar(doneCount, total, barWidth);
-    lines.push(`  ${chalk.hex(C.lavender)(bar)}  ${chalk.hex(C.cream)(`${doneCount}/${total} complete`)}`);
+    const bar = progressBar(doneCount, total, barWidth, THEME.accent);
+    lines.push(`  ${fg(THEME.accent, bar)}  ${fg(THEME.ink, `${doneCount}/${total} complete`)}`);
 
     return lines;
   }

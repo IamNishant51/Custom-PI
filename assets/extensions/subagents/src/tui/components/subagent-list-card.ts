@@ -1,5 +1,5 @@
-import chalk from "chalk";
-import { C } from "../../tui-colors";
+import { THEME } from "../theme/theme";
+import { fg, fgBold, dim } from "../theme/colorize";
 import { truncate } from "../render/format";
 import type { Component } from "@earendil-works/pi-tui";
 
@@ -15,10 +15,9 @@ export class SubAgentListCard implements Component {
   render(width: number): string[] {
     const w = Math.min(width, 80);
     const lines: string[] = [];
-    const dim = (s: string) => chalk.hex(C.dusty)(s);
 
     lines.push(
-      chalk.hex(C.lavender).bold("\u2500 \u2605 Available Sub-Agents") +
+      fgBold(THEME.accent, "\u2500 \u2605 Available Sub-Agents") +
       dim("\u2500".repeat(Math.max(0, w - 24)))
     );
 
@@ -41,17 +40,17 @@ export class SubAgentListCard implements Component {
         if (match) {
           const [, name, desc, model, tools] = match;
           lines.push(
-            prefix + chalk.hex(C.orange).bold(name) +
-            dim(" \u2014 ") + chalk.hex(C.cream)(truncate(desc || "", w - (name || "").length - 20))
+            prefix + fgBold(THEME.warning, name) +
+            dim(" \u2014 ") + fg(THEME.ink, truncate(desc || "", w - (name || "").length - 20))
           );
           if (tools) {
             lines.push(
-              childPrefix + dim("Tools: ") + chalk.hex(C.lavender)(tools) +
-              (model ? dim("  \u00b7  Model: ") + chalk.hex(C.teal)(model) : "")
+              childPrefix + dim("Tools: ") + fg(THEME.accent, tools) +
+              (model ? dim("  \u00b7  Model: ") + fg(THEME.info, model) : "")
             );
           }
         } else {
-          lines.push(prefix + chalk.hex(C.sand)(truncate(agentLines[i].replace(/^-\s*/, ""), w - 6)));
+          lines.push(prefix + fg(THEME.ink, truncate(agentLines[i].replace(/^-\s*/, ""), w - 6)));
         }
       }
     }

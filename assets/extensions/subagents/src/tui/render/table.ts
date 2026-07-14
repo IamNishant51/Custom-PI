@@ -1,4 +1,4 @@
-import { stripAnsi, wordWrap } from "./format";
+import { stripAnsi, wordWrap, measureWidth } from "./format";
 import { BOX } from "./box";
 
 const MARKDOWN_TABLE_RE = /^\|.+\|$/;
@@ -29,7 +29,7 @@ export function renderTableGrid(rows: string[][], boxWidth: number, colorFn: (s:
   const colWidths: number[] = new Array(numCols).fill(0);
   for (const row of rows) {
     for (let c = 0; c < numCols; c++) {
-      colWidths[c] = Math.max(colWidths[c], stripAnsi(row[c] || "").length);
+      colWidths[c] = Math.max(colWidths[c], measureWidth(stripAnsi(row[c] || "")));
     }
   }
   const innerW = boxWidth - 6;
@@ -48,7 +48,7 @@ export function renderTableGrid(rows: string[][], boxWidth: number, colorFn: (s:
     const parts: string[] = [];
     for (let c = 0; c < numCols; c++) {
       const cell = cells[c] || "";
-      const cellLen = stripAnsi(cell).length;
+      const cellLen = measureWidth(stripAnsi(cell));
       parts.push(cell + " ".repeat(Math.max(0, colWidths[c] - cellLen)));
     }
     return `${sep}  ${parts.join(` ${sep} `)}  ${sep}`;
@@ -88,7 +88,7 @@ export function formatBoxContent(text: string, boxWidth: number, colorFn: (s: st
       if (parsed) {
         const grid = renderTableGrid(parsed.rows, boxWidth, colorFn);
         for (const row of grid) {
-          const contentLen = stripAnsi(row).length;
+          const contentLen = measureWidth(stripAnsi(row));
           const padding = Math.max(0, boxWidth - 4 - contentLen);
           lines.push(colorFn(BOX.v) + "  " + row.slice(2, -2).trimEnd() + " ".repeat(padding) + " " + colorFn(BOX.v));
         }
@@ -96,14 +96,14 @@ export function formatBoxContent(text: string, boxWidth: number, colorFn: (s: st
         for (const tl of tableLines) {
           const wrapped = wordWrap(tl, boxWidth - 6);
           for (const wl of wrapped) {
-            lines.push(colorFn(BOX.v) + "  " + contentColor(wl) + " ".repeat(Math.max(0, boxWidth - 4 - stripAnsi(wl).length)) + " " + colorFn(BOX.v));
+            lines.push(colorFn(BOX.v) + "  " + contentColor(wl) + " ".repeat(Math.max(0, boxWidth - 4 - measureWidth(stripAnsi(wl)))) + " " + colorFn(BOX.v));
           }
         }
       }
     } else {
       const wrapped = wordWrap(rawLines[i], boxWidth - 6);
       for (const wl of wrapped) {
-        lines.push(colorFn(BOX.v) + "  " + contentColor(wl) + " ".repeat(Math.max(0, boxWidth - 4 - stripAnsi(wl).length)) + " " + colorFn(BOX.v));
+        lines.push(colorFn(BOX.v) + "  " + contentColor(wl) + " ".repeat(Math.max(0, boxWidth - 4 - measureWidth(stripAnsi(wl)))) + " " + colorFn(BOX.v));
       }
       i++;
     }

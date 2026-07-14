@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
 import { logger } from "../../logger";
-import chalk from "chalk";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { C } from "../../tui-colors";
-import { stripAnsi, truncateToWidth, truncateLines } from "../render/format";
+import { THEME } from "../theme/theme";
+import { fg, fgBold, bgFg, dim } from "../theme/colorize";
+import { stripAnsi, truncateToWidth, truncateLines, measureWidth } from "../render/format";
 import { getGlobalFrame, getDotPulse, getPulseColor, getSpinner, activeTrackers, globalPulse, startGlobalAnimation, stopGlobalAnimation } from "../../animations";
 import { QuantumHUDWidget } from "../components/quantum-hud";
 import { getHostAdapter } from "../../host-adapter";
@@ -17,7 +17,6 @@ let renderedComponents: Array<{
   endLine: number;
 }> = [];
 let activeTuiInstance: any = null;
-let theme: any = null;
 
 let livePatchesApplied = false;
 let userMessagePatched = false;
@@ -30,21 +29,6 @@ let assistantMessagePatched = false;
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
-
-function hueToRgb(hue: number, saturation: number): string {
-  const h = ((hue % 360) + 360) % 360;
-  const c = saturation;
-  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-  const m = 0.15;
-  let r = 0, g = 0, b = 0;
-  if (h < 60) { r = c; g = x; b = 0; }
-  else if (h < 120) { r = x; g = c; b = 0; }
-  else if (h < 180) { r = 0; g = c; b = x; }
-  else if (h < 240) { r = 0; g = x; b = c; }
-  else if (h < 300) { r = x; g = 0; b = c; }
-  else { r = c; g = 0; b = x; }
-  return `${Math.round((r + m) * 255)},${Math.round((g + m) * 255)},${Math.round((b + m) * 255)}`;
-}
 
 let treeCtx: { index: number; total: number } = { index: 0, total: 0 };
 let treeCtxActive = false;
@@ -73,15 +57,9 @@ function patchUserMessage(proto: any) {
     const contentWidth = Math.max(20, width - 8);
     const mdLines = markdownComponent.render(contentWidth);
 
-    const pointerColor = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("accent", s)
-      : (s: string) => `\x1b[38;2;106;155;204m${s}\x1b[0m`;
-    const dimFn = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("muted", s)
-      : (s: string) => `\x1b[90m${s}\x1b[0m`;
-    const textFn = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("userMessageText", s)
-      : (s: string) => s;
+    const pointerColor = (s: string) => fg(THEME.accent, s);
+    const dimFn = (s: string) => fg(THEME.muted, s);
+    const textFn = (s: string) => s;
 
     const lines: string[] = [];
     const pointer = "\u276f ";
@@ -128,18 +106,17 @@ function patchToolExecution(proto: any) {
     if (isRunning) {
       const frame = getGlobalFrame();
       const hue = (frame * 3) % 360;
-      dotColor = `\x1b[38;2;${hueToRgb(hue, 0.8)}m`;
-      const blinkPhase = Math.sin(frame * 0.2);
-      dotChar = blinkPhase > 0 ? "\u25cf" : "\u25cb";
+      dotColor = fg(THEME.accent, "");
+      dotChar = "\u25cf";
     } else if (isError) {
-      dotColor = `\x1b[38;2;255;80;80m`;
+      dotColor = fg(THEME.error, "");
       dotChar = "\u25cf";
     } else {
-      dotColor = `\x1b[38;2;80;200;120m`;
+      dotColor = fg(THEME.success, "");
       dotChar = "\u25cf";
     }
     const statusDot = `${dotColor}${dotChar}\x1b[0m`;
-    const yellow = (s: string) => `\x1b[38;2;220;180;60m${s}\x1b[0m`;
+    const toolNameColor = (s: string) => fg(THEME.warning, s);
 
     let paramSummary = "";
     if (this.args && typeof this.args === "object") {
@@ -151,7 +128,7 @@ function patchToolExecution(proto: any) {
       if (params.length > 0) paramSummary = "(" + params.join(", ") + ")";
     }
 
-    const headerLine = `${statusDot} ${yellow(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
+    const headerLine = `${statusDot} ${toolNameColor(this.toolName)}${paramSummary ? " " + paramSummary : ""}`;
 
     const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit";
     const hasDiff = rawLines.some((l: string) => /^[+-]{1,3}/.test(l.trim()));
@@ -161,12 +138,10 @@ function patchToolExecution(proto: any) {
     const contentRaw = rawLines.length > 1 ? rawLines.slice(1) : [];
 
     if ((isEditTool || hasDiff) && !isRunning) {
-      const diffAdded = (s: string) => `\x1b[48;2;0;90;0m\x1b[38;2;180;255;180m ${s} \x1b[0m`;
-      const diffRemoved = (s: string) => `\x1b[48;2;90;0;0m\x1b[38;2;255;180;180m ${s} \x1b[0m`;
-      const dimFn2 = (theme && typeof theme.fg === "function")
-        ? (s: string) => theme.fg("muted", s)
-        : (s: string) => `\x1b[90m${s}\x1b[0m`;
-      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m ${s} \x1b[0m`;
+      const diffAdded = (s: string) => bgFg("#004d00", "#b4ffb4", ` ${s} `);
+      const diffRemoved = (s: string) => bgFg("#5a0000", "#ffb4b4", ` ${s} `);
+      const dimFn2 = (s: string) => fg(THEME.muted, s);
+      const bgNeutral = (s: string) => bgFg(THEME.canvas, "#b4b9c3", ` ${s} `);
       contentLines = [];
       const isWriteTool = this.toolName === "write";
       let diffBlockOpen = false;
@@ -196,7 +171,7 @@ function patchToolExecution(proto: any) {
         }
       }
     } else {
-      const bgNeutral = (s: string) => `\x1b[48;2;25;30;40m\x1b[38;2;180;185;195m ${s} \x1b[0m`;
+      const bgNeutral = (s: string) => bgFg(THEME.canvas, "#b4b9c3", ` ${s} `);
       contentLines = contentRaw.map((line: string) => indent + bgNeutral(line.trimEnd()));
     }
 
@@ -220,16 +195,14 @@ function patchAssistantMessage(proto: any) {
     const lines = originalRender.call(this, width - 4);
     if (lines.length === 0) return lines;
 
-    const purple = (s: string) => `\x1b[38;2;143;122;244m${s}\x1b[0m`;
-    const dimFn = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("muted", s)
-      : (s: string) => `\x1b[90m${s}\x1b[0m`;
+    const accentColor = (s: string) => fg(THEME.accent, s);
+    const dimFn = (s: string) => fg(THEME.muted, s);
 
-    const assistantLabel = "C-PI";
+    const assistantLabel = "Custom-PI";
     const prefix = "\u2756 ";
 
     const result: string[] = [];
-    result.push(purple(truncateToWidth(prefix + assistantLabel, width - 4)));
+    result.push(accentColor(truncateToWidth(prefix + assistantLabel, width - 4)));
     for (const line of lines) {
       result.push(line);
     }
@@ -281,16 +254,14 @@ function patchCustomEditor(proto: any) {
     const result: string[] = [];
     const leftPadding = " ".repeat(paddingX);
     const rightPadding = leftPadding;
-    const dimFn = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("muted", s)
-      : (s: string) => `\x1b[90m${s}\x1b[0m`;
+    const dimFn = (s: string) => fg(THEME.muted, s);
 
     const horizontalStr = "\u2500".repeat(width);
     const horizontal = dimFn(horizontalStr);
 
     if (this.scrollOffset > 0) {
       const indicator = `\u2500\u2500\u2500 \u2191 ${this.scrollOffset} more `;
-      const remaining = width - stripAnsi(indicator).length;
+      const remaining = width - measureWidth(stripAnsi(indicator));
       if (remaining >= 0) {
         result.push(dimFn(indicator + "\u2500".repeat(remaining)));
       } else {
@@ -301,9 +272,7 @@ function patchCustomEditor(proto: any) {
     }
 
     const emitCursorMarker = this.focused && !this.autocompleteState;
-    const pointerColor = (theme && typeof theme.fg === "function")
-      ? (s: string) => theme.fg("accent", s)
-      : (s: string) => `\x1b[38;2;106;155;204m${s}\x1b[0m`;
+    const pointerColor = (s: string) => fg(THEME.accent, s);
     const prefixStr = pointerColor("\u276f ");
     const indentStr = "  ";
 
@@ -350,7 +319,7 @@ function patchCustomEditor(proto: any) {
     const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
     if (linesBelow > 0) {
       const indicator = `\u2500\u2500\u2500 \u2193 ${linesBelow} more `;
-      const remaining = width - stripAnsi(indicator).length;
+      const remaining = width - measureWidth(stripAnsi(indicator));
       result.push(dimFn(indicator + "\u2500".repeat(Math.max(0, remaining))));
     }
 
@@ -446,8 +415,6 @@ export function applyLivePatches(tui: any, themeInstance: any) {
   if (livePatchesApplied) return;
   livePatchesApplied = true;
   debugLog("APPLYING LIVE ESM PATCHES");
-
-  theme = themeInstance;
 
   const TuiPrototype = Object.getPrototypeOf(tui);
   const ContainerPrototype = Object.getPrototypeOf(TuiPrototype);

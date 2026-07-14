@@ -1,0 +1,38 @@
+import type { ThemeColors } from "../types";
+
+export const THEME: ThemeColors = {
+  banner: ["#8f7af4", "#00d7ff", "#00f087"],
+  accent: "#8f7af4",
+  success: "#00f087",
+  warning: "#ffb86c",
+  error: "#ff5555",
+  info: "#00d7ff",
+  canvas: "#0f0e15",
+  surface: "#1a1830",
+  surfaceElevated: "#221f38",
+  surfaceOverlay: "#221f38",
+  card: "#1a1830",
+  hairline: "#2c2846",
+  ink: "#e2e0eb",
+  muted: "#6a687a",
+  dim: "#48465a",
+  userBubble: "#1a1830",
+  assistantBubble: "#1a1830",
+  userBubbleBorder: "#2c2846",
+  assistantBubbleBorder: "#2c2846",
+  agentRunning: "#8f7af4",
+  agentSuccess: "#00f087",
+  agentError: "#ff5555",
+  agentWaiting: "#6a687a",
+  borderFocus: "#8f7af4",
+  borderActive: "#00d7ff",
+  textSecondary: "#a9a6ba",
+  textTertiary: "#6a687a",
+  scrollbar: "#48465a",
+  scrollbarThumb: "#2c2846",
+  link: "#00d7ff",
+  gradientStart: "#8f7af4",
+  gradientEnd: "#00f087",
+};
+
+export const BRAND_ACCENT_BRIGHT = "#b3a4ff";

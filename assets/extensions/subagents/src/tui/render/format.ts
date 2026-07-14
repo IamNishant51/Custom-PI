@@ -1,13 +1,16 @@
-import chalk from "chalk";
-import { C } from "../../tui-colors";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { measureWidth } from "../utils/measure-text";
+export { measureWidth };
+import { THEME } from "../theme/theme";
+import { fg } from "../theme/colorize";
 
 export function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]|\x1B\].*?\x07|\x1B\[.*?m/g, "");
 }
 
 export function truncateToWidth(str: string, width: number): string {
-  if (stripAnsi(str).length <= width) return str;
+  const plain = stripAnsi(str);
+  if (measureWidth(plain) <= width) return str;
   let result = "";
   let visibleLen = 0;
   let inAnsi = false;
@@ -22,9 +25,10 @@ export function truncateToWidth(str: string, width: number): string {
         inAnsi = false;
       }
     } else {
-      if (visibleLen < width) {
+      const cw = measureWidth(char);
+      if (visibleLen + cw <= width) {
         result += char;
-        visibleLen++;
+        visibleLen += cw;
       } else {
         break;
       }
@@ -36,12 +40,12 @@ export function truncateToWidth(str: string, width: number): string {
 export function wordWrap(text: string, maxWidth: number): string[] {
   const lines: string[] = [];
   for (const rawLine of text.split("\n")) {
-    if (stripAnsi(rawLine).length <= maxWidth) {
+    if (measureWidth(stripAnsi(rawLine)) <= maxWidth) {
       lines.push(rawLine);
       continue;
     }
     let remaining = rawLine;
-    while (stripAnsi(remaining).length > maxWidth) {
+    while (measureWidth(stripAnsi(remaining)) > maxWidth) {
       let breakIdx = -1;
       let visLen = 0;
       let inAnsi = false;
@@ -49,8 +53,9 @@ export function wordWrap(text: string, maxWidth: number): string[] {
         const ch = remaining[i];
         if (ch === "\x1B") { inAnsi = true; continue; }
         if (inAnsi) { if (ch.match(/[a-zA-Z]/)) inAnsi = false; continue; }
-        visLen++;
-        if (visLen > maxWidth) break;
+        const cw = measureWidth(ch);
+        if (visLen + cw > maxWidth) break;
+        visLen += cw;
         if (ch === " ") breakIdx = i;
       }
       if (breakIdx <= 0) {
@@ -86,7 +91,7 @@ export function progressBar(current: number, total: number, width: number, color
   const filledPart = "\u2588".repeat(filled);
   const emptyPart = "\u2591".repeat(empty);
   if (color) {
-    return chalk.hex(color)(filledPart) + chalk.hex(C.dusty)(emptyPart);
+    return fg(color, filledPart) + fg(THEME.muted, emptyPart);
   }
   return filledPart + emptyPart;
 }

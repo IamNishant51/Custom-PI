@@ -8,6 +8,7 @@ import {
 } from "./types";
 import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
 import { hexToRgb, rgbToHex } from "./utils/color";
+import { useTruecolor } from "./theme/capabilities";
 import { PulseController } from "./app/pulse-controller";
 
 const GUTTER = SPACING.gutter;
@@ -44,23 +45,15 @@ export class ScreenRenderer {
   }
 
   constructor() {
-    this.pool = new StylePool(true);
+    this.useTruecolor = useTruecolor();
+    this.pool = new StylePool(this.useTruecolor);
     this.screen = new TerminalScreen(this.pool);
     this.writer = new AnsiWriter();
     this.theme = { ...THEME };
     this.pulse = new PulseController();
-    this.useTruecolor = this.detectTruecolor();
     this.pool.setTruecolor(this.useTruecolor);
     this.pool.clear();
     this.pool.prewarm();
-  }
-
-  private detectTruecolor(): boolean {
-    const term = process.env.COLORTERM || "";
-    if (term === "truecolor" || term === "24bit") return true;
-    const colorterm = process.env.TERM || "";
-    if (colorterm.includes("truecolor") || colorterm.includes("24-bit")) return true;
-    return false;
   }
 
   /** Recompute content area dimensions based on terminal width */
@@ -266,7 +259,7 @@ export class ScreenRenderer {
     const w = Math.min(width, cols - cx - GUTTER);
 
     const titleText = ` ${title} `;
-    const titleLen = stripAnsi(titleText).length;
+    const titleLen = measureWidth(stripAnsi(titleText));
     const lineLen = Math.max(0, w - 2 - titleLen - 1);
 
     if (y >= this.screen.getRows()) return y;
@@ -882,12 +875,12 @@ export class ScreenRenderer {
       : this.style({ fg: state.color });
 
     const titleText = ` ${symbol} ${title} `;
-    const lineLen = Math.max(0, w - 2 - stripAnsi(titleText).length - 1);
+    const lineLen = Math.max(0, w - 2 - measureWidth(stripAnsi(titleText)) - 1);
 
     this.screen.clearLine(y, canvasStyle);
     this.screen.writeString(cx, y, BOX.tl + BOX.h.repeat(Math.floor(lineLen / 2)), borderStyle);
     this.screen.writeString(cx + Math.floor(lineLen / 2), y, titleText, borderStyle);
-    this.screen.writeString(cx + Math.floor(lineLen / 2) + stripAnsi(titleText).length, y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, borderStyle);
+    this.screen.writeString(cx + Math.floor(lineLen / 2) + measureWidth(stripAnsi(titleText)), y, BOX.h.repeat(Math.ceil(lineLen / 2)) + BOX.tr, borderStyle);
 
     return { y: y + 1, pulseStyle: borderStyle };
   }

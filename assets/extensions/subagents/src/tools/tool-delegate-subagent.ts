@@ -4,7 +4,7 @@ import { SubAgentCallCard, SubAgentResultCard } from "../tui/components";
 import { loadAgents } from "../runtime/agent-config";
 import { SubAgentRuntime } from "../runtime/subagent";
 import { SPINNER_FRAMES, stopGlobalAnimation, activeTrackers } from "../animations";
-import { C } from "../tui-colors";
+import { THEME } from "../tui/theme/theme";
 import { saveCheckpoint } from "../state-db";
 import { logger } from "../logger";
 import { setupWidget } from "../tui/setup-widget";
@@ -38,7 +38,7 @@ export const toolDelegateSubagent = {
     }
 
     context.ui.setWorkingIndicator({
-      frames: SPINNER_FRAMES.map((f: string) => chalk.hex(C.teal)(f)),
+      frames: SPINNER_FRAMES.map((f: string) => chalk.hex(THEME.info)(f)),
       intervalMs: 80,
     });
     context.ui.setWorkingMessage(`${config.name} is working...`);
@@ -46,7 +46,7 @@ export const toolDelegateSubagent = {
     setupWidget(context);
 
     context.ui.notify(
-      `${chalk.hex(C.orange)("\u25a3")} Spawning sub-agent: ${chalk.hex(C.cream).bold(config.name)}`,
+      `${chalk.hex(THEME.warning)("\u25a3")} Spawning sub-agent: ${chalk.hex(THEME.ink).bold(config.name)}`,
       "info"
     );
 
