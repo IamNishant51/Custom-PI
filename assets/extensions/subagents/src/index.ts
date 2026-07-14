@@ -266,23 +266,39 @@ export default function (pi: ExtensionAPI) {
 
   loadMark("after mcp setup");
 
-  // ── Initialize v2 TUI (if enabled) ──────────────────────────────────────────
-  if (process.env.CUSTOM_PI_TUI_V2 === "1") {
+  // ── Initialize Ascension Subsystems (Phase 0–8) — always runs ──────────────
+  setImmediate(() => {
+    try {
+      initializeAscension({
+        daemonEnabled: true,
+        autoDiscoverMcp: false,
+        healthCheckInterval: 300000,
+      }).catch((e: any) => logger.error(`[Ascension] Initialization failed: ${e.message}`));
+    } catch (e: any) {
+      logger.error(`[Ascension] Initialization failed: ${e.message}`);
+    }
+    loadMark("after initializeAscension");
+  });
+
+  // ── Terminal UI ────────────────────────────────────────────────────────────
+  // v2 TUI is the default. Use CUSTOM_PI_LEGACY_TUI=1 to fall back to the legacy UI.
+  const useLegacyTui = process.env.CUSTOM_PI_LEGACY_TUI === "1";
+  if (!useLegacyTui) {
     setImmediate(async () => {
       try {
         const { TuiAppV2 } = await import("./tui/v2/TuiAppV2");
         const v2App = new TuiAppV2({
-          theme: { 
-            mode: "auto", 
+          theme: {
+            mode: "auto",
             truecolor: process.env.CUSTOM_PI_TRUECOLOR === "1",
             reducedMotion: process.env.CUSTOM_PI_REDUCED_MOTION === "1",
             highContrast: process.env.CUSTOM_PI_HIGH_CONTRAST === "1",
           },
         });
-        
+
         // Store v2 app reference for event handlers
         (globalThis as any).__customPiTuiV2 = v2App;
-        
+
         // Initialize session info
         const model = (pi as any).model?.name || "unknown";
         const sessionId = "session-" + Date.now();
@@ -302,21 +318,6 @@ export default function (pi: ExtensionAPI) {
       } catch (e: any) {
         logger.error(`[TUI v2] Failed to initialize: ${e.message}`);
       }
-    });
-  } else {
-    // Legacy TUI initialization path
-    // Initialize Ascension Subsystems (Phase 0–8)
-    setImmediate(() => {
-      try {
-        initializeAscension({
-          daemonEnabled: true,
-          autoDiscoverMcp: false,
-          healthCheckInterval: 300000,
-        }).catch((e: any) => logger.error(`[Ascension] Initialization failed: ${e.message}`));
-      } catch (e: any) {
-        logger.error(`[Ascension] Initialization failed: ${e.message}`);
-      }
-      loadMark("after initializeAscension");
     });
   }
   // ── Register extracted tool definitions ───────────────────────────────────
