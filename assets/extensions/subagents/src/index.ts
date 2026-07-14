@@ -287,7 +287,16 @@ export default function (pi: ExtensionAPI) {
         const model = (pi as any).model?.name || "unknown";
         const sessionId = "session-" + Date.now();
         v2App.setSessionInfo(model, sessionId);
-        
+
+        v2App.onSubmit = (text: string) => {
+          try {
+            v2App.addMessage("user", text);
+            (pi as any).sendMessage?.({ role: "user", content: [{ type: "text", text }] });
+          } catch (e: any) {
+            process.stderr.write(`\x1b[31m[TUI v2] Submit error: ${e?.message}\x1b[0m\n`);
+          }
+        };
+
         v2App.start();
         loadMark("after tui v2 start");
       } catch (e: any) {
