@@ -772,7 +772,8 @@ function patchTui(proto: any) {
   proto.start = function (this: any) {
     activeTuiInstance = this;
     originalTuiStart.call(this);
-    // SGR mouse + stdin patching is handled by enableMouseTracking() at startup
+    // Re-enable mouse tracking after TUI init (may reset terminal modes)
+    process.stdout.write("\x1b[?1000h\x1b[?1006h");
   };
 
   const originalTuiStop = proto.stop;
