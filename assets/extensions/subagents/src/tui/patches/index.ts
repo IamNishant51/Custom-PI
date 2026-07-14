@@ -425,7 +425,10 @@ function patchCustomEditor(proto: any) {
 
   proto.render = function (this: any, width: number) {
     const boxWidth = Math.max(10, width - 2);
-    const contentWidthForText = boxWidth - 4; // internal content width
+    // Fixed border overhead per content line:
+    // ' '(1) + '│ '(2) + prefix(2) + ' │'(2) + ' '(1) = 8 chars
+    // So contentWidth = width - 8
+    const contentWidthForText = Math.max(10, width - 8);
     this.lastWidth = contentWidthForText;
 
     const layoutLines = this.layoutText(contentWidthForText);
@@ -523,16 +526,19 @@ function patchCustomEditor(proto: any) {
     result.push(bottomBorder);
 
     if (this.autocompleteState && this.autocompleteList) {
+      // autocomplete lines use indentStr (2 chars) not linePrefix, same overhead applies
       const autocompleteResult = this.autocompleteList.render(contentWidthForText);
       for (const line of autocompleteResult) {
         const lineWidth = vw(line);
         const linePadding = " ".repeat(Math.max(0, contentWidthForText - lineWidth));
-        result.push(" " + dimFn("│ ") + indentStr + line + linePadding + dimFn(" │") + " ");
+        const autoLine = " " + dimFn("│ ") + indentStr + line + linePadding + dimFn(" │") + " ";
+        result.push(truncateToWidth(autoLine, width));
       }
       result.push(bottomBorder); // Re-add bottom border under autocomplete
     }
 
-    return result;
+    // Safety net: hard-truncate any line that still exceeds terminal width
+    return truncateLines(result, width);
   };
 }
 
@@ -595,11 +601,12 @@ function patchFooterComponent(proto: any) {
 
     const right = `\x1b[2mTab to toggle  ·  ? for help\x1b[0m`;
 
-    const leftVisible = stripAnsi(left).length;
-    const rightVisible = stripAnsi(right).length;
+    const leftVisible = measureWidth(left);
+    const rightVisible = measureWidth(right);
     const spaces = Math.max(1, width - leftVisible - rightVisible);
 
-    return [left + " ".repeat(spaces) + right];
+    const line = left + " ".repeat(spaces) + right;
+    return truncateLines([line], width);
   };
 }
 
