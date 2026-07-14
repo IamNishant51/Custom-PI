@@ -5,6 +5,7 @@ import { parseInline, type StyledSegment } from "./inline";
 import { parseBlocks, parseBlocksStreaming, type Block } from "./block";
 import { highlightBlock, highlightAsync } from "./highlight";
 import { BOX } from "../types";
+import { wordWrap, truncateToWidth, visibleWidth } from "../render/format";
 
 export interface RenderOptions {
   width: number;
@@ -45,21 +46,29 @@ function renderParagraph(text: string, width: number): string[] {
   const lines: string[] = [];
   for (const line of text.split("\n")) {
     const styled = renderInline(line, width);
-    if (styled) lines.push(styled);
+    if (styled) {
+      lines.push(...wordWrap(styled, width));
+    }
   }
   return lines;
 }
 
 function renderHeading(text: string, level: number, width: number): string[] {
   const styled = renderInline(text, width);
+  const wrapped = wordWrap(styled || "", width);
   const ruler = dim("\u2500".repeat(width));
+  const result: string[] = [];
   if (level === 1) {
-    return [ruler, fgBold(THEME.accent, styled || ""), ruler];
+    result.push(ruler);
+    result.push(...wrapped.map(l => fgBold(THEME.accent, l)));
+    result.push(ruler);
+  } else if (level === 2) {
+    result.push(...wrapped.map(l => fgBold(THEME.accent, l)));
+    result.push(ruler);
+  } else {
+    result.push(...wrapped.map(l => fgBold(THEME.ink, l)));
   }
-  if (level === 2) {
-    return [fgBold(THEME.accent, styled || ""), ruler];
-  }
-  return [fgBold(THEME.ink, styled || "")];
+  return result;
 }
 
 function renderList(items: Array<{ text: string; ordered: boolean; orderNum?: number }>, width: number): string[] {
@@ -71,16 +80,26 @@ function renderList(items: Array<{ text: string; ordered: boolean; orderNum?: nu
     const indentWidth = measureWidth(prefix);
     const contentWidth = Math.max(1, width - indentWidth);
     const styled = renderInline(item.text, contentWidth);
-    lines.push(fg(THEME.muted, prefix) + (styled || ""));
+    const wrapped = wordWrap(styled || "", contentWidth);
+    if (wrapped.length > 0) {
+      lines.push(fg(THEME.muted, prefix) + wrapped[0]);
+      const indent = " ".repeat(indentWidth);
+      for (let j = 1; j < wrapped.length; j++) {
+        lines.push(indent + wrapped[j]);
+      }
+    }
   }
   return lines;
 }
 
 function renderBlockquote(text: string, width: number): string[] {
   const lines: string[] = [];
+  const contentWidth = Math.max(1, width - 4);
   for (const line of text.split("\n")) {
-    const styled = renderInline(line, Math.max(1, width - 4));
-    lines.push(fg(THEME.hairline, "\u2502 ") + (styled || ""));
+    const styled = renderInline(line, contentWidth);
+    const wrapped = wordWrap(styled || "", contentWidth);
+    const leftBar = fg(THEME.hairline, "\u2502 ");
+    lines.push(...wrapped.map(wl => leftBar + wl));
   }
   return lines;
 }
@@ -96,15 +115,16 @@ function renderCode(code: string, lang: string, lines: string[], width: number):
   const cached = highlightBlock(code, lang);
   if (cached && cached !== code) {
     for (const line of cached.split("\n")) {
-      result.push(`  ${line}`);
+      const truncated = visibleWidth(line) > innerWidth ? truncateToWidth(line, innerWidth) : line;
+      result.push(`  ${truncated}`);
     }
   } else {
     if (lang) {
       highlightAsync(code, lang);
     }
     for (const line of lines) {
-      const trimmed = line.length > innerWidth ? line.slice(0, innerWidth) : line;
-      result.push(`  ${dim(trimmed)}`);
+      const truncated = visibleWidth(line) > innerWidth ? truncateToWidth(line, innerWidth) : line;
+      result.push(`  ${dim(truncated)}`);
     }
   }
 
@@ -131,7 +151,8 @@ function renderTable(rows: string[][], width: number): string[] {
   for (let r = 0; r < rows.length; r++) {
     const cells = rows[r].map((cell, c) => {
       const w = colWidths[c] || 10;
-      const padded = cell.padEnd(w);
+      const cleanCell = cell.length > w ? cell.slice(0, Math.max(1, w - 3)) + "..." : cell;
+      const padded = cleanCell.padEnd(w);
       if (r === 0) return fgBold(THEME.ink, padded);
       return fg(THEME.ink, padded);
     });

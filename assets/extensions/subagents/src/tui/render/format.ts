@@ -1,4 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+export { visibleWidth };
 import { measureWidth } from "../utils/measure-text";
 export { measureWidth };
 import { THEME } from "../theme/theme";
