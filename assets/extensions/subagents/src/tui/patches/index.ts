@@ -795,10 +795,10 @@ function enableMouseTracking() {
   if ((process.stdin as any)._customPiPatched) return;
 
   process.stdout.write("\x1b[?1000h\x1b[?1006h");
+  (process.stdin as any)._customPiPatched = true;
 
   const originalEmit = process.stdin.emit;
   (process.stdin as any)._originalEmit = originalEmit;
-  (process.stdin as any)._customPiPatched = true;
 
   process.stdin.emit = function (this: any, event: string, data: any, ...args: any[]) {
     if (event === "data") {
@@ -830,23 +830,26 @@ function enableMouseTracking() {
           return true;
         }
       }
-
-      const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-      if (mouseMatch) {
-        const button = parseInt(mouseMatch[1], 10);
-        const col = parseInt(mouseMatch[2], 10);
-        const row = parseInt(mouseMatch[3], 10);
-        const isRelease = mouseMatch[4] === "m";
-        if (!isRelease && button === 0 && col >= 0 && row >= 0) {
-          handleTerminalMouseClick(col, row);
-        }
-        return true;
-      }
     }
     const emit = (process.stdin as any)._originalEmit;
     if (emit) return emit.call(this, event, data, ...args);
     return EventEmitter.prototype.emit.call(this, event, data, ...args);
   };
+
+  // Separate listener for mouse events — doesn't consume, fires alongside other listeners
+  process.stdin.on("data", function (this: any, data: Buffer) {
+    const raw = data.toString("utf8");
+    const mouseMatch = raw.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+    if (mouseMatch) {
+      const button = parseInt(mouseMatch[1], 10);
+      const col = parseInt(mouseMatch[2], 10);
+      const row = parseInt(mouseMatch[3], 10);
+      const isRelease = mouseMatch[4] === "m";
+      if (!isRelease && button === 0 && col >= 0 && row >= 0) {
+        handleTerminalMouseClick(col, row);
+      }
+    }
+  });
 }
 
 export function applyLivePatches(tui: any, themeInstance: any) {
