@@ -12,3 +12,4 @@ _PLAN*.md
 *TUI_UPGRADE*.md
 __pycache__/
 *.pyc
+FIX.md

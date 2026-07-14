@@ -112,7 +112,7 @@ export class UniversalToolCreator {
     lines.push(``);
 
     for (const endpoint of spec.endpoints) {
-      const fnName = `${spec.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${endpoint.path.replace(/[\/{}]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "root"}`;
+      const fnName = `${spec.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${endpoint.path.replace(/[/{}]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "root"}`;
       const method = endpoint.method.toLowerCase();
       const queryParams = endpoint.parameters.filter(p => p.location === "query").map(p => p.name);
       const pathParams = endpoint.parameters.filter(p => p.location === "path").map(p => p.name);
@@ -175,7 +175,7 @@ export class UniversalToolCreator {
 
     const endpoints: APISpec["endpoints"] = [];
 
-    const pathMatches = readme.matchAll(/`(GET|POST|PUT|DELETE|PATCH)\s+(\/[a-zA-Z0-9_\/{}.-]*)`/g);
+    const pathMatches = readme.matchAll(/`(GET|POST|PUT|DELETE|PATCH)\s+(\/[a-zA-Z0-9_/{}.-]*)`/g);
     for (const match of pathMatches) {
       const method = match[1];
       const urlPath = match[2];

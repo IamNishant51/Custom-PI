@@ -89,7 +89,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     let animStopped = false;
     const animManager = new AnimManager(
       (msg) => { if (!animStopped) { try { ctx.ui.setWorkingMessage(msg); } catch { animStopped = true; } } },
-      (indicator) => { if (!animStopped) { try { indicator ? ctx.ui.setWorkingIndicator(indicator) : ctx.ui.setWorkingIndicator(); } catch { animStopped = true; } } },
+      (indicator) => { if (!animStopped) { try { if (indicator) { ctx.ui.setWorkingIndicator(indicator); } else { ctx.ui.setWorkingIndicator(); } } catch { animStopped = true; } } },
     );
     (ctx as any).__animManager = animManager;
 
@@ -121,18 +121,22 @@ export function registerEventHandlers(pi: ExtensionAPI) {
       }, { once: true });
     }
 
+    let lastModeToggle = 0;
     try {
-      let lastModeToggle = 0;
       setUnsubTabHandler(ctx.ui.onTerminalInput((data: string) => {
         if (data === "\t") {
-          setAppMode(appMode === "agent" ? "plan" : "agent");
-          lastModeToggle = Date.now();
-          ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-          ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
+          try {
+            setAppMode(appMode === "agent" ? "plan" : "agent");
+            lastModeToggle = Date.now();
+            ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
+            ctx.ui.notify(`Switched to ${appMode.toUpperCase()} mode`, "info");
+          } catch (e: any) { logger.warn(`Tab toggle failed: ${e.message}`); }
           return { consume: true };
         }
       }));
+    } catch (e: any) { logger.warn(`Tab handler setup failed: ${e.message}`); }
 
+    try {
       ctx.ui.setWidget("app-mode-indicator", (_tui: any, _theme: any) => ({
         render(width: number): string[] {
           const mode = appMode === "agent" ? "AGENT" : "PLAN";
@@ -155,12 +159,12 @@ export function registerEventHandlers(pi: ExtensionAPI) {
         dispose() {},
       }), { placement: "aboveEditor" });
       ctx.ui.setStatus("app-mode", appMode === "agent" ? "◆ AGENT" : "◆ PLAN");
-    } catch (e: any) { logger.warn("MCP config init write failed", e?.message || String(e)); }
+    } catch (e: any) { logger.warn(`Widget setup failed: ${e.message}`); }
 
     // Defer skill sync to avoid blocking TUI startup
     setTimeout(() => {
       try {
-        const skillsSrc = path.join(__dirname, "..", "skills");
+        const skillsSrc = path.join(os.homedir(), ".pi", "agent", "extensions", "subagents", "skills");
         if (fs.existsSync(skillsSrc)) {
           const skillDirs = fs.readdirSync(skillsSrc, { withFileTypes: true }).filter(d => d.isDirectory());
           for (const dir of skillDirs) {

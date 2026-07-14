@@ -1,5 +1,6 @@
 import { logger } from "../logger";
 import { bus, Topics } from "../event-bus/event-bus";
+import { getGraph } from "../state-graph/property-graph";
 
 export type ExpertiseLevel = "beginner" | "intermediate" | "advanced" | "expert";
 export type CommunicationStyle = "concise" | "detailed" | "technical" | "educational" | "conversational";
@@ -304,7 +305,6 @@ export class TheoryOfMind {
   async persist(userId: string): Promise<void> {
     const user = this.getUserModel(userId);
     try {
-      const getGraph = (await import("../state-graph/property-graph")).getGraph;
       const graph = getGraph();
       graph.addNode("user_preference", `User ${userId}`, {
         userId,

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 function sanitizeGitRef(input: string): string {
-  return input.replace(/[^a-zA-Z0-9_\-.\/]/g, "");
+  return input.replace(/[^a-zA-Z0-9_\-./]/g, "");
 }
 
 export interface RepoState {

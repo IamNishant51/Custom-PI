@@ -12,13 +12,13 @@ export const secretsLeakedAssertion: VerificationAssertion = {
   ruleName: "No Exposed Secrets or Credentials",
   severity: "blocker",
   assertionFn: async (diff) => {
-    const genericApiKey = /(api[_-]?key|secret|password|passwd|authorization)\s*[:=]\s*["'][a-zA-Z0-9_\-]{16,}["']/i;
+    const genericApiKey = /(api[_-]?key|secret|password|passwd|authorization)\s*[:=]\s*["'][a-zA-Z0-9_-]{16,}["']/i;
     const githubPat = /ghp_[a-zA-Z0-9]{36}/;
     const githubOauth = /gho_[a-zA-Z0-9]{36}/;
     const slackToken = /xoxb-[0-9]{11}-[0-9]{12}-[a-zA-Z0-9]{24}/;
     const slackUserToken = /xoxp-[0-9]{11}-[0-9]{12}-[a-zA-Z0-9]{24}/;
     const awsKey = /AKIA[0-9A-Z]{16}/;
-    const bearerToken = /Bearer\s+[a-zA-Z0-9_\-\.]{20,}/;
+    const bearerToken = /Bearer\s+[a-zA-Z0-9_\-.]{20,}/;
     const openaiKey = /sk-[a-zA-Z0-9]{20,}/;
     const anthropicKey = /sk-ant-[a-zA-Z0-9]{20,}/;
 
@@ -121,7 +121,7 @@ export const absolutePathsAssertion: VerificationAssertion = {
   ruleName: "No Hardcoded Absolute Host Paths",
   severity: "warning",
   assertionFn: async (diff) => {
-    const hostPathRegex = /["']\/(home|etc|var|usr|bin|tmp)\/[a-zA-Z0-9_\-\.\/]+["']/g;
+    const hostPathRegex = /["']\/(home|etc|var|usr|bin|tmp)\/[a-zA-Z0-9_\-./]+["']/g;
     if (hostPathRegex.test(diff)) {
       return {
         passed: false,

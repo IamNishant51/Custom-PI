@@ -111,7 +111,6 @@ export class SelfHealer {
       severity: "critical",
       check: async () => {
         try {
-          const { bus } = await import("../event-bus/event-bus");
           const count = bus.getEventCount();
           return count >= 0 ? "healthy" : "unhealthy";
         } catch { return "unhealthy"; }

@@ -146,10 +146,10 @@ export class SubAgentRuntime {
   }
 
   static readonly SECRET_PATTERNS = [
-    /(?:api[_-]?key|secret|password|passwd|token|auth)[\s]*[:=][\s]*['"][a-zA-Z0-9_\-]{16,}['"]/i,
+    /(?:api[_-]?key|secret|password|passwd|token|auth)[\s]*[:=][\s]*['"][a-zA-Z0-9_-]{16,}['"]/i,
     /gh[pousr]_[a-zA-Z0-9]{36,}/,
     /sk-[a-zA-Z0-9]{20,}/,
-    /xox[baprs]-[0-9a-zA-Z\-]{10,}/,
+    /xox[baprs]-[0-9a-zA-Z-]{10,}/,
     /AKIA[0-9A-Z]{16}/,
   ];
 

@@ -177,13 +177,13 @@ export const tools: ToolDefinition[] = [
         let url = params.url.replace(/\.git$/, "").trim();
         let branch = "";
 
-        const treeMatch = url.match(/^(https?:\/\/github\.com\/[^\/]+\/[^\/]+)\/tree\/(.+)$/);
+        const treeMatch = url.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)\/tree\/(.+)$/);
         if (treeMatch) {
           url = treeMatch[1];
           branch = treeMatch[2];
         }
 
-        const match = url.match(/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+?)(?:\/|$)/);
+        const match = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\/|$)/);
         if (!match) {
           return { content: [{ type: "text", text: "Invalid GitHub URL. Expected format: https://github.com/owner/repo" }], isError: true };
         }

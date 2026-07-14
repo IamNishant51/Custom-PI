@@ -180,7 +180,7 @@ module.exports = { generateToken, authenticate };
     });
 
     const routeHandlers = endpoints.map(ep => {
-      const handlerName = ep.route.replace(/[\/:]/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "") || "root";
+      const handlerName = ep.route.replace(/[/:]/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "").replace(/\/$/, "") || "root";
       return `router.${ep.method}("${ep.route}", async (req, res) => {
   try {
     res.json({ message: "${handlerName} endpoint", data: null });

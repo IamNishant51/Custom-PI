@@ -91,7 +91,7 @@ export class SecurityAutopilot {
   private initializePatterns(): void {
     this.secretPatterns = [
       { name: "AWS Access Key", pattern: /AKIA[0-9A-Z]{16}/, severity: "critical" },
-      { name: "AWS Secret Key", pattern: /aws(.{0,20})?(?<![A-Za-z0-9+\/=])[A-Za-z0-9\/+=]{40}(?![A-Za-z0-9+\/=])/i, severity: "critical" },
+      { name: "AWS Secret Key", pattern: /aws(.{0,20})?(?<![A-Za-z0-9+/=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9+/=])/i, severity: "critical" },
       { name: "GitHub Token", pattern: /gh[pousr]_[A-Za-z0-9_]{36,}/, severity: "critical" },
       { name: "GitHub Fine-Grained", pattern: /github_pat_[A-Za-z0-9_]{82,}/, severity: "critical" },
       { name: "NPM Token", pattern: /npm_[A-Za-z0-9]{36,}/, severity: "high" },
@@ -99,9 +99,9 @@ export class SecurityAutopilot {
       { name: "Slack Token", pattern: /xox[baprs]-[A-Za-z0-9]{10,}/, severity: "high" },
       { name: "Private Key", pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/, severity: "critical" },
       { name: "JWT Token", pattern: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, severity: "high" },
-      { name: "Generic API Key", pattern: /(api[_-]?key|apikey|secret|token|password).{0,10}['\"]?[A-Za-z0-9_\-]{16,}['\"]?/i, severity: "high" },
+      { name: "Generic API Key", pattern: /(api[_-]?key|apikey|secret|token|password).{0,10}['"]?[A-Za-z0-9_-]{16,}['"]?/i, severity: "high" },
       { name: "Connection String", pattern: /(mongodb|postgresql|mysql|redis):\/\/[^\s]+/, severity: "critical" },
-      { name: "Heroku API Key", pattern: /[hH][eE][rR][oO][kK][uU].{0,30}[A-Za-z0-9\-]{20,}/, severity: "high" },
+      { name: "Heroku API Key", pattern: /[hH][eE][rR][oO][kK][uU].{0,30}[A-Za-z0-9-]{20,}/, severity: "high" },
     ];
   }
 
