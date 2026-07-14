@@ -6,7 +6,6 @@ import { activeInvalidators } from "../animations";
 let widgetInstance: QuantumHUDWidget | null = null;
 let bannerInstance: BannerHeader | null = null;
 let activeTuiInstance: any = null;
-let bannerTimer: ReturnType<typeof setInterval> | null = null;
 
 export function setupWidget(ctx: ExtensionContext) {
   if (widgetInstance) return;
@@ -22,16 +21,13 @@ export function setupWidget(ctx: ExtensionContext) {
   };
   activeInvalidators.set(key, invalidator);
 
-  ctx.ui.setHeader((tui: any, themeInstance: any) => {
-    activeTuiInstance = tui;
-    return bannerInstance!;
-  });
-
-  if (!bannerTimer) {
-    bannerTimer = setInterval(() => {
-      bannerInstance?.tick();
-      activeTuiInstance?.requestRender();
-    }, 50);
+  try {
+    ctx.ui.setHeader((tui: any, themeInstance: any) => {
+      activeTuiInstance = tui;
+      return bannerInstance!;
+    });
+  } catch (e: any) {
+    // setHeader not available in all host versions
   }
 
   ctx.ui.setWidget("subagent-dashboard", (tui: any, themeInstance: any) => {
@@ -43,15 +39,11 @@ export function setupWidget(ctx: ExtensionContext) {
 }
 
 export function teardownWidget(ctx: ExtensionContext) {
-  ctx.ui.setHeader(undefined);
+  try { ctx.ui.setHeader(undefined); } catch {}
   ctx.ui.setWidget("subagent-dashboard", undefined);
   ctx.ui.setWidget("app-mode-indicator", undefined);
   ctx.ui.setStatus("app-mode", undefined);
   activeInvalidators.delete("subagent-dashboard-widget");
-  if (bannerTimer) {
-    clearInterval(bannerTimer);
-    bannerTimer = null;
-  }
   if (bannerInstance) {
     bannerInstance.dispose();
     bannerInstance = null;

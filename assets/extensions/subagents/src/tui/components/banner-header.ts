@@ -31,12 +31,7 @@ function interpolateColors(colors: string[], steps: number): string[] {
 }
 
 export class BannerHeader {
-  private frame = 0;
   private _disposed = false;
-
-  tick(): void {
-    this.frame++;
-  }
 
   render(width: number): string[] {
     if (this._disposed) return [];
@@ -52,8 +47,9 @@ export class BannerHeader {
       lines.push(fg(color, BANNER[i]));
     }
 
-    if (this.frame > 0) {
-      const shimmerT = (Math.sin(this.frame * 0.05) * 0.5 + 0.5);
+    const frame = Math.floor(Date.now() / 100);
+    if (frame > 0) {
+      const shimmerT = (Math.sin(frame * 0.05) * 0.5 + 0.5);
       const shimmerX = Math.floor(shimmerT * (BANNER[0].length - 10));
       for (let i = 0; i < BANNER.length; i++) {
         const ch = BANNER[i][shimmerX];
