@@ -97,9 +97,10 @@ export class StylePool {
   private _keyCache: Map<string, number> = new Map();
 
   private _rgb(hex: string): string {
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
+    const clean = hex.startsWith("#") ? hex.slice(1) : hex;
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
     return `${r};${g};${b}`;
   }
 
@@ -107,14 +108,22 @@ export class StylePool {
     return `s:${def.fg ?? ""}:${def.bg ?? ""}:${def.bold ?? false}:${def.dim ?? false}:${def.italic ?? false}:${def.underline ?? false}:${def.inverse ?? false}:${def.strikethrough ?? false}`;
   }
 
+  private _hexTo256(hex: string): number {
+    const clean = hex.startsWith("#") ? hex.slice(1) : hex;
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    return 16 + 36 * Math.round(r / 255 * 5) + 6 * Math.round(g / 255 * 5) + Math.round(b / 255 * 5);
+  }
+
   private _ansi256Id(def: StyleDef): number {
-    const fg = def.fg ?? 255;
-    const bg = def.bg ?? 0;
+    const fgId = def.fg !== undefined ? this._hexTo256(String(def.fg)) : 255;
+    const bgId = def.bg !== undefined ? this._hexTo256(String(def.bg)) : 0;
     const bold = def.bold ? 1 : 0;
-    const id = (fg << 16) | (bg << 8) | bold;
+    const id = (fgId << 16) | (bgId << 8) | bold;
     const parts: string[] = [];
-    if (def.fg !== undefined) parts.push(`\x1b[38;5;${fg}m`);
-    if (def.bg !== undefined) parts.push(`\x1b[48;5;${bg}m`);
+    if (def.fg !== undefined) parts.push(`\x1b[38;5;${fgId}m`);
+    if (def.bg !== undefined) parts.push(`\x1b[48;5;${bgId}m`);
     if (def.bold) parts.push("\x1b[1m");
     if (def.dim) parts.push("\x1b[2m");
     if (def.italic) parts.push("\x1b[3m");
