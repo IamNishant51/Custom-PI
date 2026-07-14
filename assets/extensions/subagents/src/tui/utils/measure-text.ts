@@ -13,13 +13,16 @@ export function measureWidth(text: string): number {
       (code >= 0xFE30 && code <= 0xFE6F) ||
       (code >= 0xFF01 && code <= 0xFF60) ||
       (code >= 0xFFE0 && code <= 0xFFE6) ||
+      // Enclosed Alphanumerics Supplement through Symbols and Pictographs Extended-A
+      // Covers all common emoji: U+1F100-U+1FAFF
+      // Includes: emoticons, transport, misc symbols, supplemental symbols, chess, etc.
+      (code >= 0x1F100 && code <= 0x1FAFF) ||
+      // Kana Supplement
       (code >= 0x1B000 && code <= 0x1B0FF) ||
+      // Musical Symbols
       (code >= 0x1D000 && code <= 0x1D0FF) ||
+      // CJK Extension B and beyond
       (code >= 0x20000 && code <= 0x2FA1F) ||
-      // Emoji 5.0+ Chess Symbols
-      (code >= 0x1FA00 && code <= 0x1FA6F) ||
-      // Symbols and Pictographs Extended-A
-      (code >= 0x1FA70 && code <= 0x1FA7F) ||
       // Supplementary Private Use Area A and B (covers newer emoji)
       (code >= 0xF0000 && code <= 0x10FFFF)
     )) {
