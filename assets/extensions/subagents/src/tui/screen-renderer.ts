@@ -6,7 +6,7 @@ import {
   type ThemeColors, type PulseConfig, type ResponsiveBreakpoint,
   type ConversationHeader, type ScrollIndicator, type SurfaceLevel,
 } from "./types";
-import { stripAnsi, measureWidth, wordWrap } from "./utils/measure-text";
+import { stripAnsi, measureWidth, wordWrap, truncateToWidth } from "./utils/measure-text";
 import { hexToRgb, rgbToHex } from "./utils/color";
 import { useTruecolor } from "./theme/capabilities";
 import { ICONS } from "./theme/icons";
@@ -738,7 +738,7 @@ export class ScreenRenderer {
     this.screen.writeString(cx + 2, y, icon, iconStyle);
     this.screen.writeString(cx + 4, y, ` ${name} `, nameStyle);
     const dur = opts?.duration ? ` \u25f7 ${opts.duration}` : "";
-    const rightStart = cx + w - dur.length - 2;
+    const rightStart = cx + w - measureWidth(stripAnsi(dur)) - 2;
     this.screen.writeString(rightStart, y, dur, metaStyle);
     this.screen.writeString(cx + w - 1, y, "\u2500\u256e", bStyle);
     y++;
@@ -767,11 +767,13 @@ export class ScreenRenderer {
       this.screen.writeString(cx + w - 1, y, "\u2502", bStyle);
       y++;
 
+      const maxOutputWidth = this.breakpoint === "compact" ? Math.min(30, w - 14) : w - 8;
       for (const ol of opts.outputLines.slice(-3)) {
         if (y >= this.screen.getRows() - GUTTER) break;
         this.screen.clearLine(y, cardBgStyle);
         this.screen.writeString(cx, y, "\u2502 ", bStyle);
-        const trimmed = ol.length > w - 8 ? ol.slice(0, w - 12) + "\u2026" : ol;
+        const plain = stripAnsi(ol);
+        const trimmed = measureWidth(plain) > maxOutputWidth ? truncateToWidth(ol, maxOutputWidth - 1) + "\u2026" : ol;
         this.screen.writeString(cx + PAD, y, trimmed, outputStyle);
         this.screen.writeString(cx + w - 1, y, " \u2502", bStyle);
         y++;
@@ -851,8 +853,8 @@ export class ScreenRenderer {
     const sizeStr = ` ${cols}x${this.screen.getRows()} `;
     this.screen.writeString(cols - measureWidth(sizeStr) - GUTTER, y, sizeStr, dimStyle);
 
-    // Hint (centered between info and size)
-    if (opts?.hint) {
+    // Hint (centered between info and size) — hide on compact breakpoint
+    if (opts?.hint && this.breakpoint !== "compact") {
       const hintStyle = this.style({ fg: this.theme.dim, italic: true });
       const hintW = measureWidth(stripAnsi(opts.hint));
       const hintX = cols - GUTTER - hintW - measureWidth(stripAnsi(sizeStr)) - 4;

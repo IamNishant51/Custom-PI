@@ -1,10 +1,10 @@
 import { appMode } from "../../runtime/agent-state";
 import { getActiveSession, getFooterData, formatCwdForFooter } from "../patches";
-import { stripAnsi } from "../render/format";
+import { stripAnsi, measureWidth } from "../render/format";
 
 function rightAlign(left: string, right: string, width: number): string {
-  const leftVisible = stripAnsi(left).length;
-  const rightVisible = stripAnsi(right).length;
+  const leftVisible = measureWidth(stripAnsi(left));
+  const rightVisible = measureWidth(stripAnsi(right));
   const spaces = Math.max(1, width - leftVisible - rightVisible);
   return left + " ".repeat(spaces) + right;
 }

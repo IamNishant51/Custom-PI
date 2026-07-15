@@ -82,8 +82,21 @@ export function elapsed(startTime: number, endTime?: number): string {
 }
 
 export function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 1) + "\u2026";
+  const plain = stripAnsi(str);
+  if (measureWidth(plain) <= maxLen) return str;
+  let visible = 0;
+  let result = "";
+  let inAnsi = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === "\x1B") { inAnsi = true; result += ch; continue; }
+    if (inAnsi) { result += ch; if (ch.match(/[a-zA-Z]/)) inAnsi = false; continue; }
+    const cw = measureWidth(ch);
+    if (visible + cw > maxLen - 1) break;
+    result += ch;
+    visible += cw;
+  }
+  return result + "\u2026";
 }
 
 export function progressBar(current: number, total: number, width: number, color?: string): string {

@@ -610,10 +610,6 @@ function patchFooterComponent(proto: any) {
   };
 }
 
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\].*?\x1b\\/g, "").trim();
-}
-
 function handleTerminalMouseClick(col: number, row: number) {
   const logFile = path.join(os.homedir(), ".pi", "agent", "mouse-debug.log");
   const log = (msg: string) => {
@@ -751,9 +747,9 @@ function patchTui(proto: any) {
     if (renderedComponents.length > 0) {
       const firstComp = renderedComponents[0];
       if (firstComp.renderedLines.length > 0) {
-        const target = stripAnsi(firstComp.renderedLines[0]);
+        const target = stripAnsi(firstComp.renderedLines[0]).trim();
         for (let i = 0; i < filtered.length; i++) {
-          if (stripAnsi(filtered[i]) === target) {
+          if (stripAnsi(filtered[i]).trim() === target) {
             chatContainerStartLine = i - firstComp.startLine;
             break;
           }

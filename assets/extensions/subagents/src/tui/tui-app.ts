@@ -228,6 +228,7 @@ export class TuiApp {
   }
 
   private _doRender(): void {
+    const _frameStart = process.env.PI_TUI_DEBUG_FRAMES ? performance.now() : 0;
     const idleTime = Date.now() - this.lastInputTime;
     if (idleTime > 5000 && !this.hasActiveAnimations()) {
       const now = Date.now();
@@ -245,7 +246,7 @@ export class TuiApp {
     if (cols < SPACING.minScreenCols || rows < SPACING.minScreenRows) {
       renderer.screen.clear(canvasStyle);
       const msg = "Resize your terminal to at least 60x16 to use the Custom-PI TUI";
-      const x = Math.max(0, Math.floor((cols - msg.length) / 2));
+      const x = Math.max(0, Math.floor((cols - measureWidth(msg)) / 2));
       const y = Math.floor(rows / 2);
       const msgStyle = renderer.style({ fg: renderer.theme.warning, bold: true });
       renderer.screen.writeString(x, y, msg, msgStyle);
@@ -394,6 +395,15 @@ export class TuiApp {
     this.lastRenderMaxY = currentMaxY;
 
     renderer.render();
+
+    if (_frameStart) {
+      const elapsed = performance.now() - _frameStart;
+      if (elapsed > 4) {
+        try {
+          process.stderr.write(`\x1b[2m[tui-app frame: ${elapsed.toFixed(1)}ms, dirty rows: ${this.lastRenderMaxY}]\x1b[0m\n`);
+        } catch {}
+      }
+    }
   }
 
   private handleMouseClick(x: number, y: number): void {
