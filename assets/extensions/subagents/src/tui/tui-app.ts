@@ -8,6 +8,8 @@ import { AutocompleteProvider, type AutocompleteItem } from "./autocomplete";
 import { InChatSearch } from "./search";
 import { Dialog, ModelSelector, TranscriptViewer } from "./dialogs";
 import type { ModelEntry } from "./dialogs";
+import { ToastManager } from "./toast";
+import { SidebarPanel } from "./sidebar";
 
 interface TrackerData {
   id: string;
@@ -69,9 +71,12 @@ export class TuiApp {
   private cmdPalette: CommandPalette;
   private autocomplete = new AutocompleteProvider();
   private search = new InChatSearch();
+  private _vimPendingG = false;
   private confirmDialog = new Dialog({ title: "Confirm", body: ["Proceed?"], confirmText: "Confirm", cancelText: "Cancel" });
   private modelSelector = new ModelSelector();
   private transcriptViewer = new TranscriptViewer();
+  private toasts = new ToastManager();
+  private sidebar = new SidebarPanel();
 
   private getAutocompleteItems(): AutocompleteItem[] {
     return [
@@ -408,6 +413,13 @@ export class TuiApp {
 
     renderer.updateLayout();
 
+    // Adjust content area for sidebar
+    if (this.sidebar.state.visible) {
+      const sbw = this.sidebar.state.width + 1;
+      renderer.contentLeft += sbw;
+      renderer.contentWidth = Math.max(40, renderer.contentWidth - sbw);
+    }
+
     for (const [id, tracker] of globalTrackers) {
       this.trackers.set(id, tracker as any);
     }
@@ -418,6 +430,28 @@ export class TuiApp {
 
     const defaultStyle = renderer.style({ bg: renderer.theme.canvas });
     let currentMaxY = 0;
+    const hairlineFg = renderer.style({ fg: renderer.theme.hairline });
+    const cardStyle = renderer.style({ bg: renderer.theme.card });
+
+    // Render sidebar content
+    if (this.sidebar.state.visible) {
+      const sbLines = this.sidebar.render();
+      const sbw = this.sidebar.state.width;
+      for (let si = 0; si < sbLines.length && si < rows; si++) {
+        renderer.screen.clearLine(si, defaultStyle);
+        renderer.screen.writeString(0, si, sbLines[si], defaultStyle);
+      }
+      // Separator and fill remaining sidebar area
+      for (let si = 0; si < rows; si++) {
+        if (si < sbLines.length) {
+          renderer.screen.writeString(sbw, si, "\u2502", hairlineFg);
+        } else {
+          renderer.screen.clearLine(si, defaultStyle);
+          renderer.screen.writeString(0, si, " ".repeat(sbw), cardStyle);
+          renderer.screen.writeString(sbw, si, "\u2502", hairlineFg);
+        }
+      }
+    }
 
     const statusBarY = rows - 1;
     const inputAreaY = statusBarY - SPACING.inputAreaLines;
@@ -592,6 +626,18 @@ export class TuiApp {
       }
     }
 
+    // Toast notifications (top-right overlay)
+    const toastLines = this.toasts.render(cols);
+    if (toastLines.length > 0) {
+      const toastStartY = Math.max(2, Math.floor(rows * 0.08));
+      for (let ti = 0; ti < toastLines.length; ti++) {
+        const py = toastStartY + ti;
+        if (py >= rows) break;
+        renderer.screen.clearLine(py, defaultStyle);
+        renderer.screen.writeString(cols - 50, py, toastLines[ti], defaultStyle);
+      }
+    }
+
     // Modal dialog overlays (drawn on top of everything)
     const activeDialog = this.confirmDialog.visible ? this.confirmDialog
       : this.modelSelector.visible ? this.modelSelector
@@ -696,6 +742,13 @@ export class TuiApp {
       return;
     }
 
+    // Sidebar input
+    if (this.sidebar.state.visible) {
+      this.sidebar.handleInput(data);
+      this.tui.requestFrame();
+      return;
+    }
+
     // Modal dialogs — intercept before everything
     if (this.confirmDialog.visible) {
       this.confirmDialog.handleInput(data);
@@ -709,6 +762,13 @@ export class TuiApp {
     }
     if (this.transcriptViewer.visible) {
       this.transcriptViewer.handleInput(data);
+      this.tui.requestFrame();
+      return;
+    }
+
+    // Ctrl+B (0x02) to toggle sidebar
+    if (data === "\x02") {
+      this.sidebar.toggle();
       this.tui.requestFrame();
       return;
     }
@@ -753,6 +813,50 @@ export class TuiApp {
           this.tui.requestFrame();
           return;
         }
+      }
+    }
+
+    // Vim message list navigation (normal mode, no input text)
+    if (this.tui.vimInput.state.mode === "normal" && !this.inputText) {
+      if (data !== "g" && data !== "G" && this._vimPendingG) {
+        this._vimPendingG = false;
+      }
+      if (data === "j" || data === "\x1b[B") {
+        this.scrollOffset = Math.max(0, this.scrollOffset + 1);
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "k" || data === "\x1b[A") {
+        this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "g") {
+        this._vimPendingG = true;
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "G") {
+        this.scrollOffset = 0;
+        this._vimPendingG = false;
+        this.tui.requestFrame();
+        return;
+      }
+      if (this._vimPendingG && data === "g") {
+        this.scrollOffset = this.messageLog.length;
+        this._vimPendingG = false;
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "\x1b[5~" || data === "\x04") { // PageUp / Ctrl+D
+        this.scrollOffset = Math.max(0, this.scrollOffset - 10);
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "\x1b[6~" || data === "\x15") { // PageDown / Ctrl+U
+        this.scrollOffset = Math.max(0, this.scrollOffset + 10);
+        this.tui.requestFrame();
+        return;
       }
     }
 
