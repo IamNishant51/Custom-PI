@@ -56,6 +56,42 @@ export class TuiApp {
   private _lastMessageCount = -1;
   private hintIndex = 0;
   private lastHintSwitch = 0;
+  private _agentState: "idle" | "thinking" | "working" | "error" = "idle";
+  private _lastTitleUpdate = 0;
+  private scrollAccel = { lastEventTime: 0, velocity: 0, accumulated: 0 };
+  private _pendingRecap = "";
+
+  private acceleratedScroll(delta: number): number {
+    const now = Date.now();
+    const dt = Math.max(1, now - this.scrollAccel.lastEventTime);
+    this.scrollAccel.lastEventTime = now;
+    this.scrollAccel.velocity *= Math.pow(0.5, dt / 100);
+    this.scrollAccel.velocity += Math.abs(delta) * 0.1;
+    const lines = Math.abs(delta) + (this.scrollAccel.velocity > 1 ? Math.log2(this.scrollAccel.velocity) * 2 : 0);
+    this.scrollAccel.accumulated += lines;
+    const result = Math.floor(this.scrollAccel.accumulated);
+    this.scrollAccel.accumulated -= result;
+    return Math.sign(delta) * Math.max(1, Math.abs(result));
+  }
+
+  private getStatusLight(): { emoji: string; state: string } {
+    const map: Record<string, { emoji: string; state: string }> = {
+      idle: { emoji: "\u{1F7E2}", state: "idle" },
+      thinking: { emoji: "\u{1F7E1}", state: "thinking" },
+      working: { emoji: "\u{1F534}", state: "working" },
+      error: { emoji: "\u26A0\uFE0F", state: "error" },
+    };
+    return map[this._agentState] || map.idle;
+  }
+
+  private updateTerminalTitle(): void {
+    const now = Date.now();
+    if (now - this._lastTitleUpdate < 2000) return;
+    this._lastTitleUpdate = now;
+    const light = this.getStatusLight();
+    const cwd = process.cwd().split("/").pop() || "custom-pi";
+    process.stdout.write(`\x1b]0;${light.emoji} Custom-PI \u2014 ${cwd} [${light.state}]\x07`);
+  }
 
   private hasActiveAnimations(): boolean {
     if (this.trackers.size > 0) return true;
@@ -239,6 +275,23 @@ export class TuiApp {
     this.frameCounter++;
     this.syncMessages();
 
+    // Session recap — show after idle period with enough history
+    if (!this._pendingRecap && idleTime > 180000 && this.messageLog.length >= 6) {
+      const lastMsgs = this.messageLog.slice(-6);
+      const userMsgs = lastMsgs.filter(m => m.role === "user").length;
+      const toolLike = lastMsgs.filter(m => m.role === "assistant" || m.role === "thinking").length;
+      this._pendingRecap = `\u2501 Since you were away: ${userMsgs} prompts, ${toolLike} responses \u2501`;
+    }
+
+    const hasRunning = Array.from(this.trackers.values()).some(
+      t => t.status === "running" || t.status === "calling_tool"
+    );
+    const hasError = Array.from(this.trackers.values()).some(
+      t => t.status === "error"
+    );
+    this._agentState = hasRunning ? "working" : hasError ? "error" : "idle";
+    this.updateTerminalTitle();
+
     const renderer = this.tui.renderer;
     const cols = renderer.screen.getCols();
     const rows = renderer.screen.getRows();
@@ -290,10 +343,13 @@ export class TuiApp {
     const totalVisible = this.messageLog.length;
     const olderCount = Math.max(0, totalVisible - 10 - this.scrollOffset);
     const scroll: ScrollIndicator = { visible: olderCount > 0, olderCount, newerCount: this.scrollOffset };
-    y = renderer.drawScrollIndicator(y, scroll);
+    if (renderer.breakpoint === "compact") {
+      y = renderer.drawScrollIndicator(y, scroll);
+    }
 
     const maxMessages = Math.max(1, maxContentBottom - y - 2);
     const visibleMessages = this.messageLog.slice(-maxMessages);
+
     this.renderedElements = [];
 
     for (let i = 0; i < visibleMessages.length; i++) {
@@ -366,6 +422,15 @@ export class TuiApp {
       renderer.drawInputArea(inputAreaY, renderer.contentWidth, this.inputText, this.cursorPos, this.tui.vimInput.state.mode);
     }
 
+    // Show session recap before status bar
+    if (this._pendingRecap && y < statusBarY - 1) {
+      const recapStyle = renderer.style({ fg: renderer.theme.muted, dim: true, italic: true });
+      renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
+      renderer.screen.writeString(renderer.contentLeft, y, this._pendingRecap, recapStyle);
+      y++;
+      if (idleTime < 5000) this._pendingRecap = "";
+    }
+
     if (statusBarY < rows) {
       const now = Date.now();
       if (now - this.lastHintSwitch > 5000) {
@@ -383,6 +448,15 @@ export class TuiApp {
           hint: ROTATING_HINTS[this.hintIndex],
         });
       }
+    }
+
+    // Draw scrollbar overlay
+    if (renderer.breakpoint !== "compact") {
+      renderer.drawScrollbar(0, rows - 2, {
+        total: this.messageLog.length,
+        visible: maxMessages,
+        offset: this.scrollOffset,
+      });
     }
 
     currentMaxY = y;

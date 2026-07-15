@@ -1,3 +1,5 @@
+import path from "node:path";
+import fs from "node:fs";
 import { visibleWidth } from "@earendil-works/pi-tui";
 export { visibleWidth };
 import { measureWidth } from "../utils/measure-text";
@@ -5,8 +7,27 @@ export { measureWidth };
 import { THEME } from "../theme/theme";
 import { fg } from "../theme/colorize";
 
+export function hyperlink(text: string, uri: string): string {
+  return `\x1b]8;;${uri}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
+export function linkifyFilePaths(text: string, cwd?: string): string {
+  const dir = cwd ?? process.cwd();
+  const filePattern = /(?<=^|\s)\(?([\w./-]+\.[a-z]{1,4})(?::(\d+))?(?::(\d+))?\)?(?=\s|$|[.,;:!?])/gi;
+  return text.replace(filePattern, (match, file, line, col) => {
+    const absPath = path.isAbsolute(file) ? file : path.resolve(dir, file);
+    try {
+      if (!fs.existsSync(absPath)) return match;
+    } catch { return match; }
+    let uri = `file://${absPath}`;
+    if (line) uri += `#${line}`;
+    if (col) uri += `:${col}`;
+    return hyperlink(match, uri);
+  });
+}
+
 export function stripAnsi(str: string): string {
-  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]|\x1B\].*?\x07|\x1B\[.*?m/g, "");
+  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]|\x1B\].*?\x07|\x1B\[.*?m|\x1b]8;;.*?\x1b\\/g, "");
 }
 
 export function truncateToWidth(str: string, width: number): string {

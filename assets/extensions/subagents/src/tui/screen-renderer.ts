@@ -3,10 +3,12 @@ import { StylePool } from "./style-pool";
 import { AnsiWriter } from "./ansi-writer";
 import {
   THEME, BOX, SPACING, hexToAnsi, getResponsiveBreakpoint,
+  LAYOUT_PRESETS,
   type ThemeColors, type PulseConfig, type ResponsiveBreakpoint,
   type ConversationHeader, type ScrollIndicator, type SurfaceLevel,
+  type LayoutConfig,
 } from "./types";
-import { stripAnsi, measureWidth, wordWrap, truncateToWidth } from "./utils/measure-text";
+import { stripAnsi, measureWidth, wordWrap, truncateToWidth, linkifyFilePaths } from "./render/format";
 import { hexToRgb, rgbToHex } from "./utils/color";
 import { useTruecolor } from "./theme/capabilities";
 import { ICONS } from "./theme/icons";
@@ -29,6 +31,14 @@ export class ScreenRenderer {
   breakpoint: ResponsiveBreakpoint = "normal";
   contentLeft: number = GUTTER;
   contentWidth: number = 80;
+  layout: LayoutConfig = { ...LAYOUT_PRESETS.default };
+
+  setLayout(name: string): void {
+    const preset = LAYOUT_PRESETS[name];
+    if (preset) {
+      this.layout = { ...preset };
+    }
+  }
 
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -174,6 +184,7 @@ export class ScreenRenderer {
   // ── New Layout Methods ──────────────────────────────────────────────────
 
   drawConversationHeader(y: number, opts: ConversationHeader): number {
+    if (!this.layout.showConversationHeader) return y;
     const cols = this.screen.getCols();
     if (y >= this.screen.getRows()) return y;
 
@@ -214,7 +225,28 @@ export class ScreenRenderer {
     return y + 1;
   }
 
+  drawScrollbar(y: number, height: number, state: { total: number; visible: number; offset: number }): void {
+    const cols = this.screen.getCols();
+    if (state.total <= state.visible || state.total === 0) return;
+    const trackH = Math.max(1, height - 2);
+    const thumbH = Math.max(1, Math.round((state.visible / state.total) * trackH));
+    const thumbPos = trackH > thumbH ? Math.round((state.offset / (state.total - state.visible)) * (trackH - thumbH)) : 0;
+    const thumbStyle = this.style({ fg: this.theme.scrollbarThumb || this.theme.muted });
+    const trackStyle = this.style({ fg: this.theme.scrollbar || this.theme.dim });
+    const x = cols - 2;
+    for (let row = 0; row < height; row++) {
+      const sr = y + row;
+      if (sr >= this.screen.getRows()) break;
+      if (row >= thumbPos && row < thumbPos + thumbH) {
+        this.screen.writeString(x, sr, "\u2588", thumbStyle);
+      } else {
+        this.screen.writeString(x, sr, "\u2591", trackStyle);
+      }
+    }
+  }
+
   drawScrollIndicator(y: number, opts: ScrollIndicator): number {
+    if (!this.layout.showScrollIndicator) return y;
     const cols = this.screen.getCols();
     if (y >= this.screen.getRows()) return y;
 
@@ -254,6 +286,7 @@ export class ScreenRenderer {
   }
 
   drawBanner(startY: number, animFrame?: number): number {
+    if (!this.layout.showBanner) return startY;
     const banner = [
       "  ██████╗ ██╗   ██╗ ██████╗ ████████╗ ██████╗ ███╗   ███╗      ██████╗ ██╗",
       " ██╔════╝ ██║   ██║██╔════╝ ╚══██╔══╝██╔═══██╗████╗ ████║      ██╔══██╗██║",
@@ -265,8 +298,7 @@ export class ScreenRenderer {
     const cols = this.screen.getCols();
     const canvasStyle = this.style({ bg: this.theme.canvas });
 
-    const bp = this.breakpoint;
-    if (bp === "compact") {
+    if (this.layout.bannerCompact) {
       const glyph = "\u2756 Custom-PI";
       const gStyle = this.style({ fg: this.theme.accent, bold: true });
       this.screen.clearLine(startY, canvasStyle);
@@ -458,9 +490,10 @@ export class ScreenRenderer {
       if (y >= this.screen.getRows() - GUTTER) break;
       this.screen.clearLine(y, bubbleBg);
       const clean = line.trimEnd();
-      const visibleLen = measureWidth(stripAnsi(clean));
+      const linked = linkifyFilePaths(clean);
+      const visibleLen = measureWidth(stripAnsi(linked));
       const pad = Math.max(0, bubbleW - PAD - visibleLen);
-      this.screen.writeString(startX + PAD_SM, y, clean + " ".repeat(pad), contentStyle);
+      this.screen.writeString(startX + PAD_SM, y, linked + " ".repeat(pad), contentStyle);
       this.screen.writeString(startX, y, "\u2502", bStyle);
       this.screen.writeString(startX + bubbleW - 1, y, "\u2502", bStyle);
       y++;
@@ -555,6 +588,8 @@ export class ScreenRenderer {
     const cx = this.contentLeft;
     const cw = this.contentWidth;
     const w = Math.min(cw, cols - cx - GUTTER);
+    const inputLines = this.layout.inputAreaHeight;
+    const isCompact = this.layout.inputAreaCompact;
 
     const borderStyle = this.style({ fg: this.theme.hairline, dim: true });
     const inputStyle = this.style({ fg: this.theme.ink });
@@ -566,13 +601,12 @@ export class ScreenRenderer {
     const slashStyle = this.style({ fg: this.theme.warning });
     const shellStyle = this.style({ fg: this.theme.error });
 
-    if (y >= this.screen.getRows() - SPACING.inputAreaLines) return y;
+    if (y >= this.screen.getRows() - inputLines) return y;
 
     const maxVisibleChars = w - 3;
 
-    // Split text into lines for multi-line display
     const lines = text.split("\n");
-    const visibleLines = lines.slice(-3); // max 3 visible lines
+    const visibleLines = lines.slice(-inputLines);
 
     // Top border separator line (sleek and borderless, single line divider)
     this.screen.clearLine(y, canvasStyle);
@@ -659,14 +693,14 @@ export class ScreenRenderer {
       y++;
     }
 
-    // Fill remaining input lines with empty canvas lines if fewer than 3
-    for (let li = visibleLines.length; li < 3; li++) {
+    // Fill remaining input lines
+    for (let li = visibleLines.length; li < inputLines; li++) {
       if (y >= this.screen.getRows() - 1) break;
       this.screen.clearLine(y, canvasStyle);
       y++;
     }
 
-    // Mode bar below input (no bottom border box, just a clean flat status indicator bar)
+    // Mode bar below input (compact mode hides hints)
     if (y < this.screen.getRows()) {
       this.screen.clearLine(y, this.surfaceStyle("surface"));
       if (vimMode) {
@@ -683,13 +717,43 @@ export class ScreenRenderer {
         this.screen.writeString(cx + PAD_SM + 12 + measureWidth(lineCount) + 1, y, "\u2502", this.style({ fg: this.theme.dim }));
       }
 
-      // Right hint
-      const hint = "\u2302 Ctrl+Enter send";
-      this.screen.writeString(cx + cw - measureWidth(hint) - PAD_SM, y, hint, modeStyle);
+      // Right hint (hidden in compact mode)
+      if (!isCompact) {
+        const hint = "\u2302 Ctrl+Enter send";
+        this.screen.writeString(cx + cw - measureWidth(hint) - PAD_SM, y, hint, modeStyle);
+      }
       y++;
     }
 
     return y;
+  }
+
+  private drawAgentCardCompact(y: number, width: number, name: string, status: string, opts?: {
+    verb?: string; toolCalls?: string; outputLines?: string[]; duration?: string; animate?: boolean; animFrame?: number;
+  }): number {
+    const cols = this.screen.getCols();
+    const cx = this.contentLeft;
+    const w = Math.min(width, cols - cx - GUTTER);
+    const isRunning = status === "running" || status === "calling_tool";
+    const isSuccess = status === "success" || status === "complete";
+    const isError = status === "error";
+    const dotColor = isError ? this.theme.error : isSuccess ? this.theme.success : isRunning ? this.theme.agentRunning : this.theme.agentWaiting;
+    const dotStyle = this.style({ fg: dotColor });
+    const nameStyle = this.style({ fg: this.theme.ink, bold: true });
+    const metaStyle = this.style({ fg: this.theme.muted, dim: true });
+    const canvasStyle = this.style({ bg: this.theme.canvas });
+    if (y >= this.screen.getRows() - GUTTER) return y;
+    this.screen.clearLine(y, canvasStyle);
+    this.screen.writeString(cx, y, "\u25cf", dotStyle);
+    this.screen.writeString(cx + 2, y, ` ${name} `, nameStyle);
+    if (opts?.duration) {
+      this.screen.writeString(cx + 2 + measureWidth(` ${name} `), y, opts.duration, metaStyle);
+    }
+    if (opts?.toolCalls) {
+      const tcX = cx + w - measureWidth(stripAnsi(opts.toolCalls)) - GUTTER;
+      this.screen.writeString(tcX, y, opts.toolCalls, metaStyle);
+    }
+    return y + 1;
   }
 
   drawAgentCard(y: number, width: number, name: string, status: string, opts?: {
@@ -700,6 +764,9 @@ export class ScreenRenderer {
     animate?: boolean;
     animFrame?: number;
   }): number {
+    if (this.layout.agentCardCompact) {
+      return this.drawAgentCardCompact(y, width, name, status, opts);
+    }
     const cx = this.contentLeft;
     const cw = this.contentWidth;
     const w = Math.min(cw, this.screen.getCols() - cx - GUTTER);
@@ -768,12 +835,13 @@ export class ScreenRenderer {
       y++;
 
       const maxOutputWidth = this.breakpoint === "compact" ? Math.min(30, w - 14) : w - 8;
-      for (const ol of opts.outputLines.slice(-3)) {
+      for (const ol of opts.outputLines.slice(-this.layout.agentCardMaxOutputLines)) {
         if (y >= this.screen.getRows() - GUTTER) break;
         this.screen.clearLine(y, cardBgStyle);
         this.screen.writeString(cx, y, "\u2502 ", bStyle);
-        const plain = stripAnsi(ol);
-        const trimmed = measureWidth(plain) > maxOutputWidth ? truncateToWidth(ol, maxOutputWidth - 1) + "\u2026" : ol;
+        const linked = linkifyFilePaths(ol);
+        const plain = stripAnsi(linked);
+        const trimmed = measureWidth(plain) > maxOutputWidth ? truncateToWidth(linked, maxOutputWidth - 1) + "\u2026" : linked;
         this.screen.writeString(cx + PAD, y, trimmed, outputStyle);
         this.screen.writeString(cx + w - 1, y, " \u2502", bStyle);
         y++;
@@ -799,6 +867,7 @@ export class ScreenRenderer {
     agentStatus?: string;
     hint?: string;
   }): number {
+    if (!this.layout.showStatusBar) return y;
     const cols = this.screen.getCols();
     if (y >= this.screen.getRows()) return y;
 

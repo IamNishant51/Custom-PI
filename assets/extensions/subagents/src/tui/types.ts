@@ -79,6 +79,54 @@ export function getResponsiveBreakpoint(cols: number): ResponsiveBreakpoint {
   return "wide";
 }
 
+export interface LayoutConfig {
+  showBanner: boolean;
+  bannerCompact: boolean;
+  showConversationHeader: boolean;
+  showScrollIndicator: boolean;
+  showStatusBar: boolean;
+  statusBarCompact: boolean;
+  agentCardCompact: boolean;
+  agentCardMaxOutputLines: number;
+  messageSeparation: number;
+  messagePaddingTop: number;
+  messagePaddingBottom: number;
+  containerPaddingLeft: number;
+  containerPaddingRight: number;
+  inputAreaHeight: number;
+  inputAreaCompact: boolean;
+}
+
+export const LAYOUT_PRESETS: Record<string, LayoutConfig> = {
+  default: {
+    showBanner: true, bannerCompact: false,
+    showConversationHeader: true, showScrollIndicator: true,
+    showStatusBar: true, statusBarCompact: false,
+    agentCardCompact: false, agentCardMaxOutputLines: 3,
+    messageSeparation: 1, messagePaddingTop: 1, messagePaddingBottom: 1,
+    containerPaddingLeft: 2, containerPaddingRight: 2,
+    inputAreaHeight: 3, inputAreaCompact: false,
+  },
+  dense: {
+    showBanner: true, bannerCompact: true,
+    showConversationHeader: false, showScrollIndicator: true,
+    showStatusBar: true, statusBarCompact: true,
+    agentCardCompact: true, agentCardMaxOutputLines: 1,
+    messageSeparation: 0, messagePaddingTop: 0, messagePaddingBottom: 0,
+    containerPaddingLeft: 1, containerPaddingRight: 1,
+    inputAreaHeight: 2, inputAreaCompact: true,
+  },
+  minimal: {
+    showBanner: false, bannerCompact: false,
+    showConversationHeader: false, showScrollIndicator: false,
+    showStatusBar: true, statusBarCompact: true,
+    agentCardCompact: true, agentCardMaxOutputLines: 1,
+    messageSeparation: 0, messagePaddingTop: 0, messagePaddingBottom: 0,
+    containerPaddingLeft: 1, containerPaddingRight: 1,
+    inputAreaHeight: 2, inputAreaCompact: true,
+  },
+};
+
 export interface LayoutRegion {
   name: string;
   startY: number;
