@@ -121,16 +121,34 @@ if (fs.existsSync(envPath)) {
   } catch (e) {}
 }
 
-// Launch custom-pi as a dedicated `pi` process. Spawning (rather than calling
-// main() in-process) keeps stdin/stdout, the render loop and signal handlers in
-// a separate process from the CLI — this prevents the TUI from freezing when the
-// agent is doing heavy work. CUSTOM_PI_ACTIVE is inherited via process.env so the
-// shared extension activates only for custom-pi and stays inert for stock `pi`.
-const { spawn } = require('child_process');
-const piProcess = spawn('pi', args, { stdio: 'inherit', shell: process.platform === 'win32' });
-piProcess.on('error', (err) => {
-  console.error('\x1b[31mFailed to launch `pi`. Is it installed and on your PATH?\x1b[0m');
-  console.error(err.message);
-  process.exit(1);
-});
-piProcess.on('exit', (code) => process.exit(code || 0));
+// Check for --legacy-pi flag to spawn original pi process
+const legacyPiIdx = args.indexOf('--legacy-pi');
+if (legacyPiIdx >= 0) {
+  args.splice(legacyPiIdx, 1);
+  const { spawn } = require('child_process');
+  const piProcess = spawn('pi', args, { stdio: 'inherit', shell: process.platform === 'win32' });
+  piProcess.on('error', (err) => {
+    console.error('\x1b[31mFailed to launch `pi`. Is it installed and on your PATH?\x1b[0m');
+    console.error(err.message);
+    process.exit(1);
+  });
+  piProcess.on('exit', (code) => process.exit(code || 0));
+  return;
+}
+
+// Run Custom-PI agent directly in-process (no subprocess spawn).
+// Dynamic import is used because pi's dist is ESM while this file is CJS.
+(async () => {
+  try {
+    const { configureHttpDispatcher } = await import('@earendil-works/pi-coding-agent/dist/core/http-dispatcher.js');
+    configureHttpDispatcher();
+    process.title = 'custom-pi';
+    process.env.PI_CODING_AGENT = "true";
+    const { main } = await import('@earendil-works/pi-coding-agent/dist/main.js');
+    await main(args);
+  } catch (err) {
+    console.error('\x1b[31mFailed to load the Custom-PI agent.\x1b[0m');
+    console.error(err.message);
+    process.exit(1);
+  }
+})();

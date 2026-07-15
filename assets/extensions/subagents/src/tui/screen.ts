@@ -152,9 +152,7 @@ export class TerminalScreen {
   flush(): string {
     const reset = this.pool.resetAnsi();
     const parts: string[] = [];
-    let lastStyle = -1;
     let lastY = -1;
-    let lastX = -1;
 
     const cols = this.cols;
     const yStart = Math.max(0, this.damageTop);
@@ -175,13 +173,12 @@ export class TerminalScreen {
       }
       if (rowStart === -1) continue;
 
-      if (y !== lastY) {
-        parts.push(`\x1b[${y + 1};1H`);
-        lastY = y;
-        lastX = 0;
-        lastStyle = -1;
-      }
+      // Single cursor-position to start of dirty run
+      parts.push(`\x1b[${y + 1};${rowStart + 1}H`);
+      lastY = y;
 
+      // Emit contiguous run: just output chars sequentially with style transitions
+      let lastStyle = -1;
       for (let x = rowStart; x <= rowEnd; x++) {
         const bi = (rowBase + x) * CELL_WORDS;
         const flags = this.back[bi + WORD_FLAGS];
@@ -192,10 +189,6 @@ export class TerminalScreen {
         const backChar = this.back[bi + WORD_CHAR];
         const backStyle = this.back[bi + WORD_STYLE];
         if (backChar === this.front[fi + WORD_CHAR] && backStyle === this.front[fi + WORD_STYLE]) continue;
-
-        if (x !== lastX) {
-          parts.push(`\x1b[${y + 1};${x + 1}H`);
-        }
 
         if (backStyle !== lastStyle) {
           parts.push(this.pool.transition(lastStyle, backStyle));
@@ -208,7 +201,6 @@ export class TerminalScreen {
           parts.push(String.fromCodePoint(backChar));
         }
 
-        lastX = x + 1;
         if (flags & FLAG_WIDE) x++;
       }
     }

@@ -7,9 +7,14 @@ export class RenderScheduler {
   private frameId = 0;
   private lastTickWall = 0;
   private fps = 60;
+  private baseFps = 60;
   private tickGuard = false;
+  private lastUserInput = Date.now();
+  private idleFps = 10;
+  private idleTimeoutMs = 5000;
 
   start(fps = 60): void {
+    this.baseFps = fps;
     this.fps = fps;
     if (this.running) return;
     this.running = true;
@@ -27,7 +32,21 @@ export class RenderScheduler {
   }
 
   setFps(fps: number): void {
-    this.fps = fps;
+    this.baseFps = fps;
+  }
+
+  notifyInput(): void {
+    this.lastUserInput = Date.now();
+    if (this.fps !== this.baseFps) {
+      this.fps = this.baseFps;
+    }
+  }
+
+  hasActiveCallbacks(): boolean {
+    for (const entry of this.frameCallbacks.values()) {
+      if (entry.interval <= 80) return true;
+    }
+    return false;
   }
 
   private tick(): void {
@@ -54,6 +73,13 @@ export class RenderScheduler {
           }
         }
       }
+      // Idle detection: throttle to idleFps when no input for idleTimeoutMs
+      // and no fast-interval callbacks are registered
+      const idleMs = now - this.lastUserInput;
+      const targetFps = (idleMs > this.idleTimeoutMs && !this.hasActiveCallbacks())
+        ? this.idleFps : this.baseFps;
+      this.fps = targetFps;
+
       const elapsed = now - this.lastTickWall;
       this.lastTickWall = now;
       const targetMs = Math.max(16, Math.round(1000 / this.fps));

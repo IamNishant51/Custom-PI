@@ -97,6 +97,10 @@ export class TuiManager {
     this.renderer.render();
   }
 
+  notifyInput(): void {
+    this.scheduler.notifyInput();
+  }
+
   // ── Layout system ────────────────────────────────────────────────────────
 
   updateLayout(): void {
