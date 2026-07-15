@@ -31,9 +31,15 @@ export class SidebarPanel {
   };
 
   private workspaceRoot = "";
+  private minWidth = 20;
+  private maxWidth = 60;
 
   setWorkspaceRoot(root: string): void {
     this.workspaceRoot = root;
+  }
+
+  resize(delta: number): void {
+    this.state.width = Math.max(this.minWidth, Math.min(this.maxWidth, this.state.width + delta));
   }
 
   toggle(): void {
@@ -84,7 +90,7 @@ export class SidebarPanel {
     } catch {}
   }
 
-  handleInput(char: string): "navigate" | "toggleDir" | "close" | null {
+  handleInput(char: string): "navigate" | "toggleDir" | "close" | "resize" | null {
     if (!this.state.visible) return null;
     if (char === "Escape" || char === "\x02") { // Escape or Ctrl+B
       this.hide();
@@ -95,6 +101,8 @@ export class SidebarPanel {
     if (char === "1") { this.switchTab("files"); return "navigate"; }
     if (char === "2") { this.switchTab("memory"); return "navigate"; }
     if (char === "3") { this.switchTab("agents"); return "navigate"; }
+    if (char === "[" && this.state.width > this.minWidth) { this.resize(-2); return "resize"; }
+    if (char === "]" && this.state.width < this.maxWidth) { this.resize(2); return "resize"; }
     if (char === "\n" || char === "\r") {
       const file = this.state.files[this.state.scrollOffset];
       if (file && file.isDir) {

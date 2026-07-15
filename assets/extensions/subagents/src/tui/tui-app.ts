@@ -2,6 +2,7 @@ import { TuiManager } from "./tui-manager";
 import { SPINNERS, BOX, SPACING, LAYOUT_PRESETS } from "./types";
 import type { AgentState, PulseConfig, ConversationHeader, ScrollIndicator } from "./types";
 import { stripAnsi, measureWidth } from "./utils/measure-text";
+import { ICONS } from "./theme/icons";
 import { activeTrackers as globalTrackers } from "../animations";
 import { CommandRegistry, CommandPalette, type PaletteCommand } from "./palette";
 import { AutocompleteProvider, type AutocompleteItem } from "./autocomplete";
@@ -10,6 +11,7 @@ import { Dialog, ModelSelector, TranscriptViewer } from "./dialogs";
 import type { ModelEntry } from "./dialogs";
 import { ToastManager } from "./toast";
 import { SidebarPanel } from "./sidebar";
+import { TodoWidget, type TodoItem } from "./components/todo-widget";
 
 interface TrackerData {
   id: string;
@@ -41,7 +43,11 @@ export class TuiApp {
   private trackers: Map<string, TrackerData> = new Map();
   private messageLog: Array<{ role: string; content: string; timestamp: number }> = [];
   private collapsedThinkingIndices: Set<number> = new Set();
+  private messageReactions: Map<number, string> = new Map();
   private renderedElements: Array<{ index: number; role: string; startY: number; endY: number }> = [];
+  private compareMode = false;
+  private compareLeftIndex = -1;
+  private compareRightIndex = -1;
   private memoryCount = 0;
   private vaultCount = 0;
   private _onSubmit: ((text: string) => void) | null = null;
@@ -77,6 +83,7 @@ export class TuiApp {
   private transcriptViewer = new TranscriptViewer();
   private toasts = new ToastManager();
   private sidebar = new SidebarPanel();
+  private todoWidget = new TodoWidget();
 
   private getAutocompleteItems(): AutocompleteItem[] {
     return [
@@ -490,41 +497,107 @@ export class TuiApp {
       y = renderer.drawScrollIndicator(y, scroll);
     }
 
-    const maxMessages = Math.max(1, maxContentBottom - y - 2);
-    const visibleMessages = this.messageLog.slice(-maxMessages);
+    const maxVisibleMsgs = Math.max(1, maxContentBottom - y - 2);
 
-    this.renderedElements = [];
+    if (this.compareMode && this.compareLeftIndex >= 0 && this.compareRightIndex >= 0) {
+      // Split-screen comparison: render two messages side by side
+      const halfW = Math.floor((renderer.contentWidth - 3) / 2);
+      const origContentLeft = renderer.contentLeft;
+      const origContentWidth = renderer.contentWidth;
 
-    for (let i = 0; i < visibleMessages.length; i++) {
-      const msg = visibleMessages[i];
-      const startY = y;
-      const ts = new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-      if (msg.role === "thinking") {
-        const isCollapsed = this.collapsedThinkingIndices.has(i);
-        const thinkingContent = this.search.state.visible ? this.applySearchHighlight(msg.content.slice(0, 300)) : msg.content.slice(0, 300);
-        y = renderer.drawThinkingBlock(y, renderer.contentWidth, thinkingContent, isCollapsed, ts, {
-          animFrame: this.frameCounter,
-        });
-      } else {
-        const contentForDisplay = this.search.state.visible ? this.applySearchHighlight(msg.content.slice(0, 300)) : msg.content.slice(0, 300);
-        y = renderer.drawMessageBubble(y, renderer.contentWidth, msg.role, contentForDisplay, ts, {
-          agentName: msg.role === "assistant" ? "Assistant" : undefined,
-          isStreaming: msg.role === "assistant" && i === visibleMessages.length - 1,
-          animFrame: this.frameCounter,
-          modelName: msg.role === "assistant" ? this.sessionModel : undefined,
-        });
-      }
-
-      this.renderedElements.push({
-        index: i,
-        role: msg.role,
-        startY,
-        endY: y
+      // Left message
+      const leftMsg = this.messageLog[this.compareLeftIndex];
+      const leftTs = new Date(leftMsg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      renderer.contentLeft = origContentLeft;
+      renderer.contentWidth = halfW;
+      renderer.drawMessageBubble(y, halfW, leftMsg.role, leftMsg.content.slice(0, 200), leftTs, {
+        agentName: leftMsg.role === "assistant" ? "Assistant (A)" : undefined,
+        modelName: leftMsg.role === "assistant" ? this.sessionModel : undefined,
       });
 
-      y += SPACING.paddingSm;
-      if (y >= maxContentBottom) break;
+      // Separator
+      const sepX = origContentLeft + halfW + 1;
+      const sepStyle = renderer.style({ fg: renderer.theme.hairline });
+      for (let sy = y; sy < y + 6 && sy < maxContentBottom; sy++) {
+        renderer.screen.writeString(sepX, sy, "\u2502", sepStyle);
+      }
+
+      // Right message
+      const rightMsg = this.messageLog[this.compareRightIndex];
+      const rightTs = new Date(rightMsg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      renderer.contentLeft = origContentLeft + halfW + 3;
+      renderer.contentWidth = halfW;
+      renderer.drawMessageBubble(y, halfW, rightMsg.role, rightMsg.content.slice(0, 200), rightTs, {
+        agentName: rightMsg.role === "assistant" ? "Assistant (B)" : undefined,
+        modelName: rightMsg.role === "assistant" ? this.sessionModel : undefined,
+      });
+
+      renderer.contentLeft = origContentLeft;
+      renderer.contentWidth = origContentWidth;
+      y += 8;
+
+      // Compare hint
+      const hintStyle = renderer.style({ fg: renderer.theme.muted, dim: true });
+      renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
+      renderer.screen.writeString(renderer.contentLeft, y, " Compare mode \u2014 Escape to exit", hintStyle);
+      y++;
+    } else {
+      const visibleMessages = this.messageLog.slice(-maxVisibleMsgs);
+
+      this.renderedElements = [];
+
+      for (let i = 0; i < visibleMessages.length; i++) {
+        const msg = visibleMessages[i];
+        const startY = y;
+        const ts = new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+        if (msg.role === "thinking") {
+          const isCollapsed = this.collapsedThinkingIndices.has(i);
+          const thinkingContent = this.search.state.visible ? this.applySearchHighlight(msg.content.slice(0, 300)) : msg.content.slice(0, 300);
+          y = renderer.drawThinkingBlock(y, renderer.contentWidth, thinkingContent, isCollapsed, ts, {
+            animFrame: this.frameCounter,
+          });
+        } else {
+          const contentForDisplay = this.search.state.visible ? this.applySearchHighlight(msg.content.slice(0, 300)) : msg.content.slice(0, 300);
+          y = renderer.drawMessageBubble(y, renderer.contentWidth, msg.role, contentForDisplay, ts, {
+            agentName: msg.role === "assistant" ? "Assistant" : undefined,
+            isStreaming: msg.role === "assistant" && i === visibleMessages.length - 1,
+            animFrame: this.frameCounter,
+            modelName: msg.role === "assistant" ? this.sessionModel : undefined,
+          });
+        }
+
+        // Render reaction indicator if present
+        const reaction = this.messageReactions.get(i);
+        const msgIndex = i + this.messageLog.length - visibleMessages.length;
+        if (reaction && y > 0) {
+          const reactStyle = renderer.style({ fg: renderer.theme.warning, dim: false });
+          const reactX = renderer.contentLeft + renderer.contentWidth - measureWidth(reaction) - SPACING.padding;
+          renderer.screen.writeString(reactX, y - 1, reaction, reactStyle);
+        }
+
+        this.renderedElements.push({
+          index: msgIndex,
+          role: msg.role,
+          startY,
+          endY: y
+        });
+
+        y += SPACING.paddingSm;
+        if (y >= maxContentBottom) break;
+      }
+    }
+
+    // Typing indicator (shows when agent is working but no streaming message)
+    if (this._agentState === "working" && y < maxContentBottom) {
+      const dotIdx = Math.floor(this.frameCounter / 4) % 3;
+      const dots = ["\u25cf", "\u25cb", "\u25cb"];
+      const ordered = dots.slice(dotIdx).concat(dots.slice(0, dotIdx));
+      const indicator = ` ${ordered.join(" ")}  ${ICONS.assistantLabel}`;
+      const typingStyle = renderer.style({ fg: renderer.theme.accent, dim: true });
+      renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.canvas }));
+      renderer.screen.writeString(renderer.contentLeft, y, indicator, typingStyle);
+      y++;
     }
 
     for (const [id, tracker] of this.trackers) {
@@ -563,6 +636,20 @@ export class TuiApp {
       y += SPACING.paddingSm;
     }
 
+    // Todo widget (renders above input area)
+    if (y < inputAreaY) {
+      const todoLines = this.todoWidget.render(renderer.contentWidth);
+      if (todoLines.length > 0) {
+        const todoStyle = renderer.style({ fg: renderer.theme.muted, bg: renderer.theme.canvas });
+        for (const line of todoLines) {
+          if (y >= inputAreaY) break;
+          renderer.screen.clearLine(y, todoStyle);
+          renderer.screen.writeString(renderer.contentLeft, y, line, todoStyle);
+          y++;
+        }
+      }
+    }
+
     if (inputAreaY < statusBarY) {
       renderer.drawInputArea(inputAreaY, renderer.contentWidth, this.inputText, this.cursorPos, this.tui.vimInput.state.mode);
     }
@@ -599,7 +686,7 @@ export class TuiApp {
     if (renderer.breakpoint !== "compact") {
       renderer.drawScrollbar(0, rows - 2, {
         total: this.messageLog.length,
-        visible: maxMessages,
+        visible: maxVisibleMsgs,
         offset: this.scrollOffset,
       });
     }
@@ -773,6 +860,15 @@ export class TuiApp {
       return;
     }
 
+
+
+    // Escape to exit compare mode
+    if (data === "\x1b" && this.compareMode) {
+      this.compareMode = false;
+      this.tui.requestFrame();
+      return;
+    }
+
     // Ctrl+F (0x06) to open search
     if (data === "\x06") {
       this.search.open();
@@ -783,6 +879,42 @@ export class TuiApp {
     // Ctrl+K (0x0b) or Ctrl+P (0x10) to open command palette
     if (data === "\x0b" || data === "\x10") {
       this.cmdPalette.toggle();
+      this.tui.requestFrame();
+      return;
+    }
+
+    // Ctrl+Y (0x19) to toggle compare/split-screen mode
+    if (data === "\x19") {
+      if (this.compareMode) {
+        this.compareMode = false;
+      } else {
+        const assistantIndices = this.messageLog
+          .map((m, i) => m.role === "assistant" ? i : -1)
+          .filter(i => i >= 0);
+        if (assistantIndices.length >= 2) {
+          this.compareLeftIndex = assistantIndices[assistantIndices.length - 2];
+          this.compareRightIndex = assistantIndices[assistantIndices.length - 1];
+          this.compareMode = true;
+        }
+      }
+      this.tui.requestFrame();
+      return;
+    }
+
+    // Ctrl+R (0x12) to toggle reaction on last assistant message
+    if (data === "\x12") {
+      const lastAssistant = this.messageLog.length - 1;
+      for (let i = this.messageLog.length - 1; i >= 0; i--) {
+        if (this.messageLog[i].role === "assistant") {
+          const existing = this.messageReactions.get(i);
+          if (existing) {
+            this.messageReactions.delete(i);
+          } else {
+            this.messageReactions.set(i, "\u2b50");
+          }
+          break;
+        }
+      }
       this.tui.requestFrame();
       return;
     }

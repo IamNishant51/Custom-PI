@@ -211,7 +211,7 @@ function patchUserMessage(proto: any) {
       if (mdLines.length === 0) return [];
 
       const lines: string[] = [];
-      lines.push(OSC133_ZONE_START + "\x1b[36m>\x1b[0m " + (mdLines[0] || ""));
+      lines.push(OSC133_ZONE_START + fg(THEME.info, ">") + " " + (mdLines[0] || ""));
       for (let i = 1; i < mdLines.length; i++) {
         lines.push("  " + (mdLines[i] || ""));
       }
@@ -254,12 +254,12 @@ function patchAssistantMessage(proto: any) {
 
             this._thinkingToggleLineIndices.push(lines.length);
             if (isCollapsed) {
-              lines.push(`\x1b[2m▶ Reasoning  (click to expand)\x1b[0m`);
+              lines.push(dim("\u25b6 Reasoning  (click to expand)"));
             } else {
-              lines.push(`\x1b[2m▼ Reasoning\x1b[0m`);
+              lines.push(dim("\u25bc Reasoning"));
               const thinkingLines = renderMarkdown(c.thinking.trim(), { width: contentWidth - 2, streaming: !!this.isStreaming });
               for (const line of thinkingLines) {
-                lines.push(`\x1b[2m${line}\x1b[0m`);
+                lines.push(dim(line));
               }
             }
           }
@@ -280,7 +280,7 @@ function patchAssistantMessage(proto: any) {
         const lastIdx = result.length - 1;
         if (lastIdx >= 0) {
           const spinner = getSpinner();
-          result[lastIdx] = result[lastIdx] + ` \x1b[2m${spinner}\x1b[0m`;
+          result[lastIdx] = result[lastIdx] + " " + dim(spinner);
         }
       }
 
@@ -323,7 +323,7 @@ function formatArgInParens(toolName: string, args: any): string {
   if (!primary) return "";
   const cleanPath = primary.replace(/^\/home\/[^/]+\/Desktop\/pi-custom-pack\//, "");
   const truncated = cleanPath.length > 60 ? "…" + cleanPath.slice(-57) : cleanPath;
-  return `\x1b[2m(${truncated})\x1b[0m`;
+  return dim(`(${truncated})`);
 }
 
 function patchToolExecution(proto: any) {
@@ -354,23 +354,23 @@ function patchToolExecution(proto: any) {
 
     if (isRunning) {
       const spinner = getSpinner();
-      finalLines = [`\x1b[36m${spinner}\x1b[0m \x1b[1m${displayName}\x1b[0m${argsStr}`];
+      finalLines = [fg(THEME.info, spinner) + " " + fgBold(THEME.ink, displayName) + argsStr];
     } else if (isError) {
-      const dot = `\x1b[31m●\x1b[0m`;
+      const dot = fg(THEME.error, "\u25cf");
       const errorMsg = this.result?.details?.message || this.result?.details || "failed";
-      const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
-      const errorLine = `  \x1b[31m└\x1b[0m \x1b[31m${errorMsg}\x1b[0m`;
+      const headerLine = `${dot} ${fgBold(THEME.ink, displayName)}${argsStr} ${dim(`(${durationSec}s)`)}`;
+      const errorLine = `  ${fg(THEME.error, "\u2514")} ${fg(THEME.error, errorMsg)}`;
       
       const contentWidth = Math.max(10, width - 8);
       let rawLines = originalToolRender.call(this, contentWidth);
       rawLines = rawLines.map((l: string) => stripBackgroundColors(l));
       rawLines = rawLines.filter((l: string) => l.trim() !== "");
-      const outputLines = rawLines.slice(0, 10).map((l: string) => `    \x1b[31m│\x1b[0m  \x1b[2m${l}\x1b[0m`);
+      const outputLines = rawLines.slice(0, 10).map((l: string) => `    ${fg(THEME.error, "\u2502")}  ${dim(l)}`);
       
       finalLines = [headerLine, errorLine, ...outputLines];
     } else {
-      const dot = `\x1b[32m●\x1b[0m`;
-      const headerLine = `${dot} \x1b[1m${displayName}\x1b[0m${argsStr} \x1b[2m(${durationSec}s)\x1b[0m`;
+      const dot = fg(THEME.success, "\u25cf");
+      const headerLine = `${dot} ${fgBold(THEME.ink, displayName)}${argsStr} ${dim(`(${durationSec}s)`)}`;
 
       const contentWidth = Math.max(10, width - 8);
       let rawLines = originalToolRender.call(this, contentWidth);
@@ -381,7 +381,7 @@ function patchToolExecution(proto: any) {
       const cleanFirstLine = firstLine.replace(/^(Read|Updated|Listed)\s+.*?\s+with\s+/, "$1 ");
       const resultSummary = cleanFirstLine ? cleanFirstLine : "Completed";
 
-      const resultLine = `  \x1b[2m└\x1b[0m ${resultSummary} \x1b[2m(ctrl+r to expand)\x1b[0m`;
+      const resultLine = `  ${dim("\u2514")} ${resultSummary} ${dim("(ctrl+r to expand)")}`;
 
       const isEditTool = this.toolName === "edit" || this.toolName === "write" || this.toolName === "str_replace" || this.toolName === "file_edit" || this.toolName === "replace_file_content" || this.toolName === "multi_replace_file_content";
       
@@ -395,11 +395,11 @@ function patchToolExecution(proto: any) {
           const outputLines = diffLines.slice(0, 15).map((l: string) => {
             const plain = stripAnsi(l);
             if (plain.startsWith("+") && !plain.startsWith("+++")) {
-              return `    \x1b[32m${l}\x1b[0m`;
+              return `    ${fg(THEME.success, l)}`;
             } else if (plain.startsWith("-") && !plain.startsWith("---")) {
-              return `    \x1b[31m${l}\x1b[0m`;
+              return `    ${fg(THEME.error, l)}`;
             } else {
-              return `    \x1b[2m${l}\x1b[0m`;
+              return `    ${dim(l)}`;
             }
           });
           finalLines = [headerLine, resultLine, ...outputLines];
@@ -461,7 +461,7 @@ function patchCustomEditor(proto: any) {
     result.push(topBorder);
 
     const emitCursorMarker = this.focused && !this.autocompleteState;
-    const prefixStr = "\x1b[36m>\x1b[0m ";
+    const prefixStr = fg(THEME.info, ">") + " ";
     const indentStr = "  ";
 
     const segmenter = typeof this.segment === "function"
@@ -482,7 +482,7 @@ function patchCustomEditor(proto: any) {
       if (isEmpty) {
         const marker = emitCursorMarker ? CURSOR_MARKER : "";
         const cursor = emitCursorMarker ? "\x1b[7m \x1b[0m" : "";
-        displayText = "\x1b[2mMessage Custom-PI…\x1b[0m" + marker + cursor;
+        displayText = dim("Message Custom-PI\u2026") + marker + cursor;
         lineVisibleWidth = measureWidth("Message Custom-PI…") + (emitCursorMarker ? 1 : 0);
       } else if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
         const before = displayText.slice(0, layoutLine.cursorPos);
@@ -492,7 +492,7 @@ function patchCustomEditor(proto: any) {
           const afterGraphemes = [...segmenter(after, "grapheme")];
           const firstGrapheme = afterGraphemes[0]?.segment || "";
           const restAfter = after.slice(firstGrapheme.length);
-          const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
+          const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`; // inverse video — keep as-is, single char only
           displayText = before + marker + cursor + restAfter;
         } else {
           const cursor = "\x1b[7m \x1b[0m";
@@ -593,13 +593,13 @@ function patchFooterComponent(proto: any) {
         const secs = Math.floor((Date.now() - runningTool.startTime) / 1000);
         elapsedStr = `${secs}s · `;
       }
-      left = `\x1b[36m${spinner}\x1b[0m \x1b[1m${action}\x1b[0m \x1b[2m(${elapsedStr}↓ ${totalTokens.toLocaleString()} tok · esc to interrupt)\x1b[0m`;
+      left = `${fg(THEME.info, spinner)} ${fgBold(THEME.ink, action)} ${dim(`(${elapsedStr}↓ ${totalTokens.toLocaleString()} tok · esc to interrupt)`)}`;
     } else {
-      const symbol = `\x1b[32m●\x1b[0m`;
-      left = `${symbol} \x1b[2m${modelName} · ${totalTokens.toLocaleString()} tok · $${totalCost.toFixed(3)}\x1b[0m`;
+      const symbol = fg(THEME.success, "\u25cf");
+      left = `${symbol} ${dim(`${modelName} · ${totalTokens.toLocaleString()} tok · $${totalCost.toFixed(3)}`)}`;
     }
 
-    const right = `\x1b[2mTab to toggle  ·  ? for help\x1b[0m`;
+    const right = dim("Tab to toggle  \u00b7  ? for help");
 
     const leftVisible = measureWidth(left);
     const rightVisible = measureWidth(right);
