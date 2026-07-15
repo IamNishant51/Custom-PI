@@ -1,8 +1,13 @@
 import { TuiManager } from "./tui-manager";
-import { SPINNERS, BOX, SPACING } from "./types";
+import { SPINNERS, BOX, SPACING, LAYOUT_PRESETS } from "./types";
 import type { AgentState, PulseConfig, ConversationHeader, ScrollIndicator } from "./types";
 import { stripAnsi, measureWidth } from "./utils/measure-text";
 import { activeTrackers as globalTrackers } from "../animations";
+import { CommandRegistry, CommandPalette, type PaletteCommand } from "./palette";
+import { AutocompleteProvider, type AutocompleteItem } from "./autocomplete";
+import { InChatSearch } from "./search";
+import { Dialog, ModelSelector, TranscriptViewer } from "./dialogs";
+import type { ModelEntry } from "./dialogs";
 
 interface TrackerData {
   id: string;
@@ -60,6 +65,97 @@ export class TuiApp {
   private _lastTitleUpdate = 0;
   private scrollAccel = { lastEventTime: 0, velocity: 0, accumulated: 0 };
   private _pendingRecap = "";
+  private cmdRegistry = new CommandRegistry();
+  private cmdPalette: CommandPalette;
+  private autocomplete = new AutocompleteProvider();
+  private search = new InChatSearch();
+  private confirmDialog = new Dialog({ title: "Confirm", body: ["Proceed?"], confirmText: "Confirm", cancelText: "Cancel" });
+  private modelSelector = new ModelSelector();
+  private transcriptViewer = new TranscriptViewer();
+
+  private getAutocompleteItems(): AutocompleteItem[] {
+    return [
+      { label: "search", description: "Search conversation", type: "command", insertText: "search " },
+      { label: "clear", description: "Clear conversation", type: "command", insertText: "clear" },
+      { label: "export", description: "Export to file", type: "command", insertText: "export " },
+      { label: "compact", description: "Compact session", type: "command", insertText: "compact" },
+      { label: "help", description: "Show help", type: "command", insertText: "help" },
+      { label: "web_search", description: "Search the web", type: "tool", insertText: "web_search " },
+      { label: "web_fetch", description: "Fetch a URL", type: "tool", insertText: "web_fetch " },
+      { label: "memory_search", description: "Search memory", type: "tool", insertText: "memory_search " },
+      { label: "generate_image", description: "Create an image", type: "tool", insertText: "generate_image " },
+      { label: "bash", description: "Run a command", type: "tool", insertText: "bash " },
+      { label: "write", description: "Write a file", type: "tool", insertText: "write " },
+      { label: "assistant", description: "Default assistant", type: "agent", insertText: "assistant " },
+      { label: "researcher", description: "Research agent", type: "agent", insertText: "researcher " },
+      { label: "coder", description: "Coding agent", type: "agent", insertText: "coder " },
+      { label: "reviewer", description: "Code reviewer", type: "agent", insertText: "reviewer " },
+    ];
+  }
+
+  private registerBuiltinCommands(): void {
+    const cmds: PaletteCommand[] = [
+      { id: "session.new", title: "New Session", description: "Start a fresh session", category: "navigation", execute: () => {} },
+      { id: "session.list", title: "List Sessions", description: "Show all sessions", category: "navigation", execute: () => {} },
+      { id: "search.chat", title: "Search Chat", description: "Search conversation history", category: "navigation", icon: "\u{1F50D}", execute: () => { this.search.open(); this.tui.requestFrame(); } },
+      { id: "view.layout", title: "Switch Layout", description: "Toggle between default/dense/minimal", category: "view", execute: () => { this.cycleLayout(); } },
+      { id: "view.sidebar", title: "Toggle Sidebar", description: "Show or hide sidebar", category: "view", execute: () => {} },
+      { id: "view.compact", title: "Toggle Compact Mode", description: "Switch to compact layout", category: "view", execute: () => { this.tui.renderer.setLayout("dense"); } },
+      { id: "session.clear", title: "Clear Chat", description: "Clear conversation view", category: "session", execute: () => { this.messageLog = []; } },
+      { id: "session.compact", title: "Compact Session", description: "Summarize and compact", category: "session", execute: () => {} },
+      { id: "session.export", title: "Export Chat", description: "Export conversation to file", category: "session", execute: () => {} },
+      { id: "agent.switch", title: "Switch Model", description: "Change active model", category: "agent", execute: () => {} },
+      { id: "agent.toggle-mode", title: "Toggle Plan Mode", description: "Switch between agent and plan mode", category: "agent", execute: () => {} },
+      { id: "agent.view-agents", title: "View Agents", description: "List all swarm agents", category: "agent", execute: () => {} },
+      { id: "settings.theme", title: "Open Theme Picker", description: "Browse and apply themes", category: "settings", execute: () => {} },
+      { id: "settings.layout", title: "Open Layout Picker", description: "Browse layout presets", category: "settings", execute: () => { this.cycleLayout(); } },
+      { id: "settings.keybinds", title: "Configure Keybinds", description: "View keyboard shortcuts", category: "settings", execute: () => {} },
+    ];
+    for (const cmd of cmds) this.cmdRegistry.register(cmd);
+  }
+
+  private cycleLayout(): void {
+    const names = Object.keys(LAYOUT_PRESETS);
+    const current = this.tui.renderer.layout;
+    const idx = names.findIndex(n => {
+      const p = LAYOUT_PRESETS[n];
+      return p.showBanner === current.showBanner && p.bannerCompact === current.bannerCompact;
+    });
+    const next = (idx + 1) % names.length;
+    this.tui.renderer.setLayout(names[next]);
+  }
+
+  private updateSearchMatches(): void {
+    const q = this.search.state.query;
+    if (!q) { this.search.setMatchInfo(0, 0); return; }
+    let count = 0;
+    let currentGlobalIdx = 0;
+    const targetIdx = this.search.state.currentMatch;
+    for (const msg of this.messageLog) {
+      const matches = this.search.findMatches(msg.content, q);
+      for (const m of matches) {
+        if (count === targetIdx) currentGlobalIdx = count;
+        count++;
+      }
+    }
+    this.search.setMatchInfo(count, currentGlobalIdx);
+  }
+
+  private applySearchHighlight(content: string): string {
+    const q = this.search.state.query;
+    if (!q || !this.search.state.visible) return content;
+    const matches = this.search.findMatches(content, q);
+    if (!matches.length) return content;
+    let result = "";
+    let lastEnd = 0;
+    for (const m of matches) {
+      result += content.slice(lastEnd, m.start);
+      result += `\x1b[7m${content.slice(m.start, m.end)}\x1b[27m`;
+      lastEnd = m.end;
+    }
+    result += content.slice(lastEnd);
+    return result;
+  }
 
   private acceleratedScroll(delta: number): number {
     const now = Date.now();
@@ -104,6 +200,9 @@ export class TuiApp {
     this.ctx = ctx;
     this.pi = pi;
     this.tui = new TuiManager({ useAltScreen: true });
+    this.registerBuiltinCommands();
+    this.cmdPalette = new CommandPalette(this.cmdRegistry);
+    this.autocomplete.setItems(this.getAutocompleteItems());
 
     if (this.pi) {
       this.onSubmit = (text) => {
@@ -340,6 +439,16 @@ export class TuiApp {
     };
     y = renderer.drawConversationHeader(y, header);
 
+    // Search bar
+    if (this.search.state.visible) {
+      const searchBar = this.search.render(cols);
+      if (searchBar.length) {
+        renderer.screen.clearLine(y, renderer.style({ bg: renderer.theme.card }));
+        renderer.screen.writeString(renderer.contentLeft, y, searchBar[0], renderer.style({ fg: renderer.theme.ink, bg: renderer.theme.card }));
+        y++;
+      }
+    }
+
     const totalVisible = this.messageLog.length;
     const olderCount = Math.max(0, totalVisible - 10 - this.scrollOffset);
     const scroll: ScrollIndicator = { visible: olderCount > 0, olderCount, newerCount: this.scrollOffset };
@@ -359,11 +468,13 @@ export class TuiApp {
 
       if (msg.role === "thinking") {
         const isCollapsed = this.collapsedThinkingIndices.has(i);
-        y = renderer.drawThinkingBlock(y, renderer.contentWidth, msg.content.slice(0, 300), isCollapsed, ts, {
+        const thinkingContent = this.search.state.visible ? this.applySearchHighlight(msg.content.slice(0, 300)) : msg.content.slice(0, 300);
+        y = renderer.drawThinkingBlock(y, renderer.contentWidth, thinkingContent, isCollapsed, ts, {
           animFrame: this.frameCounter,
         });
       } else {
-        y = renderer.drawMessageBubble(y, renderer.contentWidth, msg.role, msg.content.slice(0, 300), ts, {
+        const contentForDisplay = this.search.state.visible ? this.applySearchHighlight(msg.content.slice(0, 300)) : msg.content.slice(0, 300);
+        y = renderer.drawMessageBubble(y, renderer.contentWidth, msg.role, contentForDisplay, ts, {
           agentName: msg.role === "assistant" ? "Assistant" : undefined,
           isStreaming: msg.role === "assistant" && i === visibleMessages.length - 1,
           animFrame: this.frameCounter,
@@ -459,11 +570,58 @@ export class TuiApp {
       });
     }
 
+    // Autocomplete popup (rendered above input area)
+    if (this.autocomplete.state.visible && this.tui.vimInput.state.mode === "insert") {
+      const acLines = this.autocomplete.render(cols);
+      if (acLines.length > 0) {
+        const popupStartY = inputAreaY - acLines.length - 1;
+        for (let ai = 0; ai < acLines.length; ai++) {
+          const py = popupStartY + ai;
+          if (py < 0) break;
+          renderer.screen.clearLine(py, defaultStyle);
+          renderer.screen.writeString(renderer.contentLeft + 2, py, acLines[ai], defaultStyle);
+        }
+      }
+    }
+
     currentMaxY = y;
 
     if (this.lastRenderMaxY > currentMaxY) {
       for (let ry = currentMaxY; ry < this.lastRenderMaxY && ry < rows; ry++) {
         renderer.screen.clearLine(ry, defaultStyle);
+      }
+    }
+
+    // Modal dialog overlays (drawn on top of everything)
+    const activeDialog = this.confirmDialog.visible ? this.confirmDialog
+      : this.modelSelector.visible ? this.modelSelector
+      : this.transcriptViewer.visible ? this.transcriptViewer
+      : null;
+    if (activeDialog) {
+      const dlgLines = activeDialog.render(cols, cols, rows);
+      if (dlgLines.length > 0) {
+        const dlgH = dlgLines.length;
+        const startY = Math.max(0, Math.floor((rows - dlgH) / 2));
+        for (let di = 0; di < dlgH; di++) {
+          const py = startY + di;
+          if (py >= rows) break;
+          renderer.screen.clearLine(py, defaultStyle);
+          const pad = Math.floor((cols - measureWidth(stripAnsi(dlgLines[di]))) / 2);
+          renderer.screen.writeString(Math.max(0, pad), py, dlgLines[di], defaultStyle);
+        }
+      }
+    }
+
+    // Command palette overlay (drawn last, on top of everything)
+    if (this.cmdPalette.state.visible) {
+      const paletteLines = this.cmdPalette.render(cols);
+      const overlayH = paletteLines.length;
+      const startY = Math.max(0, Math.floor((rows - overlayH) / 3));
+      for (let pi = 0; pi < overlayH; pi++) {
+        const py = startY + pi;
+        if (py >= rows) break;
+        renderer.screen.clearLine(py, defaultStyle);
+        renderer.screen.writeString(0, py, paletteLines[pi], defaultStyle);
       }
     }
     this.lastRenderMaxY = currentMaxY;
@@ -522,11 +680,94 @@ export class TuiApp {
       return;
     }
 
+    // Command palette — intercept before VimInput
+    if (this.cmdPalette.state.visible) {
+      const action = this.cmdPalette.handleInput(data);
+      if (action === "close") this.tui.requestFrame();
+      else this.tui.requestFrame();
+      return;
+    }
+
+    // Search mode — intercept before VimInput
+    if (this.search.state.visible) {
+      const action = this.search.handleInput(data);
+      if (action === "close") { this.tui.requestFrame(); return; }
+      if (action === "navigate") { this.updateSearchMatches(); this.tui.requestFrame(); }
+      return;
+    }
+
+    // Modal dialogs — intercept before everything
+    if (this.confirmDialog.visible) {
+      this.confirmDialog.handleInput(data);
+      this.tui.requestFrame();
+      return;
+    }
+    if (this.modelSelector.visible) {
+      this.modelSelector.handleInput(data);
+      this.tui.requestFrame();
+      return;
+    }
+    if (this.transcriptViewer.visible) {
+      this.transcriptViewer.handleInput(data);
+      this.tui.requestFrame();
+      return;
+    }
+
+    // Ctrl+F (0x06) to open search
+    if (data === "\x06") {
+      this.search.open();
+      this.tui.requestFrame();
+      return;
+    }
+
+    // Ctrl+K (0x0b) or Ctrl+P (0x10) to open command palette
+    if (data === "\x0b" || data === "\x10") {
+      this.cmdPalette.toggle();
+      this.tui.requestFrame();
+      return;
+    }
+
+    // Autocomplete: Tab to cycle, Enter to select
+    if (this.autocomplete.state.visible) {
+      if (data === "\x1b" || data === "\x03") { // Escape or Ctrl+C
+        this.autocomplete.hide();
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "\t" || data === "\x1b[B") { // Tab or ArrowDown
+        this.autocomplete.selectNext();
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "\x1b[A") { // ArrowUp
+        this.autocomplete.selectPrev();
+        this.tui.requestFrame();
+        return;
+      }
+      if (data === "\n" || data === "\r") {
+        const applied = this.autocomplete.applyCompletion(this.inputText, this.cursorPos);
+        if (applied) {
+          this.inputText = applied.text;
+          this.cursorPos = applied.cursorPos;
+          this.autocomplete.hide();
+          this.tui.requestFrame();
+          return;
+        }
+      }
+    }
+
     const result = this.tui.vimInput.handleData(data, this.inputText, this.cursorPos);
+    const prevText = this.inputText;
     this.inputText = result.text;
     this.cursorPos = result.cursor;
 
+    // Update autocomplete after every input change
+    if (this.inputText !== prevText) {
+      this.autocomplete.update(this.inputText, this.cursorPos);
+    }
+
     if (result.action === "submit" && this.inputText.trim() && this._onSubmit) {
+      this.autocomplete.hide();
       const text = this.inputText;
       this.inputText = "";
       this.cursorPos = 0;
