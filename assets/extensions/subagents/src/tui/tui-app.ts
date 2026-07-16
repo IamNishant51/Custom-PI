@@ -772,8 +772,7 @@ export class TuiApp {
   }
 
   private handleMouseClick(x: number, y: number): void {
-    const y0 = y - 1; // SGR is 1-based; renderedElements uses 0-based screen rows
-    const element = this.renderedElements.find(el => y0 >= el.startY && y0 < el.endY);
+    const element = this.renderedElements.find(el => y >= el.startY && y < el.endY);
     if (!element) return;
 
     if (element.role === "user") {

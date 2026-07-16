@@ -41,7 +41,14 @@ let renderedComponents: Array<{
   reasoningToggleLines: number[];
   renderedLines: string[];
 }> = [];
+let lastRenderedLines: string[] = [];
 let activeTuiInstance: any = null;
+
+// Toggle position history: maps absolute screen-line → component.
+// Retains old positions for 2 seconds after a component moves (height change),
+// so clicking a stale ghost toggle still toggles the correct component.
+let togglePositionHistory: Map<number, { component: any }> = new Map();
+let lastToggleUpdateTime = 0;
 
 let livePatchesApplied = false;
 let containerPatched = false;
@@ -598,7 +605,7 @@ function handleTerminalMouseClick(col: number, row: number) {
     try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`, "utf8"); } catch {}
   };
 
-  log(`CLICK AT col=${col}, row=${row}`);
+  log(`CLICK AT col=${col}, row=${row}, renderedComponents.length=${renderedComponents.length}`);
   if (!activeTuiInstance) {
     log("No active TUI instance");
     return;
@@ -607,31 +614,60 @@ function handleTerminalMouseClick(col: number, row: number) {
   const lineIndex = row - 1;
   log(`lineIndex=${lineIndex}, chatContainerStartLine=${chatContainerStartLine}`);
 
+  // Match clicked line to a component's rendered range.
+  // For AssistantMessage with thinking blocks, extend range by +1 to cover
+  // the blank-line gap after the component (handles collapsed-state clicks).
   const clicked = renderedComponents.find(rc => {
     const absStart = chatContainerStartLine + rc.startLine;
-    const absEnd = chatContainerStartLine + rc.endLine;
+    let absEnd = chatContainerStartLine + rc.endLine;
+    if (rc.component.constructor?.name === "AssistantMessageComponent") {
+      absEnd += 1;
+    }
     return lineIndex >= absStart && lineIndex < absEnd;
   });
 
-  if (!clicked) {
-    log("No component matched click line");
+  let assistant: any = null;
+
+  // ANY click on an AssistantMessage that has a thinking toggle toggles it —
+  // the entire component area is a hot zone, not just the toggle line.
+  if (clicked && clicked.component.constructor?.name === "AssistantMessageComponent" && clicked.reasoningToggleLines.length > 0) {
+    assistant = clicked.component;
+    log(`Toggle on AssistantMessage (hot-zone mode): startLine=${clicked.startLine} endLine=${clicked.endLine}`);
+  }
+
+  // Ghost/stale toggle: retain old toggle screen positions for 3 seconds,
+  // so a click at a position that displayed the toggle before a height
+  // change (component shrunk/grew) still toggles the correct component.
+  if (!assistant && togglePositionHistory.has(lineIndex)) {
+    const info = togglePositionHistory.get(lineIndex)!;
+    if (info.component.constructor?.name === "AssistantMessageComponent") {
+      assistant = info.component;
+      log(`Toggle from position history: lineIndex=${lineIndex}`);
+    }
+  }
+
+  // Ghost glyph scan: when the clicked line still shows a ▶/▼ character
+  // in the rendered output (stale screen), find the owning component by
+  // extending its range by 2 lines and toggle it.
+  if (!assistant && lastRenderedLines && lineIndex >= 0 && lineIndex < lastRenderedLines.length) {
+    const clickedText = stripAnsi(lastRenderedLines[lineIndex]);
+    if (clickedText.includes("\u25b6") || clickedText.includes("\u25bc")) {
+      const containerLine = lineIndex - chatContainerStartLine;
+      const ghostOwner = renderedComponents
+        .filter(rc => rc.component.constructor?.name === "AssistantMessageComponent")
+        .find(rc => containerLine >= rc.startLine && containerLine < rc.endLine + 2);
+      if (ghostOwner) {
+        assistant = ghostOwner.component;
+        log(`Toggle from glyph scan: startLine=${ghostOwner.startLine} endLine=${ghostOwner.endLine}`);
+      }
+    }
+  }
+
+  if (!assistant) {
+    log("Not a toggle line");
     return;
   }
 
-  log(`Matched component: ${clicked.component.constructor?.name}`);
-
-  if (clicked.component.constructor?.name !== "AssistantMessageComponent") {
-    log("Not an AssistantMessage — ignoring");
-    return;
-  }
-
-  const relativeLine = lineIndex - chatContainerStartLine - clicked.startLine;
-  if (!clicked.reasoningToggleLines.includes(relativeLine)) {
-    log(`Clicked line ${relativeLine} is not a reasoning toggle line (toggles at ${JSON.stringify(clicked.reasoningToggleLines)})`);
-    return;
-  }
-
-  const assistant = clicked.component;
   assistant.setHideThinkingBlock(!assistant.hideThinkingBlock);
   log(`Toggled AssistantMessage hideThinkingBlock to ${assistant.hideThinkingBlock}`);
   activeTuiInstance.requestRender();
@@ -743,6 +779,29 @@ function patchTui(proto: any) {
       overlayHelp(filtered, width);
     }
 
+    // Build current toggle-screen-line → component map
+    // Retain previous positions for 2s to handle stale ghost clicks
+    const now = Date.now();
+    const currentToggles = new Map<number, { component: any }>();
+    for (const rc of renderedComponents) {
+      if (rc.component.constructor?.name !== "AssistantMessageComponent") continue;
+      for (const ti of rc.reasoningToggleLines) {
+        const screenLine = chatContainerStartLine + rc.startLine + ti;
+        currentToggles.set(screenLine, { component: rc.component });
+      }
+    }
+    // Merge old positions that haven't expired yet
+    if (lastToggleUpdateTime > 0 && now - lastToggleUpdateTime < 3000) {
+      for (const [line, info] of togglePositionHistory.entries()) {
+        if (!currentToggles.has(line)) {
+          currentToggles.set(line, info);
+        }
+      }
+    }
+    togglePositionHistory = currentToggles;
+    lastToggleUpdateTime = now;
+
+    lastRenderedLines = filtered;
     return filtered;
   };
 

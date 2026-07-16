@@ -99,17 +99,6 @@ export function registerEventHandlers(pi: ExtensionAPI) {
     );
     (ctx as any).__animManager = animManager;
 
-    try {
-      const latest = await getLatestCheckpoint();
-      if (latest && Date.now() - latest.timestamp < CHECKPOINT_STALE_MS) {
-        const age = Math.round((Date.now() - latest.timestamp) / 1000);
-        ctx.ui.notify(
-          `Recovery checkpoint found from ${age}s ago (task: "${latest.goal.slice(0, 60)}"). Resume? Use /checkpoint to continue.`,
-          "info"
-        );
-      }
-    } catch (err: any) { logger.warn(`Checkpoint check failed: ${err.message}`); }
-
     checkAndSuggestWorkflows(ctx, pi).catch(err => logger.error(`Workflow suggestions failed: ${err.message}`));
 
     animManager.start("requesting");
