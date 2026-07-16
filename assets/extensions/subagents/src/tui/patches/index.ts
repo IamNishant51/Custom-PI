@@ -809,14 +809,13 @@ function patchTui(proto: any) {
   proto.start = function (this: any) {
     activeTuiInstance = this;
     originalTuiStart.call(this);
-    // Re-enable mouse tracking after TUI init (may reset terminal modes)
-    process.stdout.write("\x1b[?1000h\x1b[?1006h");
+    // Mouse tracking is disabled to allow text selection in the terminal.
+    // Toggle thinking blocks via Ctrl+R keyboard shortcut instead.
   };
 
   const originalTuiStop = proto.stop;
   proto.stop = function (this: any) {
-    // Disable SGR mouse tracking explicitly
-    process.stdout.write("\x1b[?1000l\x1b[?1006l");
+    // Mouse tracking is disabled to allow text selection.
 
     if ((process.stdin as any)._originalEmit) {
       process.stdin.emit = (process.stdin as any)._originalEmit;
@@ -847,7 +846,7 @@ function processMouseChunk(raw: string) {
 function enableMouseTracking() {
   if ((process.stdin as any)._customPiPatched) return;
 
-  process.stdout.write("\x1b[?1000h\x1b[?1006h");
+  // Mouse tracking disabled to allow text selection.
   (process.stdin as any)._customPiPatched = true;
 
   const originalEmit = process.stdin.emit;
