@@ -72,11 +72,8 @@ export class SubAgentCallCard implements Component {
 
       if (tracker.toolCallCount > 0) {
         const verb = STATUS_VERBS[getGlobalVerbIndex() % STATUS_VERBS.length];
-        const frameInVerb = getGlobalFrame() % 10;
-        const charsToShow = Math.min(frameInVerb + 1, verb.length);
-        const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "\u2026" : "");
         const calls = dim(`${tracker.toolCallCount} tool calls`);
-        lines.push(`  ${fgBold(THEME.warning, displayVerb)}${fg(THEME.warning, "...")}  ${dim("\u00b7")}  ${calls}`);
+        lines.push(`  ${fgBold(THEME.info, verb)}  ${dim("\u00b7")}  ${calls}`);
         if (tracker.outputLines && tracker.outputLines.length > 0) {
           const recent = tracker.outputLines.slice(-2);
           for (const ol of recent) {

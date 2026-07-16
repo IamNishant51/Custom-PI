@@ -203,7 +203,11 @@ function patchUserMessage(proto: any) {
 
   proto.render = function (this: any, width: number) {
     try {
-      const rawText: string = this.text || "";
+      let rawText = this.text || "";
+      if (!rawText.trim()) {
+        const markdown = this.contentBox?.children?.[0];
+        if (markdown?.text) rawText = markdown.text;
+      }
       if (!rawText.trim()) return [];
 
       const contentWidth = Math.max(20, width - 4);
@@ -279,8 +283,10 @@ function patchAssistantMessage(proto: any) {
       if (this.isStreaming) {
         const lastIdx = result.length - 1;
         if (lastIdx >= 0) {
-          const spinner = getSpinner();
-          result[lastIdx] = result[lastIdx] + " " + dim(spinner);
+          const frame = getGlobalFrame();
+          const dots = ".oOo";
+          const dot = dots[frame % dots.length];
+          result[lastIdx] = result[lastIdx] + dim(dot);
         }
       }
 
@@ -353,8 +359,7 @@ function patchToolExecution(proto: any) {
     let finalLines: string[] = [];
 
     if (isRunning) {
-      const spinner = getSpinner();
-      finalLines = [fg(THEME.info, spinner) + " " + fgBold(THEME.ink, displayName) + argsStr];
+      finalLines = [fg(THEME.info, "\u25cf") + " " + fgBold(THEME.ink, displayName) + argsStr];
     } else if (isError) {
       const dot = fg(THEME.error, "\u25cf");
       const errorMsg = this.result?.details?.message || this.result?.details || "failed";
@@ -558,19 +563,6 @@ function patchFooterComponent(proto: any) {
     if (!session) return [];
 
     const state = session.state;
-    let totalInput = 0;
-    let totalOutput = 0;
-    let totalCost = 0;
-
-    for (const entry of session.sessionManager.getEntries()) {
-      if (entry.type === "message" && entry.message.role === "assistant") {
-        totalInput += entry.message.usage.input;
-        totalOutput += entry.message.usage.output;
-        totalCost += entry.message.usage.cost.total;
-      }
-    }
-
-    const totalTokens = totalInput + totalOutput;
     const modelName = state.model?.id || "gemma-4-e4b";
 
     const runningTool = activeTuiInstance?.children?.find((c: any) =>
@@ -583,23 +575,13 @@ function patchFooterComponent(proto: any) {
 
     let left = "";
     if (isRunning) {
-      const spinner = getSpinner();
       const verb = STATUS_VERBS[getGlobalVerbIndex() % STATUS_VERBS.length];
-      const charsToShow = Math.min((getGlobalFrame() % 10) + 1, verb.length);
-      const displayVerb = verb.slice(0, charsToShow) + (charsToShow < verb.length ? "…" : "");
-      const action = runningTool ? `${getDisplayToolName(runningTool.toolName)}…` : displayVerb;
-      let elapsedStr = "";
-      if (runningTool && runningTool.startTime) {
-        const secs = Math.floor((Date.now() - runningTool.startTime) / 1000);
-        elapsedStr = `${secs}s · `;
-      }
-      left = `${fg(THEME.info, spinner)} ${fgBold(THEME.ink, action)} ${dim(`(${elapsedStr}↓ ${totalTokens.toLocaleString()} tok · esc to interrupt)`)}`;
+      left = `${fg(THEME.info, "\u25cf")} ${fgBold(THEME.ink, verb)}`;
     } else {
-      const symbol = fg(THEME.success, "\u25cf");
-      left = `${symbol} ${dim(`${modelName} · ${totalTokens.toLocaleString()} tok · $${totalCost.toFixed(3)}`)}`;
+      left = `${fg(THEME.success, "\u25cf")} ${dim(modelName)}`;
     }
 
-    const right = dim("Tab to toggle  \u00b7  ? for help");
+    const right = dim("v2 \u00b7 ? help");
 
     const leftVisible = measureWidth(left);
     const rightVisible = measureWidth(right);

@@ -114,7 +114,7 @@ export function registerEventHandlers(pi: ExtensionAPI) {
 
     animManager.start("requesting");
 
-    const animFrameTimer = setInterval(() => tickGlobalAnimation(), 80);
+    const animFrameTimer = setInterval(() => tickGlobalAnimation(), 50);
     if (animFrameTimer?.unref) animFrameTimer.unref();
     (ctx as any).__animFrameTimer = animFrameTimer;
 

@@ -9,12 +9,12 @@ export interface PulseConfig {
 }
 
 const DEFAULT_PULSE_CONFIG: PulseConfig = {
-  symbol: "\u221e",
-  restColor: "#8B6914",
-  gradientColors: ["#8B6914", "#B8860B", "#D08770", "#E8923A", "#FF9B4A"],
-  sweepMs: 320,
-  breatheMs: 2000,
-  breatheAmplitude: 0.4,
+  symbol: "\u25cf",
+  restColor: "#8f7af4",
+  gradientColors: ["#8f7af4", "#00d7ff", "#69f0ae"],
+  sweepMs: 1600,
+  breatheMs: 800,
+  breatheAmplitude: 0.2,
   easing: true,
 };
 

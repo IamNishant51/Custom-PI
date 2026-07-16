@@ -46,7 +46,7 @@ export class TuiManager {
       }, 33);
     }
 
-    this.scheduler.add("animations:global", tickGlobalAnimation, 80);
+    this.scheduler.add("animations:global", tickGlobalAnimation, 50);
   }
 
   stop(): void {

@@ -5,7 +5,7 @@ import os from "node:os";
 import { PulseController } from "./tui/app/pulse-controller";
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-export const DOT_PULSE = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+export const DOT_PULSE = ["⢀⡀", "⢠⡄", "⢰⡆", "⢸⡇", "⢰⡆", "⢠⡄"];
 export const PROGRESS_SPINNER = ["▌", "▀", "▐", "▄"];
 export const BOUNCING_BAR = ["█", "▇", "▆", "▅", "▄", "▃", "▂", "▁"];
 
@@ -23,19 +23,13 @@ function loadVerbs(): string[] {
     }
   } catch (e: any) { logger.warn(`empty catch: ${e?.message || e}`) }
   return [
-    "Cooking", "Brewing", "Baking", "Roasting", "Sautéing",
-    "Thinking", "Dreaming", "Musing", "Pondering", "Ruminating",
-    "Crafting", "Forging", "Sculpting", "Weaving", "Knitting",
-    "Decoding", "Cracking", "Solving", "Unraveling", "Untangling",
-    "Mixing", "Blending", "Whisking", "Kneading", "Drizzling",
-    "Booping", "Beaming", "Frolicking", "Moonwalking", "Jitterbugging",
-    "Churning", "Brewing", "Fermenting", "Marinating", "Caramelizing",
-    "Orchestrating", "Conducting", "Composing", "Harmonizing", "Grooving",
-    "Foraging", "Noodling", "Meandering", "Moseying", "Gallivanting",
-    "Illuminating", "Enchanting", "Concocting", "Hatching", "Germinating",
-    "Catalyzing", "Nucleating", "Crystallizing", "Coalescing", "Manifesting",
-    "Flummoxing", "Befuddling", "Discombobulating", "Flibbertigibbeting", "Boondoggling",
-    "Hullaballooing", "Canoodling", "Dilly-dallying", "Lollygagging", "Fiddle-faddling",
+    "Thinking", "Processing", "Reasoning", "Analyzing",
+    "Researching", "Reading", "Searching", "Fetching",
+    "Writing", "Editing", "Updating", "Creating",
+    "Coding", "Debugging", "Fixing", "Building",
+    "Planning", "Designing", "Architecting", "Refactoring",
+    "Reviewing", "Testing", "Validating", "Optimizing",
+    "Working",
   ];
 }
 
@@ -51,7 +45,7 @@ export const activeInvalidators = new Map<string, () => void>();
 export function tickGlobalAnimation(): void {
   if (activeTrackers.size === 0 && !globalAnimActive) return;
   globalFrame++;
-  if (globalFrame % 10 === 0) {
+  if (globalFrame % 8 === 0) {
     globalVerbIndex = (globalVerbIndex + 1) % STATUS_VERBS.length;
   }
   for (const invalidate of activeInvalidators.values()) {
