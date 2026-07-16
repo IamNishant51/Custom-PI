@@ -157,6 +157,27 @@ function applyRuntimePatches() {
       logger.info("[Patch] Patched Agent.continue to avoid role validation crashes");
     }
   }
+
+  // Patch 3: Suppress "new version available" notification from PI agent
+  try {
+    const interactiveMode = req("@earendil-works/pi-coding-agent").InteractiveMode;
+    if (interactiveMode && interactiveMode.prototype) {
+      const origShowNewVersion = interactiveMode.prototype.showNewVersionNotification;
+      if (origShowNewVersion && !origShowNewVersion.__patched) {
+        interactiveMode.prototype.showNewVersionNotification = function () {};
+        interactiveMode.prototype.showNewVersionNotification.__patched = true;
+        logger.info("[Patch] Suppressed PI agent version update notification");
+      }
+      const origShowPackageUpdate = interactiveMode.prototype.showPackageUpdateNotification;
+      if (origShowPackageUpdate && !origShowPackageUpdate.__patched) {
+        interactiveMode.prototype.showPackageUpdateNotification = function () {};
+        interactiveMode.prototype.showPackageUpdateNotification.__patched = true;
+        logger.info("[Patch] Suppressed PI agent package update notification");
+      }
+    }
+  } catch {
+    logger.warn("[Patch] Could not patch InteractiveMode notification methods");
+  }
 }
 
 export default function (pi: ExtensionAPI) {
